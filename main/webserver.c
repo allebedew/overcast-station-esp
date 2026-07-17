@@ -1,5 +1,6 @@
 #include "webserver.h"
 
+#include <string.h>
 #include <time.h>
 
 #include "freertos/FreeRTOS.h"
@@ -21,6 +22,7 @@
 #include "led.h"
 #include "ota.h"
 #include "sensors.h"
+#include "timesync.h"
 #include "wifi.h"
 #include "wifi_store.h"
 
@@ -30,6 +32,20 @@ static const char *TAG = "webserver";
 
 extern const char index_html_start[] asm("_binary_index_html_start");
 extern const char index_html_end[] asm("_binary_index_html_end");
+
+static httpd_handle_t s_server;
+
+/* Number of currently open client sockets (includes the one serving
+ * the request being handled). */
+static int http_conn_count(void)
+{
+    size_t n = CONFIG_LWIP_MAX_SOCKETS;
+    int fds[CONFIG_LWIP_MAX_SOCKETS];
+    if (!s_server || httpd_get_client_list(s_server, &n, fds) != ESP_OK) {
+        return 0;
+    }
+    return (int)n;
+}
 
 /* Экранирует " и \ для подстановки строки в JSON; управляющие символы
  * отбрасывает. Возвращает dst. */
@@ -53,16 +69,19 @@ static const char *json_escape(const char *src, char *dst, size_t dstlen)
  * мигает светодиодом и логирует каждый HTTP-запрос. */
 static esp_err_t handle_request(httpd_req_t *req)
 {
-    char ip[INET6_ADDRSTRLEN] = "?";
-    struct sockaddr_in6 addr;
-    socklen_t addr_len = sizeof(addr);
-    if (getpeername(httpd_req_to_sockfd(req),
-                    (struct sockaddr *)&addr, &addr_len) == 0) {
-        /* lwip отдаёт IPv4-адрес клиента как IPv4-mapped IPv6 */
-        inet_ntop(AF_INET, &addr.sin6_addr.un.u32_addr[3], ip, sizeof(ip));
+    /* /api/status is polled every 2 s by the web UI — too noisy to log */
+    if (strcmp(req->uri, "/api/status") != 0) {
+        char ip[INET6_ADDRSTRLEN] = "?";
+        struct sockaddr_in6 addr;
+        socklen_t addr_len = sizeof(addr);
+        if (getpeername(httpd_req_to_sockfd(req),
+                        (struct sockaddr *)&addr, &addr_len) == 0) {
+            /* lwip reports the IPv4 client address as IPv4-mapped IPv6 */
+            inet_ntop(AF_INET, &addr.sin6_addr.un.u32_addr[3], ip, sizeof(ip));
+        }
+        ESP_LOGI(TAG, "%s %s from %s",
+                 http_method_str(req->method), req->uri, ip);
     }
-    ESP_LOGI(TAG, "%s %s from %s",
-             http_method_str(req->method), req->uri, ip);
 
     led_notify_activity();
     return ((esp_err_t (*)(httpd_req_t *))req->user_ctx)(req);
@@ -179,12 +198,14 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     nvs_stats_t nvs = {0};
     nvs_get_stats(NULL, &nvs);
 
-    time_t now;
-    time(&now);
-    struct tm tm;
-    localtime_r(&now, &tm);
-    char time_str[32];
-    strftime(time_str, sizeof(time_str), "%d.%m.%Y %H:%M:%S", &tm);
+    char time_str[32] = "--.--.---- --:--:--";
+    if (timesync_is_synced()) {
+        time_t now;
+        time(&now);
+        struct tm tm;
+        localtime_r(&now, &tm);
+        strftime(time_str, sizeof(time_str), "%d.%m.%Y %H:%M:%S", &tm);
+    }
 
     char essid[67];
     json_escape(wifi_get_ssid(), essid, sizeof(essid));
@@ -193,10 +214,11 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     int len = snprintf(json, sizeof(json),
         "{\"ap_mode\":%s,\"ssid\":\"%s\",\"ip\":\"" IPSTR "\",\"gw\":\"" IPSTR "\","
         "\"dns\":\"" IPSTR "\",\"mac\":\"" MACSTR "\",\"channel\":%d,%s,"
-        "\"uptime\":%lld,\"temp\":%.1f,\"time\":\"%s\","
+        "\"uptime\":%lld,\"temp\":%.1f,\"time\":\"%s\",\"time_synced\":%s,"
         "\"app_version\":\"%s\",\"build\":\"%s %s\",\"idf_ver\":\"%s\","
         "\"chip_rev\":\"v%d.%d\",\"cpu_mhz\":%d,\"flash_mb\":%lu,"
         "\"reset_reason\":\"%s\",\"cpu_load\":%d,\"tasks\":%u,"
+        "\"http_conns\":%d,"
         "\"heap_free\":%u,\"heap_min\":%u,\"heap_total\":%u,\"heap_largest\":%u,"
         "\"nvs_used\":%u,\"nvs_total\":%u,\"led_brightness\":%u}",
         ap_mode ? "true" : "false",
@@ -205,12 +227,14 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         wifi_json,
         esp_timer_get_time() / 1000000,
         sensors_chip_temp(), time_str,
+        timesync_is_synced() ? "true" : "false",
         app->version, app->date, app->time, app->idf_ver,
         chip.revision / 100, chip.revision % 100,
         CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
         (unsigned long)(flash_size / (1024 * 1024)),
         reset_reason_str(), cpu_load_percent(),
         (unsigned)uxTaskGetNumberOfTasks(),
+        http_conn_count(),
         (unsigned)esp_get_free_heap_size(),
         (unsigned)esp_get_minimum_free_heap_size(),
         (unsigned)heap_caps_get_total_size(MALLOC_CAP_DEFAULT),
@@ -356,6 +380,7 @@ void webserver_start(void)
     config.max_uri_handlers = 16; /* дефолтных 8 уже впритык */
     httpd_handle_t server = NULL;
     ESP_ERROR_CHECK(httpd_start(&server, &config));
+    s_server = server;
 
     const httpd_uri_t index_uri = {
         .uri = "/",

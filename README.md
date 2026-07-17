@@ -26,7 +26,14 @@ sensors are not connected yet.
   - green — connected; blinks off briefly on every HTTP request
   - red — error; purple blinking — OTA upload in progress
   - blue — AP mode; every 3 s it pulses off N times = number of AP clients
-- **SNTP** — UTC time from `pool.ntp.org`.
+- **Telegram notifications** — push-only bot (no incoming commands yet):
+  welcome message on boot (chip temp + IP), alert when chip temperature
+  crosses 35 °C (with 1 °C hysteresis on recovery), notification on IP
+  change. Bot token / chat id are compile-time constants in `telegram.c`
+  (like `OTA_KEY`); when left empty the module disables itself.
+- **SNTP** — UTC time from `pool.ntp.org`. Sync state is exposed as
+  `timesync_is_synced()` and as `time_synced` in `/api/status`; until the
+  first sync `time` contains dashes instead of digits.
 
 ## Architecture
 
@@ -37,11 +44,14 @@ tasks/callbacks. Modules under `main/`, each with a small public header:
 |---|---|
 | `wifi.c` | connection state machine, events → status callback (used by main.c to drive the LED) |
 | `wifi_store.c` | saved credentials in NVS (namespace `wifi_creds`), mutex-protected |
-| `webserver.c` | esp_http_server + mDNS; all handlers go through one wrapper that logs the request and blinks the LED; static buffers are safe (single httpd task) |
+| `webserver.c` | esp_http_server + mDNS; all handlers go through one wrapper that logs the request (except `/api/status` — polled every 2 s) and blinks the LED; static buffers are safe (single httpd task) |
 | `ota.c` | `POST /api/ota` handler + rollback confirmation |
 | `led.c` | LED task; status enum, brightness (persisted) |
 | `button.c` | BOOT button via espressif/button |
 | `sensors.c` | internal chip temperature (placeholder for real sensors) |
+| `timesync.c` | SNTP client; `timesync_is_synced()` flag |
+| `telegram.c` | message queue + sender task (Telegram Bot API over HTTPS); `telegram_notify(fmt, ...)` |
+| `alerts.c` | notification rules & thresholds; own task polls sensors/network every 10 s |
 | `settings.c` | thin u8 get/set over NVS namespace `settings` |
 
 ## HTTP API

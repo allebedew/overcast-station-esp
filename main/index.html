@@ -253,6 +253,7 @@ async function refresh() {
       ["Аптайм", fmtUptime(s.uptime)],
       ["Загрузка CPU", s.cpu_load + " %"],
       ["Задач FreeRTOS", s.tasks],
+      ["HTTP-соединений", s.http_conns],
       ["Память", `${fmtKib(s.heap_free)}/${fmtKib(s.heap_total)} (min ${fmtKib(s.heap_min)})`],
       ["Наибольший блок", fmtKib(s.heap_largest)],
       ["NVS", `${s.nvs_used}/${s.nvs_total} записей`],

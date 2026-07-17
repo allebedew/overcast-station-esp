@@ -1,12 +1,14 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
-#include "esp_netif_sntp.h"
 #include "nvs_flash.h"
+#include "alerts.h"
 #include "button.h"
 #include "led.h"
 #include "ota.h"
 #include "sensors.h"
+#include "telegram.h"
+#include "timesync.h"
 #include "webserver.h"
 #include "wifi.h"
 
@@ -17,11 +19,6 @@ static void log_task_list(void)
     static char task_list_buf[1024];
     vTaskList(task_list_buf);
     ESP_LOGI(TAG, "Task list:\nName          State  Prio  Stack  Num\n%s", task_list_buf);
-}
-
-static void on_time_sync(struct timeval *tv)
-{
-    ESP_LOGI(TAG, "Time synchronized (SNTP)");
 }
 
 static void on_wifi_status(wifi_status_t status)
@@ -66,10 +63,9 @@ void app_main(void)
     sensors_init();
     webserver_start();
 
-    /* часы в UTC; клиент сам повторяет запросы, пока сеть не появится */
-    esp_sntp_config_t sntp_cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-    sntp_cfg.sync_cb = on_time_sync;
-    ESP_ERROR_CHECK(esp_netif_sntp_init(&sntp_cfg));
+    timesync_init();
+    telegram_init();
+    alerts_init();
 
     /* инициализация прошла — фиксируем прошивку, отменяя OTA-откат */
     ota_confirm_running_image();

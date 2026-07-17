@@ -8,7 +8,7 @@
 
 #define LED_GPIO           8
 #define DEFAULT_BRIGHTNESS 4
-#define BLINK_PERIOD_MS    250
+#define BLINK_PERIOD_MS    100
 #define PULSE_CYCLE_MS     3000
 
 #define SETTING_BRIGHT "led_bright"
