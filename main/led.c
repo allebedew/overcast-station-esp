@@ -18,6 +18,7 @@ static const char *TAG = "led";
 static led_strip_handle_t led_strip;
 static volatile led_status_t s_status = LED_STATUS_OFF;
 static volatile int s_pulse_count;
+static volatile bool s_activity;
 static volatile uint8_t s_brightness = DEFAULT_BRIGHTNESS;
 
 void led_set_brightness(uint8_t brightness)
@@ -37,6 +38,16 @@ uint8_t led_get_brightness(void)
 void led_set_status(led_status_t status)
 {
     s_status = status;
+}
+
+led_status_t led_get_status(void)
+{
+    return s_status;
+}
+
+void led_notify_activity(void)
+{
+    s_activity = true;
 }
 
 void led_set_pulse_count(int count)
@@ -59,6 +70,9 @@ static void led_task(void *arg)
         blink_on = !blink_on;
         tick++;
 
+        bool activity = s_activity;
+        s_activity = false;
+
         switch (s_status) {
         case LED_STATUS_OFF:
             set_color(0, 0, 0);
@@ -71,13 +85,21 @@ static void led_task(void *arg)
             }
             break;
         case LED_STATUS_WIFI_CONNECTED:
-            set_color(0, s_brightness, 0);
+            /* гаснет на один тик при сетевой активности */
+            set_color(0, activity ? 0 : s_brightness, 0);
             break;
         case LED_STATUS_WIFI_FAILED:
             set_color(s_brightness, 0, 0);
             break;
         case LED_STATUS_WIFI_DISCONNECTED:
             set_color(s_brightness, s_brightness, 0);
+            break;
+        case LED_STATUS_OTA:
+            if (blink_on) {
+                set_color(s_brightness, 0, s_brightness);
+            } else {
+                set_color(0, 0, 0);
+            }
             break;
         case LED_STATUS_WIFI_AP: {
             /* каждые 3 с гаснет s_pulse_count раз (250 мс пауза + 250 мс свет) */

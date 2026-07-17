@@ -14,10 +14,12 @@
 #include "esp_wifi.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#include "lwip/sockets.h"
 #include "cJSON.h"
 #include "mdns.h"
 #include "nvs.h"
 #include "led.h"
+#include "ota.h"
 #include "sensors.h"
 #include "wifi.h"
 #include "wifi_store.h"
@@ -45,6 +47,25 @@ static const char *json_escape(const char *src, char *dst, size_t dstlen)
     }
     dst[o] = '\0';
     return dst;
+}
+
+/* Обёртка над всеми обработчиками (реальный лежит в user_ctx):
+ * мигает светодиодом и логирует каждый HTTP-запрос. */
+static esp_err_t handle_request(httpd_req_t *req)
+{
+    char ip[INET6_ADDRSTRLEN] = "?";
+    struct sockaddr_in6 addr;
+    socklen_t addr_len = sizeof(addr);
+    if (getpeername(httpd_req_to_sockfd(req),
+                    (struct sockaddr *)&addr, &addr_len) == 0) {
+        /* lwip отдаёт IPv4-адрес клиента как IPv4-mapped IPv6 */
+        inet_ntop(AF_INET, &addr.sin6_addr.un.u32_addr[3], ip, sizeof(ip));
+    }
+    ESP_LOGI(TAG, "%s %s from %s",
+             http_method_str(req->method), req->uri, ip);
+
+    led_notify_activity();
+    return ((esp_err_t (*)(httpd_req_t *))req->user_ctx)(req);
 }
 
 static esp_err_t index_get_handler(httpd_req_t *req)
@@ -339,42 +360,56 @@ void webserver_start(void)
     const httpd_uri_t index_uri = {
         .uri = "/",
         .method = HTTP_GET,
-        .handler = index_get_handler,
+        .handler = handle_request,
+        .user_ctx = index_get_handler,
     };
     const httpd_uri_t status_uri = {
         .uri = "/api/status",
         .method = HTTP_GET,
-        .handler = status_get_handler,
+        .handler = handle_request,
+        .user_ctx = status_get_handler,
     };
     const httpd_uri_t scan_uri = {
         .uri = "/api/scan",
         .method = HTTP_GET,
-        .handler = scan_get_handler,
+        .handler = handle_request,
+        .user_ctx = scan_get_handler,
     };
     const httpd_uri_t networks_uri = {
         .uri = "/api/networks",
         .method = HTTP_GET,
-        .handler = networks_get_handler,
+        .handler = handle_request,
+        .user_ctx = networks_get_handler,
     };
     const httpd_uri_t network_add_uri = {
         .uri = "/api/networks/add",
         .method = HTTP_POST,
-        .handler = network_add_post_handler,
+        .handler = handle_request,
+        .user_ctx = network_add_post_handler,
     };
     const httpd_uri_t network_delete_uri = {
         .uri = "/api/networks/delete",
         .method = HTTP_POST,
-        .handler = network_delete_post_handler,
+        .handler = handle_request,
+        .user_ctx = network_delete_post_handler,
     };
     const httpd_uri_t connect_uri = {
         .uri = "/api/connect",
         .method = HTTP_POST,
-        .handler = connect_post_handler,
+        .handler = handle_request,
+        .user_ctx = connect_post_handler,
     };
     const httpd_uri_t settings_uri = {
         .uri = "/api/settings",
         .method = HTTP_POST,
-        .handler = settings_post_handler,
+        .handler = handle_request,
+        .user_ctx = settings_post_handler,
+    };
+    const httpd_uri_t ota_uri = {
+        .uri = "/api/ota",
+        .method = HTTP_POST,
+        .handler = handle_request,
+        .user_ctx = ota_post_handler,
     };
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &index_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &status_uri));
@@ -384,6 +419,7 @@ void webserver_start(void)
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &network_delete_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &connect_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &settings_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &ota_uri));
 
     ESP_LOGI(TAG, "Web server started: http://%s.local/", MDNS_HOSTNAME);
 }

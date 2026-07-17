@@ -5,6 +5,7 @@
 #include "nvs_flash.h"
 #include "button.h"
 #include "led.h"
+#include "ota.h"
 #include "sensors.h"
 #include "webserver.h"
 #include "wifi.h"
@@ -69,6 +70,9 @@ void app_main(void)
     esp_sntp_config_t sntp_cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     sntp_cfg.sync_cb = on_time_sync;
     ESP_ERROR_CHECK(esp_netif_sntp_init(&sntp_cfg));
+
+    /* инициализация прошла — фиксируем прошивку, отменяя OTA-откат */
+    ota_confirm_running_image();
 
     log_task_list();
     /* app_main завершается — работают задачи led и wifi */
