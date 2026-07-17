@@ -1,5 +1,6 @@
 #include "alerts.h"
 
+#include <math.h>
 #include <stdbool.h>
 
 #include "freertos/FreeRTOS.h"
@@ -13,10 +14,16 @@
 
 #define CHECK_PERIOD_MS 10000
 
-/* Chip temperature: alert above HIGH, recovery below HIGH - HYST.
- * The hysteresis gap prevents message spam when hovering at the threshold. */
-#define CHIP_TEMP_HIGH 35.0f
-#define CHIP_TEMP_HYST 1.0f
+/* CO2 zones: 0 = fresh (<800), 1 = stale (800..1200), 2 = bad (>1200).
+ * A zone change is reported; the hysteresis margin keeps sensor noise
+ * from flapping around a threshold. */
+static const int CO2_THRESHOLDS[] = { 800, 1200 };
+#define CO2_HYST_PPM 25
+
+/* Report temperature/humidity when they drift this far from the last
+ * reported value. */
+#define TEMP_DELTA_C 2.0f
+#define RH_DELTA_PCT 10.0f
 
 /* ------------------------------------------------------------------------ */
 
@@ -56,18 +63,56 @@ static void check_ip(void)
     last_ip = ip;
 }
 
-static void check_chip_temp(void)
+/* Current zone given the previous one; moving to another zone requires
+ * clearing the threshold by the hysteresis margin. */
+static int co2_zone(int ppm, int prev)
 {
-    static bool alarm;
+    int z = prev;
+    while (z < 2 && ppm > CO2_THRESHOLDS[z] + CO2_HYST_PPM) {
+        z++;
+    }
+    while (z > 0 && ppm < CO2_THRESHOLDS[z - 1] - CO2_HYST_PPM) {
+        z--;
+    }
+    return z;
+}
 
-    float t = sensors_chip_temp();
-    if (!alarm && t > CHIP_TEMP_HIGH) {
-        alarm = true;
-        telegram_notify("⚠️ Температура чипа %.1f °C (порог %.0f °C)",
-                        t, CHIP_TEMP_HIGH);
-    } else if (alarm && t < CHIP_TEMP_HIGH - CHIP_TEMP_HYST) {
-        alarm = false;
-        telegram_notify("✅ Температура чипа в норме: %.1f °C", t);
+static void check_air(void)
+{
+    static bool baseline;
+    static int zone;
+    static float last_temp, last_rh;
+
+    scd40_data_t d;
+    if (!sensors_scd40_get(&d)) {
+        return;
+    }
+    if (!baseline) { /* first reading only arms the rules */
+        baseline = true;
+        zone = co2_zone(d.co2_ppm, 0);
+        last_temp = d.temp_c;
+        last_rh = d.rh_pct;
+        return;
+    }
+
+    int z = co2_zone(d.co2_ppm, zone);
+    if (z > zone) {
+        telegram_notify("%s CO₂ выше %d ppm: %u",
+                        z == 2 ? "🔴" : "⚠️", CO2_THRESHOLDS[z - 1], d.co2_ppm);
+    } else if (z < zone) {
+        telegram_notify("✅ CO₂ ниже %d ppm: %u", CO2_THRESHOLDS[z], d.co2_ppm);
+    }
+    zone = z;
+
+    if (fabsf(d.temp_c - last_temp) >= TEMP_DELTA_C) {
+        telegram_notify("🌡 Температура %.1f °C (было %.1f)",
+                        d.temp_c, last_temp);
+        last_temp = d.temp_c;
+    }
+    if (fabsf(d.rh_pct - last_rh) >= RH_DELTA_PCT) {
+        telegram_notify("💧 Влажность %.0f %% (было %.0f)",
+                        d.rh_pct, last_rh);
+        last_rh = d.rh_pct;
     }
 }
 
@@ -75,7 +120,7 @@ static void alerts_task(void *arg)
 {
     for (;;) {
         check_ip();
-        check_chip_temp();
+        check_air();
         vTaskDelay(pdMS_TO_TICKS(CHECK_PERIOD_MS));
     }
 }

@@ -6,6 +6,7 @@
 #include "driver/i2c_master.h"
 #include "driver/temperature_sensor.h"
 #include "esp_log.h"
+#include "history.h"
 
 /* SCD40 wiring: J1 bottom corner — SDA GPIO2, SCL GPIO3, 5V, GND. */
 #define I2C_SDA_GPIO 2
@@ -157,6 +158,8 @@ static void scd40_poll(int *errors)
     s_scd40_data = d;
     s_scd40_valid = true;
     taskEXIT_CRITICAL(&s_scd40_lock);
+
+    history_add(d.co2_ppm, d.temp_c, d.rh_pct);
 }
 
 /* Polls the sensor once a second; a fresh reading appears every 5 s

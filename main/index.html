@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Метеостанция</title>
+<link rel="stylesheet" href="/uplot.css">
 <style>
   :root {
     --bg: #f4f5f7;
@@ -124,6 +125,9 @@
   .pick { cursor: pointer; }
   .del { color: #ef4444; cursor: pointer; }
   input[type="range"] { padding: 0; accent-color: var(--accent); }
+  .chart-title { font-size: 0.82rem; color: var(--muted); margin-top: 0.7rem; }
+  .uplot { font-family: inherit; }
+  .u-legend { font-size: 0.72rem; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -140,6 +144,21 @@
       <div class="label">Воздух (SCD40)</div>
       <div class="value" id="air-value">—</div>
       <div id="air-rows"></div>
+    </div>
+    <div class="card wide">
+      <div class="label">Графики</div>
+      <div class="btns" id="range-btns" style="margin-top: 0.4rem">
+        <button class="secondary" data-r="5m" onclick="setRange('5m')">5 мин</button>
+        <button class="secondary" data-r="hour" onclick="setRange('hour')">Час</button>
+        <button data-r="day" onclick="setRange('day')">Сутки</button>
+      </div>
+      <div id="charts-wait" class="sub">загрузка…</div>
+      <div class="chart-title">CO₂, ppm</div>
+      <div id="chart-co2"></div>
+      <div class="chart-title">Температура, °C</div>
+      <div id="chart-temp"></div>
+      <div class="chart-title">Влажность, %</div>
+      <div id="chart-rh"></div>
     </div>
     <div class="card wide">
       <div class="label">Система</div>
@@ -174,6 +193,7 @@
     </div>
   </div>
 </div>
+<script src="/uplot.js"></script>
 <script>
 function rssiColor(rssi) {
   if (rssi >= -60) return "#22c55e"; /* хороший */
@@ -260,6 +280,8 @@ async function refresh() {
     document.getElementById("wifi-text").textContent = text;
     document.getElementById("wifi-rows").innerHTML = kvRows(rows);
 
+    pushLive(s);
+
     const airOk = s.scd40_ok;
     const airValue = document.getElementById("air-value");
     airValue.textContent = `${airOk ? s.co2 : "--"} ppm CO₂`;
@@ -295,6 +317,126 @@ async function refresh() {
   } catch (e) {
     setStale(true);
   }
+}
+
+/* --- графики (uPlot) --- */
+
+let plots = null;
+let hist = null;          /* последний ответ /api/history (поминутные точки) */
+let chartRange = "day";   /* '5m' | 'hour' | 'day' — общий для всех графиков */
+
+/* Живые показания для окна «5 мин»: наполняются секундным опросом статуса */
+const live = { x: [], co2: [], temp: [], rh: [] };
+const LIVE_SPAN = 300;
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function fmtTime(v) {
+  return new Date(v * 1000).toLocaleTimeString("ru-RU",
+    { hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtTimeS(v) {
+  return new Date(v * 1000).toLocaleTimeString("ru-RU",
+    { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function mkPlot(elId, label, unit, dec) {
+  const el = document.getElementById(elId);
+  const axis = {
+    stroke: cssVar("--muted"),
+    grid: { stroke: cssVar("--border") },
+    ticks: { stroke: cssVar("--border") },
+  };
+  return new uPlot({
+    width: el.clientWidth,
+    height: 150,
+    cursor: { y: false },
+    series: [
+      { label: "Время", value: (u, v) => v == null ? "--" : fmtTimeS(v) },
+      { label, stroke: cssVar("--accent"), width: 1.5, spanGaps: false,
+        value: (u, v) => v == null ? "--" : v.toFixed(dec) + " " + unit },
+    ],
+    axes: [
+      { ...axis, values: (u, splits) => splits.map(fmtTime) },
+      { ...axis, size: 46 },
+    ],
+  }, [[], []], el);
+}
+
+/* Хвост массива, дополненный null-ами слева до ровно n точек. */
+function padTo(arr, n) {
+  const tail = arr.slice(-n);
+  return Array(n - tail.length).fill(null).concat(tail);
+}
+
+/* Перерисовывает все три графика в текущем масштабе. */
+function renderCharts() {
+  if (!plots) return;
+  let xs, series;
+  if (chartRange === "5m") {
+    /* секундная сетка; live-точки раскладываются по своим секундам */
+    const now = Math.floor(Date.now() / 1000);
+    xs = Array.from({ length: LIVE_SPAN }, (_, i) => now - (LIVE_SPAN - 1 - i));
+    series = [live.co2, live.temp, live.rh].map(vals => {
+      const out = Array(LIVE_SPAN).fill(null);
+      live.x.forEach((t, j) => {
+        const k = t - (now - LIVE_SPAN + 1);
+        if (k >= 0 && k < LIVE_SPAN) out[k] = vals[j];
+      });
+      return out;
+    });
+  } else {
+    if (!hist) return;
+    const n = chartRange === "hour" ? 60 : 1440;
+    const now = Math.floor(Date.now() / 60000) * 60;
+    xs = Array.from({ length: n }, (_, i) => now - (n - 1 - i) * 60);
+    series = [hist.co2, hist.temp, hist.rh].map(a => padTo(a, n));
+  }
+  plots.forEach((p, i) => p.setData([xs, series[i]]));
+}
+
+function setRange(r) {
+  chartRange = r;
+  document.querySelectorAll("#range-btns button").forEach(b =>
+    b.classList.toggle("secondary", b.dataset.r !== r));
+  renderCharts();
+}
+
+/* Копит живые показания из секундного опроса статуса (окно «5 мин»). */
+function pushLive(s) {
+  if (!s.scd40_ok) return;
+  const t = Math.floor(Date.now() / 1000);
+  if (live.x.length && live.x[live.x.length - 1] === t) return;
+  live.x.push(t);
+  live.co2.push(s.co2);
+  live.temp.push(s.air_temp);
+  live.rh.push(s.air_rh);
+  while (live.x.length && live.x[0] < t - LIVE_SPAN) {
+    live.x.shift(); live.co2.shift(); live.temp.shift(); live.rh.shift();
+  }
+  if (chartRange === "5m") renderCharts();
+}
+
+async function loadHistory() {
+  try {
+    const r = await fetch("/api/history");
+    if (!r.ok) throw new Error(r.status);
+    hist = await r.json();
+    if (!plots) {
+      document.getElementById("charts-wait").style.display = "none";
+      plots = [
+        mkPlot("chart-co2", "CO₂", "ppm", 0),
+        mkPlot("chart-temp", "Температура", "°C", 1),
+        mkPlot("chart-rh", "Влажность", "%", 0),
+      ];
+      addEventListener("resize", () => plots.forEach(p =>
+        p.setSize({ width: p.root.parentElement.clientWidth, height: 150 })));
+    }
+    if (chartRange !== "5m") renderCharts();
+  } catch (e) {}
 }
 
 /* --- калибровка SCD40 --- */
@@ -408,6 +550,8 @@ async function doConnect() {
 
 refresh();
 setInterval(refresh, 1000);
+loadHistory();
+setInterval(loadHistory, 60000);
 loadNets();
 </script>
 </body>

@@ -19,6 +19,7 @@
 #include "cJSON.h"
 #include "mdns.h"
 #include "nvs.h"
+#include "history.h"
 #include "led.h"
 #include "ota.h"
 #include "sensors.h"
@@ -32,6 +33,10 @@ static const char *TAG = "webserver";
 
 extern const char index_html_start[] asm("_binary_index_html_start");
 extern const char index_html_end[] asm("_binary_index_html_end");
+extern const char uplot_js_start[] asm("_binary_uplot_js_start");
+extern const char uplot_js_end[] asm("_binary_uplot_js_end");
+extern const char uplot_css_start[] asm("_binary_uplot_css_start");
+extern const char uplot_css_end[] asm("_binary_uplot_css_end");
 
 static httpd_handle_t s_server;
 
@@ -91,6 +96,22 @@ static esp_err_t index_get_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_send(req, index_html_start, index_html_end - index_html_start);
+}
+
+/* Embedded uPlot assets. The -1 strips the NUL byte that EMBED_TXTFILES
+ * appends — a stray NUL is a syntax error in JS. */
+static esp_err_t uplot_js_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/javascript");
+    httpd_resp_set_hdr(req, "Cache-Control", "max-age=86400");
+    return httpd_resp_send(req, uplot_js_start, uplot_js_end - uplot_js_start - 1);
+}
+
+static esp_err_t uplot_css_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/css");
+    httpd_resp_set_hdr(req, "Cache-Control", "max-age=86400");
+    return httpd_resp_send(req, uplot_css_start, uplot_css_end - uplot_css_start - 1);
 }
 
 static const char *authmode_str(wifi_auth_mode_t mode)
@@ -249,6 +270,46 @@ static esp_err_t status_get_handler(httpd_req_t *req)
 
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json, len);
+}
+
+/* 24 h of 1-min points as arrays per metric (null = gap). The full
+ * response is ~15-20 KB, so it is streamed in chunks. */
+static esp_err_t history_get_handler(httpd_req_t *req)
+{
+    static char buf[1024]; /* single httpd task */
+    httpd_resp_set_type(req, "application/json");
+
+    int len = snprintf(buf, sizeof(buf), "{\"period\":60");
+    static const char *names[] = { "co2", "temp", "rh" };
+    for (int m = 0; m < 3; m++) {
+        len += snprintf(buf + len, sizeof(buf) - len, ",\"%s\":[", names[m]);
+        int count = history_count();
+        for (int i = 0; i < count; i++) {
+            history_point_t p;
+            char val[16] = "null";
+            if (history_get(i, &p) && p.valid) {
+                if (m == 0) {
+                    snprintf(val, sizeof(val), "%u", p.co2_ppm);
+                } else if (m == 1) {
+                    snprintf(val, sizeof(val), "%.1f", p.temp_cx10 / 10.0);
+                } else {
+                    snprintf(val, sizeof(val), "%u", p.rh_pct);
+                }
+            }
+            len += snprintf(buf + len, sizeof(buf) - len, "%s%s",
+                            i ? "," : "", val);
+            if (len > (int)sizeof(buf) - 32) {
+                if (httpd_resp_send_chunk(req, buf, len) != ESP_OK) {
+                    return ESP_FAIL;
+                }
+                len = 0;
+            }
+        }
+        len += snprintf(buf + len, sizeof(buf) - len, "]");
+    }
+    len += snprintf(buf + len, sizeof(buf) - len, "}");
+    httpd_resp_send_chunk(req, buf, len);
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 static esp_err_t scan_get_handler(httpd_req_t *req)
@@ -427,6 +488,24 @@ void webserver_start(void)
         .handler = handle_request,
         .user_ctx = status_get_handler,
     };
+    const httpd_uri_t uplot_js_uri = {
+        .uri = "/uplot.js",
+        .method = HTTP_GET,
+        .handler = handle_request,
+        .user_ctx = uplot_js_get_handler,
+    };
+    const httpd_uri_t uplot_css_uri = {
+        .uri = "/uplot.css",
+        .method = HTTP_GET,
+        .handler = handle_request,
+        .user_ctx = uplot_css_get_handler,
+    };
+    const httpd_uri_t history_uri = {
+        .uri = "/api/history",
+        .method = HTTP_GET,
+        .handler = handle_request,
+        .user_ctx = history_get_handler,
+    };
     const httpd_uri_t scan_uri = {
         .uri = "/api/scan",
         .method = HTTP_GET,
@@ -476,7 +555,10 @@ void webserver_start(void)
         .user_ctx = ota_post_handler,
     };
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &index_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &uplot_js_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &uplot_css_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &status_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &history_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &scan_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &networks_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &network_add_uri));

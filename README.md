@@ -34,10 +34,17 @@ sensors are not connected yet.
   button on the page — run the sensor ≥3 min in known-CO₂ air first.
   Pressure compensation is hardcoded (985 hPa at the site, 245 m) until a
   real pressure sensor provides live values.
+- **History & charts** — 24 h of SCD40 readings averaged into 1-min points
+  (RAM ring, ~9 KB, lost on reboot). The web UI draws interactive
+  CO₂/temperature/humidity charts with uPlot (embedded into the firmware,
+  served as `/uplot.js` + `/uplot.css`): switchable window (5 min live from
+  the 1 s status polling / hour / day, one switch for all charts), hover
+  readout of time/value; offline periods show as gaps.
 - **Telegram notifications** — push-only bot (no incoming commands yet):
-  welcome message on boot (chip temp + IP), alert when chip temperature
-  crosses 35 °C (with 1 °C hysteresis on recovery), notification on IP
-  change. Bot token / chat id are compile-time constants in `telegram.c`
+  welcome message on boot (chip temp + IP), notification on IP change,
+  air alerts from the SCD40 — CO₂ crossing the 800/1200 ppm thresholds
+  (±25 ppm hysteresis), temperature drift ≥2 °C, humidity drift ≥10 %.
+  Bot token / chat id are compile-time constants in `telegram.c`
   (like `OTA_KEY`); when left empty the module disables itself.
 - **SNTP** — UTC time from `pool.ntp.org`. Sync state is exposed as
   `timesync_is_synced()` and as `time_synced` in `/api/status`; until the
@@ -58,6 +65,7 @@ tasks/callbacks. Modules under `main/`, each with a small public header:
 | `button.c` | BOOT button via espressif/button |
 | `sensors.c` | internal chip temperature + SCD40 polling task (I2C master bus, Sensirion protocol with CRC-8) |
 | `timesync.c` | SNTP client; `timesync_is_synced()` flag |
+| `history.c` | 24 h RAM ring of 1-min averaged sensor points; fed by `sensors.c`, flushed by an esp_timer once a minute |
 | `telegram.c` | message queue + sender task (Telegram Bot API over HTTPS); `telegram_notify(fmt, ...)` |
 | `alerts.c` | notification rules & thresholds; own task polls sensors/network every 10 s |
 | `settings.c` | thin u8 get/set over NVS namespace `settings` |
@@ -68,6 +76,7 @@ tasks/callbacks. Modules under `main/`, each with a small public header:
 |---|---|---|
 | `/` | GET | embedded single-page UI (index.html) |
 | `/api/status` | GET | full status JSON: Wi-Fi (STA details or AP client list), system info, heap, settings |
+| `/api/history` | GET | 24 h of 1-min points: `{period, co2: [...], temp: [...], rh: [...]}`, `null` = gap |
 | `/api/scan` | GET | scan for Wi-Fi networks, returns `[{ssid, rssi, auth}]` |
 | `/api/networks` | GET | list of saved networks (SSIDs only) |
 | `/api/networks/add` | POST | save a network; body `{"ssid": "...", "password": "..."}`, updates password if SSID exists |

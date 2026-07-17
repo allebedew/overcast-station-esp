@@ -4,6 +4,7 @@
 #include "nvs_flash.h"
 #include "alerts.h"
 #include "button.h"
+#include "history.h"
 #include "led.h"
 #include "ota.h"
 #include "sensors.h"
@@ -60,6 +61,7 @@ void app_main(void)
 
     wifi_set_status_callback(on_wifi_status);
     ESP_ERROR_CHECK(wifi_connect());
+    history_init();
     sensors_init();
     webserver_start();
 
