@@ -1,43 +1,75 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
-#include "led_strip.h"
+#include "esp_netif_sntp.h"
+#include "nvs_flash.h"
+#include "button.h"
+#include "led.h"
+#include "sensors.h"
+#include "webserver.h"
+#include "wifi.h"
 
-/* Встроенный адресный светодиод WS2812 на ESP32-C6-DevKitC-1 / DevKitM-1 */
-#define BLINK_GPIO      8
-#define BLINK_PERIOD_MS 500
+static const char *TAG = "main";
 
-static const char *TAG = "blink";
-
-static led_strip_handle_t led_strip;
-
-static void configure_led(void)
+static void log_task_list(void)
 {
-    led_strip_config_t strip_config = {
-        .strip_gpio_num = BLINK_GPIO,
-        .max_leds = 1,
-    };
-    led_strip_rmt_config_t rmt_config = {
-        .resolution_hz = 10 * 1000 * 1000, /* 10 МГц */
-    };
-    ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip));
-    ESP_ERROR_CHECK(led_strip_clear(led_strip));
+    static char task_list_buf[1024];
+    vTaskList(task_list_buf);
+    ESP_LOGI(TAG, "Task list:\nName          State  Prio  Stack  Num\n%s", task_list_buf);
+}
+
+static void on_time_sync(struct timeval *tv)
+{
+    ESP_LOGI(TAG, "Time synchronized (SNTP)");
+}
+
+static void on_wifi_status(wifi_status_t status)
+{
+    switch (status) {
+    case WIFI_STATUS_CONNECTING:
+        led_set_status(LED_STATUS_WIFI_CONNECTING);
+        break;
+    case WIFI_STATUS_CONNECTED:
+        led_set_status(LED_STATUS_WIFI_CONNECTED);
+        break;
+    case WIFI_STATUS_FAILED:
+        led_set_status(LED_STATUS_WIFI_FAILED);
+        break;
+    case WIFI_STATUS_AP_MODE:
+        led_set_pulse_count(wifi_get_ap_client_count());
+        led_set_status(LED_STATUS_WIFI_AP);
+        break;
+    case WIFI_STATUS_WAITING_RETRY:
+    case WIFI_STATUS_DISCONNECTED:
+        led_set_status(LED_STATUS_WIFI_DISCONNECTED);
+        break;
+    }
 }
 
 void app_main(void)
 {
-    configure_led();
-    ESP_LOGI(TAG, "Blink started, GPIO %d", BLINK_GPIO);
-
-    bool led_on = false;
-    while (true) {
-        if (led_on) {
-            ESP_ERROR_CHECK(led_strip_set_pixel(led_strip, 0, 16, 16, 16));
-            ESP_ERROR_CHECK(led_strip_refresh(led_strip));
-        } else {
-            ESP_ERROR_CHECK(led_strip_clear(led_strip));
-        }
-        led_on = !led_on;
-        vTaskDelay(pdMS_TO_TICKS(BLINK_PERIOD_MS));
+    /* NVS нужен модулям ниже (яркость LED, список сетей Wi-Fi) */
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
     }
+    ESP_ERROR_CHECK(ret);
+
+    led_init();
+    led_set_status(LED_STATUS_WIFI_DISCONNECTED);
+    button_init();
+
+    wifi_set_status_callback(on_wifi_status);
+    ESP_ERROR_CHECK(wifi_connect());
+    sensors_init();
+    webserver_start();
+
+    /* часы в UTC; клиент сам повторяет запросы, пока сеть не появится */
+    esp_sntp_config_t sntp_cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    sntp_cfg.sync_cb = on_time_sync;
+    ESP_ERROR_CHECK(esp_netif_sntp_init(&sntp_cfg));
+
+    log_task_list();
+    /* app_main завершается — работают задачи led и wifi */
 }

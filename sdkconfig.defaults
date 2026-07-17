@@ -1,0 +1,14 @@
+# Осознанные отклонения от дефолтов ESP-IDF.
+# Полный sdkconfig генерируется из этого файла и не хранится в git.
+
+CONFIG_IDF_TARGET="esp32c6"
+
+# Кастомная таблица разделов: app-раздел 4 МБ (см. partitions.csv)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Статистика времени выполнения задач — для показа загрузки CPU
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+
+# Оптимизация по размеру
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y

@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Метеостанция</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --card: #ffffff;
+    --text: #1c1e21;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --border: #e5e7eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111318;
+      --card: #1b1e25;
+      --text: #e7e9ee;
+      --muted: #9aa1ad;
+      --border: #2a2e37;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+    padding: 2rem 1rem;
+  }
+  .wrap { max-width: 450px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin-bottom: 1.5rem; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+  }
+  .card .label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin-bottom: 0.4rem;
+  }
+  .card .value { font-size: 1.35rem; font-weight: 600; }
+  .card .sub { font-size: 0.82rem; color: var(--muted); margin-top: 0.3rem; }
+  .dot {
+    display: inline-block;
+    width: 0.7em; height: 0.7em;
+    border-radius: 50%;
+    margin-right: 0.45em;
+    background: #9ca3af;
+  }
+  .bar {
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    margin-top: 0.6rem;
+    overflow: hidden;
+  }
+  .bar > div {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    width: 0;
+    transition: width 0.4s;
+  }
+  #error-banner {
+    display: none;
+    background: #ef4444;
+    color: #fff;
+    border-radius: 12px;
+    padding: 0.8rem 1.25rem;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+  }
+  body.stale #error-banner { display: block; }
+  body.stale .grid { opacity: 0.45; }
+  .card.wide { grid-column: 1 / -1; }
+  .kv {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.35rem 0;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+  }
+  .kv:first-of-type { margin-top: 0.6rem; }
+  .kv .k { color: var(--muted); white-space: nowrap; }
+  .kv .v { font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+  .form { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
+  input, button {
+    font: inherit;
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+  }
+  input {
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+  }
+  button {
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+  }
+  button.secondary {
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .btns { display: flex; gap: 0.5rem; }
+  .btns button { flex: 1; }
+  .pick { cursor: pointer; }
+  .del { color: #ef4444; cursor: pointer; }
+  input[type="range"] { padding: 0; accent-color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Метеостанция</h1>
+  <div id="error-banner">⚠ Нет связи с устройством — данные устарели. <span id="error-since"></span></div>
+  <div class="grid">
+    <div class="card wide">
+      <div class="label">Wi-Fi</div>
+      <div class="value"><span class="dot" id="wifi-dot"></span><span id="wifi-text">—</span></div>
+      <div id="wifi-rows"></div>
+    </div>
+    <div class="card wide">
+      <div class="label">Система</div>
+      <div id="sys-rows"></div>
+      <div class="bar"><div id="heap-bar"></div></div>
+    </div>
+    <div class="card wide">
+      <div class="label">Сети Wi-Fi</div>
+      <div id="saved-rows" class="sub">загрузка…</div>
+      <div class="form">
+        <input id="net-ssid" placeholder="SSID" maxlength="32">
+        <input id="net-pass" type="password" placeholder="Пароль" maxlength="64">
+        <div class="btns">
+          <button class="secondary" id="scan-btn" onclick="doScan()">Сканировать</button>
+          <button onclick="addNet()">Добавить</button>
+        </div>
+        <div id="scan-rows"></div>
+        <button class="secondary" onclick="doConnect()">Переподключиться</button>
+      </div>
+    </div>
+    <div class="card wide">
+      <div class="label">Настройки</div>
+      <div class="kv"><span class="k">Яркость светодиода</span><span class="v" id="bright-val">—</span></div>
+      <input type="range" id="bright" min="1" max="255" value="4"
+             oninput="brightPreview()" onchange="brightApply()">
+    </div>
+  </div>
+</div>
+<script>
+function rssiColor(rssi) {
+  if (rssi >= -60) return "#22c55e"; /* хороший */
+  if (rssi >= -70) return "#eab308"; /* средний */
+  return "#ef4444";                  /* слабый */
+}
+
+function fmtUptime(s) {
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600),
+        m = Math.floor(s % 3600 / 60), sec = s % 60;
+  if (d) return `${d}д ${h}ч ${m}м`;
+  if (h) return `${h}ч ${m}м ${sec}с`;
+  return `${m}м ${sec}с`;
+}
+
+function fmtKib(bytes) {
+  return (bytes / 1024).toFixed(0) + " Кб";
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function kvRows(rows) {
+  return rows.map(([k, v]) =>
+    `<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
+}
+
+let lastOk = null;
+
+function setStale(stale) {
+  document.body.classList.toggle("stale", stale);
+  if (stale && lastOk) {
+    const ago = Math.round((Date.now() - lastOk) / 1000);
+    document.getElementById("error-since").textContent =
+      `Последнее обновление ${ago} с назад.`;
+  }
+}
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/status");
+    if (!r.ok) throw new Error(r.status);
+    const s = await r.json();
+    lastOk = Date.now();
+    setStale(false);
+
+    let text, color, rows;
+    if (s.ap_mode) {
+      text = "Точка доступа";
+      color = "#3b82f6";
+      rows = [
+        ["Сеть", esc(s.ssid)],
+        ["IP", s.ip],
+        ["Канал", s.channel],
+        ["MAC", s.mac],
+        ["Клиентов", s.clients.length],
+      ];
+      s.clients.forEach((c, i) =>
+        rows.push([`Клиент ${i + 1}`, `${c.mac} · ${c.rssi} дБм`]));
+    } else {
+      text = `${s.rssi} дБм`;
+      color = rssiColor(s.rssi);
+      rows = [
+        ["Сеть", esc(s.ssid)],
+        ["IP", s.ip],
+        ["Шлюз", s.gw],
+        ["DNS", s.dns],
+        ["Канал", s.channel],
+        ["Стандарт", s.phy],
+        ["Защита", s.auth],
+        ["BSSID роутера", s.bssid],
+        ["MAC станции", s.mac],
+      ];
+    }
+    document.getElementById("wifi-dot").style.background = color;
+    document.getElementById("wifi-text").textContent = text;
+    document.getElementById("wifi-rows").innerHTML = kvRows(rows);
+
+    document.getElementById("sys-rows").innerHTML = kvRows([
+      ["Время (UTC)", s.time],
+      ["Прошивка", `${s.app_version} · ${s.build}`],
+      ["ESP-IDF", s.idf_ver],
+      ["Чип", `ESP32-C6 ${s.chip_rev} · ${s.cpu_mhz} МГц · флеш ${s.flash_mb} МБ`],
+      ["Причина перезагрузки", s.reset_reason],
+      ["Температура чипа", s.temp.toFixed(1) + " °C"],
+      ["Аптайм", fmtUptime(s.uptime)],
+      ["Загрузка CPU", s.cpu_load + " %"],
+      ["Задач FreeRTOS", s.tasks],
+      ["Память", `${fmtKib(s.heap_free)}/${fmtKib(s.heap_total)} (min ${fmtKib(s.heap_min)})`],
+      ["Наибольший блок", fmtKib(s.heap_largest)],
+      ["NVS", `${s.nvs_used}/${s.nvs_total} записей`],
+    ]);
+    document.getElementById("heap-bar").style.width =
+      (100 * s.heap_free / s.heap_total).toFixed(0) + "%";
+
+    if (!brightLoaded) { /* один раз, чтобы не дёргать ползунок под рукой */
+      brightLoaded = true;
+      document.getElementById("bright").value = s.led_brightness;
+      brightPreview();
+    }
+  } catch (e) {
+    setStale(true);
+  }
+}
+
+/* --- настройки --- */
+
+let brightLoaded = false;
+
+function brightPreview() {
+  document.getElementById("bright-val").textContent =
+    document.getElementById("bright").value;
+}
+
+async function brightApply() {
+  await fetch("/api/settings", {
+    method: "POST",
+    body: JSON.stringify({ led_brightness: +document.getElementById("bright").value }),
+  });
+}
+
+/* --- управление сетями --- */
+
+let savedNets = [];
+
+async function loadNets() {
+  try {
+    const r = await fetch("/api/networks");
+    savedNets = await r.json();
+    document.getElementById("saved-rows").innerHTML = savedNets.length
+      ? kvRows(savedNets.map((n, i) =>
+          [esc(n.ssid), `<span class="del" onclick="delNet(${i})">удалить</span>`]))
+      : '<div class="sub">нет сохранённых сетей</div>';
+  } catch (e) {}
+}
+
+async function delNet(i) {
+  await fetch("/api/networks/delete", {
+    method: "POST",
+    body: JSON.stringify({ ssid: savedNets[i].ssid }),
+  });
+  loadNets();
+}
+
+async function addNet() {
+  const ssid = document.getElementById("net-ssid").value.trim();
+  if (!ssid) return;
+  const r = await fetch("/api/networks/add", {
+    method: "POST",
+    body: JSON.stringify({ ssid, password: document.getElementById("net-pass").value }),
+  });
+  if (r.ok) {
+    document.getElementById("net-ssid").value = "";
+    document.getElementById("net-pass").value = "";
+  } else {
+    alert("Не удалось добавить сеть: " + await r.text());
+  }
+  loadNets();
+}
+
+async function doScan() {
+  const btn = document.getElementById("scan-btn");
+  btn.disabled = true;
+  btn.textContent = "Сканирую…";
+  try {
+    const r = await fetch("/api/scan");
+    if (!r.ok) throw new Error(r.status);
+    const list = await r.json();
+    document.getElementById("scan-rows").innerHTML = list.length
+      ? kvRows(list.map(a =>
+          [`<span class="pick" onclick="pickNet(this.textContent)">${esc(a.ssid)}</span>`,
+           `${a.rssi} дБм · ${a.auth}`]))
+      : '<div class="sub">сетей не найдено</div>';
+  } catch (e) {
+    document.getElementById("scan-rows").innerHTML =
+      '<div class="sub">ошибка сканирования</div>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Сканировать";
+  }
+}
+
+function pickNet(ssid) {
+  document.getElementById("net-ssid").value = ssid;
+  document.getElementById("net-pass").focus();
+}
+
+async function doConnect() {
+  await fetch("/api/connect", { method: "POST" });
+}
+
+refresh();
+setInterval(refresh, 2000);
+loadNets();
+</script>
+</body>
+</html>
