@@ -3,3 +3,4 @@ dependencies:
   idf: '>=5.3'
   espressif/button: '*'
   espressif/mdns: '*'
+  joltwallet/littlefs: ^1.20

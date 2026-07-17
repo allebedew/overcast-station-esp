@@ -8,6 +8,7 @@
 #include "led.h"
 #include "ota.h"
 #include "sensors.h"
+#include "storage.h"
 #include "telegram.h"
 #include "timesync.h"
 #include "webserver.h"
@@ -61,6 +62,7 @@ void app_main(void)
 
     wifi_set_status_callback(on_wifi_status);
     ESP_ERROR_CHECK(wifi_connect());
+    storage_init();
     history_init();
     sensors_init();
     webserver_start();

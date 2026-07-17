@@ -4,3 +4,6 @@ otadata,  data, ota,     0xf000,  8K
 phy_init, data, phy,     0x11000, 4K
 ota_0,    app,  ota_0,   0x20000, 4M
 ota_1,    app,  ota_1,   ,        4M
+# pinned to the end of the 16 MB flash so future app-slot growth
+# does not move it (LittleFS data survives repartitioning)
+storage,  data, littlefs, 0xA00000, 6M

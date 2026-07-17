@@ -35,7 +35,9 @@ sensors are not connected yet.
   Pressure compensation is hardcoded (985 hPa at the site, 245 m) until a
   real pressure sensor provides live values.
 - **History & charts** — 24 h of SCD40 readings averaged into 1-min points
-  (RAM ring, ~9 KB, lost on reboot). The web UI draws interactive
+  (RAM ring, ~9 KB). The ring is snapshotted to LittleFS every 10 min and on
+  graceful shutdown (OTA reboot), and restored on boot — downtime shows up
+  as a gap, anchored via SNTP time. The web UI draws interactive
   CO₂/temperature/humidity charts with uPlot (embedded into the firmware,
   served as `/uplot.js` + `/uplot.css`): switchable window (5 min live from
   the 1 s status polling / hour / day, one switch for all charts), hover
@@ -65,7 +67,8 @@ tasks/callbacks. Modules under `main/`, each with a small public header:
 | `button.c` | BOOT button via espressif/button |
 | `sensors.c` | internal chip temperature + SCD40 polling task (I2C master bus, Sensirion protocol with CRC-8) |
 | `timesync.c` | SNTP client; `timesync_is_synced()` flag |
-| `history.c` | 24 h RAM ring of 1-min averaged sensor points; fed by `sensors.c`, flushed by an esp_timer once a minute |
+| `history.c` | 24 h RAM ring of 1-min averaged sensor points; fed by `sensors.c`, flushed by an esp_timer once a minute; persisted to `/data/history.bin` (10-min snapshots + shutdown handler) |
+| `storage.c` | mounts the LittleFS `storage` partition at `/data` |
 | `telegram.c` | message queue + sender task (Telegram Bot API over HTTPS); `telegram_notify(fmt, ...)` |
 | `alerts.c` | notification rules & thresholds; own task polls sensors/network every 10 s |
 | `settings.c` | thin u8 get/set over NVS namespace `settings` |
@@ -96,4 +99,5 @@ idf.py build flash monitor   # first time (partition table changed) — by cable
 Deliberate config deviations live in `sdkconfig.defaults` (custom partition
 table, rollback, run-time stats for CPU load, -Os); `sdkconfig` is generated
 and not tracked. `partitions.csv`: nvs 24K, otadata 8K, phy 4K, ota_0/ota_1
-4M each.
+4M each, storage (LittleFS) 6M pinned to the end of flash at 0xA00000 so
+future app-slot growth does not move the data.
