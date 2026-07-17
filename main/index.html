@@ -137,6 +137,11 @@
       <div id="wifi-rows"></div>
     </div>
     <div class="card wide">
+      <div class="label">Воздух (SCD40)</div>
+      <div class="value" id="air-value">—</div>
+      <div id="air-rows"></div>
+    </div>
+    <div class="card wide">
       <div class="label">Система</div>
       <div id="sys-rows"></div>
       <div class="bar"><div id="heap-bar"></div></div>
@@ -160,6 +165,12 @@
       <div class="kv"><span class="k">Яркость светодиода</span><span class="v" id="bright-val">—</span></div>
       <input type="range" id="bright" min="1" max="255" value="4"
              oninput="brightPreview()" onchange="brightApply()">
+      <div class="kv"><span class="k">Калибровка CO₂ (FRC)</span><span class="v">ppm</span></div>
+      <div class="btns" style="margin-top: 0.5rem">
+        <input id="frc-ppm" type="number" value="420" min="400" max="2000"
+               style="flex: 1; min-width: 0">
+        <button class="secondary" id="frc-btn" onclick="calibrate()">Калибровать</button>
+      </div>
     </div>
   </div>
 </div>
@@ -168,6 +179,12 @@ function rssiColor(rssi) {
   if (rssi >= -60) return "#22c55e"; /* хороший */
   if (rssi >= -70) return "#eab308"; /* средний */
   return "#ef4444";                  /* слабый */
+}
+
+function co2Color(ppm) {
+  if (ppm < 800) return "#22c55e";  /* свежо */
+  if (ppm < 1200) return "#eab308"; /* пора проветрить */
+  return "#ef4444";                 /* душно */
 }
 
 function fmtUptime(s) {
@@ -243,6 +260,15 @@ async function refresh() {
     document.getElementById("wifi-text").textContent = text;
     document.getElementById("wifi-rows").innerHTML = kvRows(rows);
 
+    const airOk = s.scd40_ok;
+    const airValue = document.getElementById("air-value");
+    airValue.textContent = `${airOk ? s.co2 : "--"} ppm CO₂`;
+    airValue.style.color = airOk ? co2Color(s.co2) : "";
+    document.getElementById("air-rows").innerHTML = kvRows([
+      ["Температура", (airOk ? s.air_temp.toFixed(1) : "--") + " °C"],
+      ["Влажность", (airOk ? s.air_rh.toFixed(0) : "--") + " %"],
+    ]);
+
     document.getElementById("sys-rows").innerHTML = kvRows([
       ["Время (UTC)", s.time],
       ["Прошивка", `${s.app_version} · ${s.build}`],
@@ -268,6 +294,29 @@ async function refresh() {
     }
   } catch (e) {
     setStale(true);
+  }
+}
+
+/* --- калибровка SCD40 --- */
+
+async function calibrate() {
+  const ppm = +document.getElementById("frc-ppm").value;
+  if (!confirm(`Калибровка перезапишет заводскую поправку. Датчик должен ` +
+      `не меньше 3 минут работать в воздухе с известной концентрацией ` +
+      `(на улице ~420 ppm). Калибровать на ${ppm} ppm?`)) return;
+  const btn = document.getElementById("frc-btn");
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/scd40/calibrate", {
+      method: "POST",
+      body: JSON.stringify({ ppm }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    alert(`Готово. Применённая поправка: ${(await r.json()).correction} ppm`);
+  } catch (e) {
+    alert("Ошибка калибровки: " + e.message);
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -358,7 +407,7 @@ async function doConnect() {
 }
 
 refresh();
-setInterval(refresh, 2000);
+setInterval(refresh, 1000);
 loadNets();
 </script>
 </body>

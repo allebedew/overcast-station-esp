@@ -26,6 +26,14 @@ sensors are not connected yet.
   - green — connected; blinks off briefly on every HTTP request
   - red — error; purple blinking — OTA upload in progress
   - blue — AP mode; every 3 s it pulses off N times = number of AP clients
+- **SCD40 (CO₂ / temperature / humidity)** — I2C on GPIO2 (SDA) / GPIO3 (SCL),
+  periodic measurement mode (fresh reading every 5 s — the sensor's maximum).
+  Hot-plug: an absent/failing sensor is re-probed every 5 s, the web UI shows
+  a separate "Воздух" card (or "датчик не отвечает"), `/api/status` carries
+  `scd40_ok`, `co2`, `air_temp`, `air_rh`. Forced recalibration (FRC) via a
+  button on the page — run the sensor ≥3 min in known-CO₂ air first.
+  Pressure compensation is hardcoded (985 hPa at the site, 245 m) until a
+  real pressure sensor provides live values.
 - **Telegram notifications** — push-only bot (no incoming commands yet):
   welcome message on boot (chip temp + IP), alert when chip temperature
   crosses 35 °C (with 1 °C hysteresis on recovery), notification on IP
@@ -48,7 +56,7 @@ tasks/callbacks. Modules under `main/`, each with a small public header:
 | `ota.c` | `POST /api/ota` handler + rollback confirmation |
 | `led.c` | LED task; status enum, brightness (persisted) |
 | `button.c` | BOOT button via espressif/button |
-| `sensors.c` | internal chip temperature (placeholder for real sensors) |
+| `sensors.c` | internal chip temperature + SCD40 polling task (I2C master bus, Sensirion protocol with CRC-8) |
 | `timesync.c` | SNTP client; `timesync_is_synced()` flag |
 | `telegram.c` | message queue + sender task (Telegram Bot API over HTTPS); `telegram_notify(fmt, ...)` |
 | `alerts.c` | notification rules & thresholds; own task polls sensors/network every 10 s |
@@ -66,6 +74,7 @@ tasks/callbacks. Modules under `main/`, each with a small public header:
 | `/api/networks/delete` | POST | remove a saved network; body `{"ssid": "..."}` |
 | `/api/connect` | POST | leave AP mode / restart the STA connection cycle |
 | `/api/settings` | POST | apply settings; body `{"led_brightness": 1–255}`, persisted in NVS |
+| `/api/scd40/calibrate` | POST | SCD40 forced recalibration; body `{"ppm": 400–2000}`, returns applied correction |
 | `/api/ota` | POST | firmware update; raw binary body, requires `X-OTA-Key` header; reboots on success |
 
 ## Build & flash

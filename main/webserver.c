@@ -198,6 +198,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     nvs_stats_t nvs = {0};
     nvs_get_stats(NULL, &nvs);
 
+    scd40_data_t air;
+    bool air_ok = sensors_scd40_get(&air);
+
     char time_str[32] = "--.--.---- --:--:--";
     if (timesync_is_synced()) {
         time_t now;
@@ -210,11 +213,12 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     char essid[67];
     json_escape(wifi_get_ssid(), essid, sizeof(essid));
 
-    static char json[1024];
+    static char json[1280];
     int len = snprintf(json, sizeof(json),
         "{\"ap_mode\":%s,\"ssid\":\"%s\",\"ip\":\"" IPSTR "\",\"gw\":\"" IPSTR "\","
         "\"dns\":\"" IPSTR "\",\"mac\":\"" MACSTR "\",\"channel\":%d,%s,"
         "\"uptime\":%lld,\"temp\":%.1f,\"time\":\"%s\",\"time_synced\":%s,"
+        "\"scd40_ok\":%s,\"co2\":%u,\"air_temp\":%.1f,\"air_rh\":%.1f,"
         "\"app_version\":\"%s\",\"build\":\"%s %s\",\"idf_ver\":\"%s\","
         "\"chip_rev\":\"v%d.%d\",\"cpu_mhz\":%d,\"flash_mb\":%lu,"
         "\"reset_reason\":\"%s\",\"cpu_load\":%d,\"tasks\":%u,"
@@ -228,6 +232,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         esp_timer_get_time() / 1000000,
         sensors_chip_temp(), time_str,
         timesync_is_synced() ? "true" : "false",
+        air_ok ? "true" : "false", air.co2_ppm, air.temp_c, air.rh_pct,
         app->version, app->date, app->time, app->idf_ver,
         chip.revision / 100, chip.revision % 100,
         CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
@@ -355,6 +360,34 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
+static esp_err_t scd40_calibrate_post_handler(httpd_req_t *req)
+{
+    cJSON *root = read_json_body(req);
+    if (!root) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    }
+    const cJSON *ppm = cJSON_GetObjectItem(root, "ppm");
+    int target = cJSON_IsNumber(ppm) ? ppm->valueint : 0;
+    cJSON_Delete(root);
+    if (target < 400 || target > 2000) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad ppm");
+    }
+
+    int correction = 0;
+    esp_err_t err = sensors_scd40_calibrate((uint16_t)target, &correction);
+    if (err == ESP_ERR_INVALID_STATE) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   "sensor offline");
+    }
+    if (err != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   "calibration rejected");
+    }
+    char resp[64];
+    snprintf(resp, sizeof(resp), "{\"ok\":true,\"correction\":%d}", correction);
+    return httpd_resp_sendstr(req, resp);
+}
+
 static esp_err_t connect_post_handler(httpd_req_t *req)
 {
     /* ответ уходит до переключения режима, иначе клиент его не получит */
@@ -430,6 +463,12 @@ void webserver_start(void)
         .handler = handle_request,
         .user_ctx = settings_post_handler,
     };
+    const httpd_uri_t scd40_cal_uri = {
+        .uri = "/api/scd40/calibrate",
+        .method = HTTP_POST,
+        .handler = handle_request,
+        .user_ctx = scd40_calibrate_post_handler,
+    };
     const httpd_uri_t ota_uri = {
         .uri = "/api/ota",
         .method = HTTP_POST,
@@ -444,6 +483,7 @@ void webserver_start(void)
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &network_delete_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &connect_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &settings_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &scd40_cal_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &ota_uri));
 
     ESP_LOGI(TAG, "Web server started: http://%s.local/", MDNS_HOSTNAME);
