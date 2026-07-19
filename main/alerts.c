@@ -17,7 +17,7 @@
 /* CO2 zones: 0 = fresh (<800), 1 = stale (800..1200), 2 = bad (>1200).
  * A zone change is reported; the hysteresis margin keeps sensor noise
  * from flapping around a threshold. */
-static const int CO2_THRESHOLDS[] = { 800, 1200 };
+static const int CO2_THRESHOLDS[] = { 500, 800, 1200 };
 #define CO2_HYST_PPM 25
 
 /* Report temperature/humidity when they drift this far from the last

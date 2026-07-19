@@ -13,10 +13,14 @@ sensors are not connected yet.
   Runs as APSTA so Wi-Fi scanning keeps working. Toggled manually with the
   BOOT button (GPIO9, single click: AP ↔ reconnect STA).
 - **Web UI** — single page embedded into the firmware, `http://weather.local`
-  (mDNS). Shows Wi-Fi details, system info (chip temp, heap, CPU load, NVS,
-  uptime, reset reason, firmware/build version), manages saved networks
-  (scan / add / delete / reconnect) and settings (LED brightness).
-  Auto-refreshes every 2 s, shows a banner when the device is unreachable.
+  (mDNS). Dark dashboard: three sensor cards (temperature / humidity / CO₂)
+  with current value, trend arrow, min/max and a sparkline chart, plus a
+  system card (Wi-Fi details, chip temp, heap, CPU load, NVS, uptime, reset
+  reason, firmware/build version), a Wi-Fi card (scan list → tap a network →
+  password modal → save + reconnect; saved networks with delete; reconnect
+  button) and a settings card (LED brightness, SCD40 FRC calibration).
+  Auto-refreshes every 1 s; the header connection pill turns red and the page
+  dims when the device is unreachable.
 - **OTA** — push model: `./flash-ota.sh [host]` builds and uploads the binary
   to `POST /api/ota` (auth via `X-OTA-Key` header, key defined in `ota.c`).
   Two 4 MB app partitions + otadata; rollback is enabled — a new image must
@@ -37,11 +41,13 @@ sensors are not connected yet.
 - **History & charts** — 24 h of SCD40 readings averaged into 1-min points
   (RAM ring, ~9 KB). The ring is snapshotted to LittleFS every 10 min and on
   graceful shutdown (OTA reboot), and restored on boot — downtime shows up
-  as a gap, anchored via SNTP time. The web UI draws interactive
-  CO₂/temperature/humidity charts with uPlot (embedded into the firmware,
-  served as `/uplot.js` + `/uplot.css`): switchable window (5 min live from
-  the 1 s status polling / hour / day, one switch for all charts), hover
-  readout of time/value; offline periods show as gaps.
+  as a gap, anchored via SNTP time. The web UI draws CO₂/temperature/humidity
+  sparkline charts inside the sensor cards with a small dependency-free
+  canvas renderer: switchable window (5 min live from the 1 s status
+  polling / hour / day, one switch for all charts), time/value axis labels,
+  hover crosshair with a value + time tooltip; offline periods show as
+  gaps. uPlot is no longer used by the page, but its assets are still
+  embedded and served at `/uplot.js` + `/uplot.css` (removal pending).
 - **Telegram notifications** — push-only bot (no incoming commands yet):
   welcome message on boot (chip temp + IP), notification on IP change,
   air alerts from the SCD40 — CO₂ crossing the 800/1200 ppm thresholds
@@ -61,7 +67,7 @@ tasks/callbacks. Modules under `main/`, each with a small public header:
 |---|---|
 | `wifi.c` | connection state machine, events → status callback (used by main.c to drive the LED) |
 | `wifi_store.c` | saved credentials in NVS (namespace `wifi_creds`), mutex-protected |
-| `webserver.c` | esp_http_server + mDNS; all handlers go through one wrapper that logs the request (except `/api/status` — polled every 2 s) and blinks the LED; static buffers are safe (single httpd task) |
+| `webserver.c` | esp_http_server + mDNS; all handlers go through one wrapper that logs the request (except `/api/status` — polled every 1 s) and blinks the LED; static buffers are safe (single httpd task) |
 | `ota.c` | `POST /api/ota` handler + rollback confirmation |
 | `led.c` | LED task; status enum, brightness (persisted) |
 | `button.c` | BOOT button via espressif/button |

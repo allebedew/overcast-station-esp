@@ -1,558 +1,1595 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Метеостанция</title>
-<link rel="stylesheet" href="/uplot.css">
-<style>
-  :root {
-    --bg: #f4f5f7;
-    --card: #ffffff;
-    --text: #1c1e21;
-    --muted: #6b7280;
-    --accent: #2563eb;
-    --border: #e5e7eb;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #111318;
-      --card: #1b1e25;
-      --text: #e7e9ee;
-      --muted: #9aa1ad;
-      --border: #2a2e37;
-    }
-  }
-  * { box-sizing: border-box; margin: 0; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-    min-height: 100vh;
-    padding: 2rem 1rem;
-  }
-  .wrap { max-width: 450px; margin: 0 auto; }
-  h1 { font-size: 1.4rem; margin-bottom: 1.5rem; }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 1rem;
-  }
-  .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1rem 1.25rem;
-  }
-  .card .label {
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--muted);
-    margin-bottom: 0.4rem;
-  }
-  .card .value { font-size: 1.35rem; font-weight: 600; }
-  .card .sub { font-size: 0.82rem; color: var(--muted); margin-top: 0.3rem; }
-  .dot {
-    display: inline-block;
-    width: 0.7em; height: 0.7em;
-    border-radius: 50%;
-    margin-right: 0.45em;
-    background: #9ca3af;
-  }
-  .bar {
-    height: 6px;
-    background: var(--border);
-    border-radius: 3px;
-    margin-top: 0.6rem;
-    overflow: hidden;
-  }
-  .bar > div {
-    height: 100%;
-    background: var(--accent);
-    border-radius: 3px;
-    width: 0;
-    transition: width 0.4s;
-  }
-  #error-banner {
-    display: none;
-    background: #ef4444;
-    color: #fff;
-    border-radius: 12px;
-    padding: 0.8rem 1.25rem;
-    margin-bottom: 1rem;
-    font-size: 0.9rem;
-  }
-  body.stale #error-banner { display: block; }
-  body.stale .grid { opacity: 0.45; }
-  .card.wide { grid-column: 1 / -1; }
-  .kv {
-    display: flex;
-    justify-content: space-between;
-    gap: 1rem;
-    padding: 0.35rem 0;
-    border-top: 1px solid var(--border);
-    font-size: 0.85rem;
-  }
-  .kv:first-of-type { margin-top: 0.6rem; }
-  .kv .k { color: var(--muted); white-space: nowrap; }
-  .kv .v { font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
-  .form { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
-  input, button {
-    font: inherit;
-    border-radius: 8px;
-    padding: 0.5rem 0.75rem;
-  }
-  input {
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--text);
-  }
-  button {
-    border: none;
-    background: var(--accent);
-    color: #fff;
-    cursor: pointer;
-  }
-  button.secondary {
-    background: var(--card);
-    color: var(--text);
-    border: 1px solid var(--border);
-  }
-  button:disabled { opacity: 0.5; cursor: default; }
-  .btns { display: flex; gap: 0.5rem; }
-  .btns button { flex: 1; }
-  .pick { cursor: pointer; }
-  .del { color: #ef4444; cursor: pointer; }
-  input[type="range"] { padding: 0; accent-color: var(--accent); }
-  .chart-title { font-size: 0.82rem; color: var(--muted); margin-top: 0.7rem; }
-  .uplot { font-family: inherit; }
-  .u-legend { font-size: 0.72rem; color: var(--muted); }
-</style>
-</head>
-<body>
-<div class="wrap">
-  <h1>Метеостанция</h1>
-  <div id="error-banner">⚠ Нет связи с устройством — данные устарели. <span id="error-since"></span></div>
-  <div class="grid">
-    <div class="card wide">
-      <div class="label">Wi-Fi</div>
-      <div class="value"><span class="dot" id="wifi-dot"></span><span id="wifi-text">—</span></div>
-      <div id="wifi-rows"></div>
-    </div>
-    <div class="card wide">
-      <div class="label">Воздух (SCD40)</div>
-      <div class="value" id="air-value">—</div>
-      <div id="air-rows"></div>
-    </div>
-    <div class="card wide">
-      <div class="label">Графики</div>
-      <div class="btns" id="range-btns" style="margin-top: 0.4rem">
-        <button class="secondary" data-r="5m" onclick="setRange('5m')">5 мин</button>
-        <button class="secondary" data-r="hour" onclick="setRange('hour')">Час</button>
-        <button data-r="day" onclick="setRange('day')">Сутки</button>
-      </div>
-      <div id="charts-wait" class="sub">загрузка…</div>
-      <div class="chart-title">CO₂, ppm</div>
-      <div id="chart-co2"></div>
-      <div class="chart-title">Температура, °C</div>
-      <div id="chart-temp"></div>
-      <div class="chart-title">Влажность, %</div>
-      <div id="chart-rh"></div>
-    </div>
-    <div class="card wide">
-      <div class="label">Система</div>
-      <div id="sys-rows"></div>
-      <div class="bar"><div id="heap-bar"></div></div>
-    </div>
-    <div class="card wide">
-      <div class="label">Сети Wi-Fi</div>
-      <div id="saved-rows" class="sub">загрузка…</div>
-      <div class="form">
-        <input id="net-ssid" placeholder="SSID" maxlength="32">
-        <input id="net-pass" type="password" placeholder="Пароль" maxlength="64">
-        <div class="btns">
-          <button class="secondary" id="scan-btn" onclick="doScan()">Сканировать</button>
-          <button onclick="addNet()">Добавить</button>
+    <head>
+        <meta charset="UTF-8" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+        />
+        <title>Метеостанция</title>
+        <style>
+            /* ============ BASE / THEME ============ */
+            :root {
+                --bg: #0d1117;
+                --panel: #161b22;
+                --panel-2: #1c2330;
+                --border: #232c3b;
+                --text: #e6edf3;
+                --text-dim: #8b98a9;
+                --text-faint: #5b6675;
+                --accent: #4da3ff;
+                --temp: #ff8a4c;
+                --hum: #4dc3ff;
+                --co2: #7ee081;
+                --co2-warn: #ffd24d;
+                --co2-bad: #ff6b6b;
+                --ok: #3fb950;
+                --radius: 12px;
+                --font:
+                    -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+                    sans-serif;
+            }
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            html {
+                -webkit-text-size-adjust: 100%;
+            }
+            body {
+                background: var(--bg);
+                color: var(--text);
+                font-family: var(--font);
+                font-size: 14px;
+                line-height: 1.4;
+                min-height: 100vh;
+                padding-bottom: env(safe-area-inset-bottom);
+            }
+            .wrap {
+                max-width: 1080px;
+                margin: 0 auto;
+                padding: 12px;
+            }
+
+            /* ============ HEADER ============ */
+            header {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 6px 2px 14px;
+            }
+            .logo {
+                width: 34px;
+                height: 34px;
+                border-radius: 9px;
+                flex: none;
+                background: linear-gradient(135deg, #2563eb, #4da3ff);
+                display: grid;
+                place-items: center;
+                font-size: 17px;
+            }
+            header h1 {
+                font-size: 16px;
+                font-weight: 600;
+            }
+            header .sub {
+                font-size: 12px;
+                color: var(--text-dim);
+            }
+            .spacer {
+                flex: 1;
+            }
+            .conn {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 12px;
+                color: var(--text-dim);
+                background: var(--panel);
+                border: 1px solid var(--border);
+                padding: 5px 10px;
+                border-radius: 99px;
+            }
+            .dot {
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--ok);
+                animation: pulse 2s infinite;
+            }
+            @keyframes pulse {
+                50% {
+                    opacity: 0.45;
+                }
+            }
+            body.stale .dot {
+                background: var(--co2-bad);
+                animation: none;
+            }
+            body.stale .grid-sensors,
+            body.stale .grid-bottom {
+                opacity: 0.45;
+            }
+
+            /* ============ GRID ============ */
+            .grid-sensors {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 12px;
+            }
+            .grid-bottom {
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr;
+                gap: 12px;
+                margin-top: 12px;
+                align-items: start;
+            }
+            @media (max-width: 900px) {
+                .grid-bottom {
+                    grid-template-columns: 1fr 1fr;
+                }
+                .grid-bottom .card:first-child {
+                    grid-column: 1 / -1;
+                }
+            }
+            @media (max-width: 640px) {
+                .grid-sensors {
+                    grid-template-columns: 1fr;
+                }
+                .grid-bottom {
+                    grid-template-columns: 1fr;
+                }
+                .wrap {
+                    padding: 10px;
+                }
+            }
+
+            /* ============ CARDS ============ */
+            .card {
+                background: var(--panel);
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                padding: 14px;
+            }
+            .card h2 {
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                color: var(--text-dim);
+                display: flex;
+                align-items: center;
+                gap: 7px;
+                margin-bottom: 10px;
+            }
+            .card h2 .ic {
+                font-size: 13px;
+            }
+
+            /* --- Sensor card --- */
+            .sensor .reading {
+                display: flex;
+                align-items: baseline;
+                gap: 8px;
+            }
+            .sensor .value {
+                font-size: 34px;
+                font-weight: 700;
+                letter-spacing: -0.02em;
+                font-variant-numeric: tabular-nums;
+            }
+            .sensor .unit {
+                font-size: 15px;
+                color: var(--text-dim);
+                font-weight: 500;
+            }
+            .sensor .trend {
+                font-size: 12px;
+                margin-left: auto;
+                font-variant-numeric: tabular-nums;
+            }
+            .trend.up {
+                color: var(--temp);
+            }
+            .trend.down {
+                color: var(--hum);
+            }
+            .trend.flat {
+                color: var(--text-faint);
+            }
+            .sensor .minmax {
+                display: flex;
+                gap: 14px;
+                margin: 6px 0 8px;
+                font-size: 11.5px;
+                color: var(--text-faint);
+                font-variant-numeric: tabular-nums;
+            }
+            .sensor canvas {
+                width: 100%;
+                height: 112px;
+                display: block;
+                touch-action: pan-y;
+                cursor: crosshair;
+            }
+            .badge {
+                font-size: 10.5px;
+                padding: 2px 8px;
+                border-radius: 99px;
+                font-weight: 600;
+                margin-left: auto;
+            }
+            .badge.good {
+                background: rgba(126, 224, 129, 0.12);
+                color: var(--co2);
+            }
+            .badge.warn {
+                background: rgba(255, 210, 77, 0.12);
+                color: var(--co2-warn);
+            }
+            .badge.bad {
+                background: rgba(255, 107, 107, 0.14);
+                color: var(--co2-bad);
+            }
+            .badge.off {
+                background: rgba(91, 102, 117, 0.18);
+                color: var(--text-faint);
+            }
+
+            /* --- Period switch --- */
+            .period-bar {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin: 14px 0 8px;
+            }
+            .period-bar .label {
+                font-size: 12px;
+                color: var(--text-dim);
+            }
+            .seg {
+                display: inline-flex;
+                background: var(--panel);
+                border: 1px solid var(--border);
+                border-radius: 9px;
+                padding: 3px;
+                gap: 2px;
+            }
+            .seg button {
+                border: 0;
+                background: transparent;
+                color: var(--text-dim);
+                font: inherit;
+                font-size: 12px;
+                font-weight: 500;
+                padding: 5px 14px;
+                border-radius: 7px;
+                cursor: pointer;
+                transition:
+                    background 0.15s,
+                    color 0.15s;
+                min-height: 30px;
+            }
+            .seg button.active {
+                background: var(--accent);
+                color: #fff;
+            }
+            .seg button:not(.active):hover {
+                color: var(--text);
+            }
+
+            /* --- Key/value table --- */
+            .kv {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            .kv td {
+                padding: 6px 0;
+                font-size: 13px;
+                border-bottom: 1px solid var(--border);
+            }
+            .kv tr:last-child td {
+                border-bottom: 0;
+            }
+            .kv td:first-child {
+                color: var(--text-dim);
+                white-space: nowrap;
+                padding-right: 12px;
+            }
+            .kv td:last-child {
+                text-align: right;
+                font-variant-numeric: tabular-nums;
+                overflow-wrap: anywhere;
+            }
+            .bar-mini {
+                display: inline-block;
+                width: 70px;
+                height: 5px;
+                border-radius: 3px;
+                background: var(--panel-2);
+                vertical-align: middle;
+                margin-right: 8px;
+                overflow: hidden;
+            }
+            .bar-mini i {
+                display: block;
+                height: 100%;
+                background: var(--accent);
+                border-radius: 3px;
+            }
+
+            /* --- WiFi --- */
+            .btn {
+                border: 1px solid var(--border);
+                background: var(--panel-2);
+                color: var(--text);
+                font: inherit;
+                font-size: 13px;
+                font-weight: 500;
+                padding: 9px 14px;
+                border-radius: 9px;
+                cursor: pointer;
+                transition:
+                    background 0.15s,
+                    border-color 0.15s;
+                min-height: 38px;
+            }
+            .btn:hover {
+                border-color: var(--accent);
+            }
+            .btn.primary {
+                background: var(--accent);
+                border-color: var(--accent);
+                color: #fff;
+            }
+            .btn.primary:hover {
+                filter: brightness(1.1);
+            }
+            .btn.block {
+                width: 100%;
+            }
+            .btn:disabled {
+                opacity: 0.5;
+                cursor: default;
+            }
+            .wifi-list {
+                margin-top: 10px;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                max-height: 240px;
+                overflow-y: auto;
+            }
+            .wifi-item {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 9px 10px;
+                border-radius: 9px;
+                border: 1px solid var(--border);
+                background: var(--panel-2);
+                cursor: pointer;
+                transition: border-color 0.15s;
+            }
+            .wifi-item:hover {
+                border-color: var(--accent);
+            }
+            .wifi-item.current {
+                border-color: var(--ok);
+            }
+            .wifi-item .ssid {
+                font-size: 13px;
+                font-weight: 500;
+                flex: 1;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .wifi-item .meta {
+                font-size: 11px;
+                color: var(--text-faint);
+            }
+            .wifi-item .lock {
+                font-size: 11px;
+            }
+            .wifi-item .del {
+                font-size: 13px;
+                color: var(--co2-bad);
+                padding: 0 4px;
+            }
+            .rssi {
+                display: inline-flex;
+                align-items: flex-end;
+                gap: 2px;
+                height: 14px;
+                flex: none;
+            }
+            .rssi i {
+                width: 3px;
+                border-radius: 1px;
+                background: var(--text-faint);
+            }
+            .rssi i:nth-child(1) {
+                height: 4px;
+            }
+            .rssi i:nth-child(2) {
+                height: 7px;
+            }
+            .rssi i:nth-child(3) {
+                height: 10px;
+            }
+            .rssi i:nth-child(4) {
+                height: 13px;
+            }
+            .rssi[data-l="1"] i:nth-child(-n + 1),
+            .rssi[data-l="2"] i:nth-child(-n + 2),
+            .rssi[data-l="3"] i:nth-child(-n + 3),
+            .rssi[data-l="4"] i:nth-child(-n + 4) {
+                background: var(--accent);
+            }
+            .scan-hint {
+                font-size: 12px;
+                color: var(--text-faint);
+                text-align: center;
+                padding: 12px 0 4px;
+            }
+            .saved-head {
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                color: var(--text-dim);
+                margin: 14px 0 4px;
+            }
+            .spin {
+                display: inline-block;
+                width: 13px;
+                height: 13px;
+                border: 2px solid var(--text-faint);
+                border-top-color: var(--accent);
+                border-radius: 50%;
+                animation: rot 0.7s linear infinite;
+                vertical-align: -2px;
+                margin-right: 6px;
+            }
+            @keyframes rot {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+
+            /* --- Settings --- */
+            .set-row {
+                padding: 9px 0;
+                border-bottom: 1px solid var(--border);
+            }
+            .set-row:last-child {
+                border-bottom: 0;
+            }
+            .set-row .head {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 10px;
+            }
+            .set-row .name {
+                font-size: 13px;
+            }
+            .set-row .val {
+                font-size: 12px;
+                color: var(--text-dim);
+                font-variant-numeric: tabular-nums;
+            }
+            input[type="range"] {
+                -webkit-appearance: none;
+                width: 100%;
+                height: 5px;
+                border-radius: 3px;
+                background: var(--panel-2);
+                outline: none;
+                margin-top: 10px;
+            }
+            input[type="range"]::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                width: 18px;
+                height: 18px;
+                border-radius: 50%;
+                background: var(--accent);
+                cursor: pointer;
+                border: 3px solid var(--bg);
+            }
+            .frc-row {
+                display: flex;
+                gap: 8px;
+                margin-top: 10px;
+            }
+            .frc-row input {
+                flex: 1;
+                min-width: 0;
+                background: var(--panel-2);
+                border: 1px solid var(--border);
+                border-radius: 9px;
+                color: var(--text);
+                font: inherit;
+                padding: 9px 12px;
+            }
+            .frc-row input:focus {
+                outline: none;
+                border-color: var(--accent);
+            }
+
+            /* --- Modal --- */
+            .overlay {
+                position: fixed;
+                inset: 0;
+                background: rgba(0, 0, 0, 0.6);
+                backdrop-filter: blur(3px);
+                display: none;
+                align-items: center;
+                justify-content: center;
+                z-index: 50;
+                padding: 16px;
+            }
+            .overlay.show {
+                display: flex;
+            }
+            .modal {
+                background: var(--panel);
+                border: 1px solid var(--border);
+                border-radius: 14px;
+                width: 100%;
+                max-width: 360px;
+                padding: 18px;
+            }
+            .modal h3 {
+                font-size: 15px;
+                margin-bottom: 4px;
+                overflow-wrap: anywhere;
+            }
+            .modal .m-sub {
+                font-size: 12px;
+                color: var(--text-dim);
+                margin-bottom: 14px;
+            }
+            .modal input[type="password"],
+            .modal input[type="text"] {
+                width: 100%;
+                background: var(--panel-2);
+                border: 1px solid var(--border);
+                border-radius: 9px;
+                color: var(--text);
+                font: inherit;
+                padding: 10px 12px;
+                margin-bottom: 12px;
+            }
+            .modal input:focus {
+                outline: none;
+                border-color: var(--accent);
+            }
+            .modal .row {
+                display: flex;
+                gap: 8px;
+            }
+            .modal .row .btn {
+                flex: 1;
+            }
+
+            /* --- Toast --- */
+            #toast {
+                position: fixed;
+                left: 50%;
+                bottom: 24px;
+                transform: translateX(-50%) translateY(80px);
+                background: var(--panel-2);
+                border: 1px solid var(--border);
+                color: var(--text);
+                padding: 10px 18px;
+                border-radius: 10px;
+                font-size: 13px;
+                z-index: 60;
+                transition: transform 0.25s;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+                max-width: 90vw;
+            }
+            #toast.show {
+                transform: translateX(-50%) translateY(0);
+            }
+
+            /* --- Chart tooltip --- */
+            #tip {
+                position: fixed;
+                display: none;
+                z-index: 70;
+                pointer-events: none;
+                background: var(--panel-2);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                padding: 6px 10px;
+                font-size: 12px;
+                line-height: 1.35;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+                font-variant-numeric: tabular-nums;
+                white-space: nowrap;
+            }
+            #tip b {
+                display: block;
+            }
+            #tip span {
+                color: var(--text-dim);
+                font-size: 11px;
+            }
+
+            footer {
+                text-align: center;
+                font-size: 11px;
+                color: var(--text-faint);
+                padding: 18px 0 8px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="wrap">
+            <!-- HEADER -->
+            <header>
+                <div class="logo">🌡</div>
+                <div>
+                    <h1>Метеостанция</h1>
+                    <div class="sub" id="hdrSub">weather.local · ESP32-C6</div>
+                </div>
+                <div class="spacer"></div>
+                <div class="conn">
+                    <span class="dot"></span><span id="connText">Онлайн</span>
+                </div>
+            </header>
+
+            <!-- PERIOD SWITCH -->
+            <div class="period-bar">
+                <span class="label">Показания датчиков</span>
+                <div class="seg" id="periodSeg">
+                    <button data-p="5m">5 мин</button>
+                    <button data-p="1h">1 час</button>
+                    <button data-p="1d" class="active">Сутки</button>
+                </div>
+            </div>
+
+            <!-- SENSORS -->
+            <div class="grid-sensors">
+                <div class="card sensor">
+                    <h2>
+                        <span class="ic">🌡</span> Температура
+                        <span class="trend flat" id="tTrend">—</span>
+                    </h2>
+                    <div class="reading">
+                        <span class="value" id="tVal">--</span
+                        ><span class="unit">°C</span>
+                    </div>
+                    <div class="minmax">
+                        <span>мин <b id="tMin">--</b></span
+                        ><span>макс <b id="tMax">--</b></span>
+                    </div>
+                    <canvas id="tChart"></canvas>
+                </div>
+                <div class="card sensor">
+                    <h2>
+                        <span class="ic">💧</span> Влажность
+                        <span class="trend flat" id="hTrend">—</span>
+                    </h2>
+                    <div class="reading">
+                        <span class="value" id="hVal">--</span
+                        ><span class="unit">%</span>
+                    </div>
+                    <div class="minmax">
+                        <span>мин <b id="hMin">--</b></span
+                        ><span>макс <b id="hMax">--</b></span>
+                    </div>
+                    <canvas id="hChart"></canvas>
+                </div>
+                <div class="card sensor">
+                    <h2>
+                        <span class="ic">☁️</span> CO₂
+                        <span class="badge off" id="cBadge">Нет данных</span>
+                    </h2>
+                    <div class="reading">
+                        <span class="value" id="cVal">--</span
+                        ><span class="unit">ppm</span>
+                    </div>
+                    <div class="minmax">
+                        <span>мин <b id="cMin">--</b></span
+                        ><span>макс <b id="cMax">--</b></span>
+                    </div>
+                    <canvas id="cChart"></canvas>
+                </div>
+            </div>
+
+            <!-- BOTTOM ROW -->
+            <div class="grid-bottom">
+                <!-- SYSTEM -->
+                <div class="card">
+                    <h2><span class="ic">⚙️</span> Система</h2>
+                    <table class="kv">
+                        <tbody id="sysRows">
+                            <tr>
+                                <td>Загрузка…</td>
+                                <td></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- WIFI -->
+                <div class="card">
+                    <h2><span class="ic">📶</span> Wi-Fi сети</h2>
+                    <button class="btn block" id="scanBtn">
+                        Сканировать сети
+                    </button>
+                    <div class="wifi-list" id="wifiList">
+                        <div class="scan-hint">
+                            Нажмите «Сканировать», чтобы найти доступные сети
+                        </div>
+                    </div>
+                    <div class="saved-head">Сохранённые сети</div>
+                    <div class="wifi-list" id="savedList">
+                        <div class="scan-hint">загрузка…</div>
+                    </div>
+                    <button
+                        class="btn block"
+                        id="reconnBtn"
+                        style="margin-top: 10px"
+                    >
+                        Переподключиться
+                    </button>
+                </div>
+
+                <!-- SETTINGS -->
+                <div class="card">
+                    <h2><span class="ic">🎛</span> Настройки</h2>
+
+                    <div class="set-row">
+                        <div class="head">
+                            <span class="name">Яркость светодиода</span
+                            ><span class="val" id="briVal">—</span>
+                        </div>
+                        <input
+                            type="range"
+                            id="briRange"
+                            min="1"
+                            max="255"
+                            value="4"
+                        />
+                    </div>
+
+                    <div class="set-row">
+                        <div class="head">
+                            <span class="name">Калибровка CO₂ (FRC)</span
+                            ><span class="val">ppm</span>
+                        </div>
+                        <div class="frc-row">
+                            <input
+                                id="frcPpm"
+                                type="number"
+                                value="420"
+                                min="400"
+                                max="2000"
+                            />
+                            <button class="btn" id="frcBtn">Калибровать</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <footer>Метеостанция · ESP32-C6 · http://weather.local</footer>
         </div>
-        <div id="scan-rows"></div>
-        <button class="secondary" onclick="doConnect()">Переподключиться</button>
-      </div>
-    </div>
-    <div class="card wide">
-      <div class="label">Настройки</div>
-      <div class="kv"><span class="k">Яркость светодиода</span><span class="v" id="bright-val">—</span></div>
-      <input type="range" id="bright" min="1" max="255" value="4"
-             oninput="brightPreview()" onchange="brightApply()">
-      <div class="kv"><span class="k">Калибровка CO₂ (FRC)</span><span class="v">ppm</span></div>
-      <div class="btns" style="margin-top: 0.5rem">
-        <input id="frc-ppm" type="number" value="420" min="400" max="2000"
-               style="flex: 1; min-width: 0">
-        <button class="secondary" id="frc-btn" onclick="calibrate()">Калибровать</button>
-      </div>
-    </div>
-  </div>
-</div>
-<script src="/uplot.js"></script>
-<script>
-function rssiColor(rssi) {
-  if (rssi >= -60) return "#22c55e"; /* хороший */
-  if (rssi >= -70) return "#eab308"; /* средний */
-  return "#ef4444";                  /* слабый */
-}
 
-function co2Color(ppm) {
-  if (ppm < 800) return "#22c55e";  /* свежо */
-  if (ppm < 1200) return "#eab308"; /* пора проветрить */
-  return "#ef4444";                 /* душно */
-}
+        <!-- WIFI CONNECT MODAL -->
+        <div class="overlay" id="wifiModal">
+            <div class="modal">
+                <h3 id="mSsid">Подключение</h3>
+                <div class="m-sub" id="mMeta"></div>
+                <input
+                    type="password"
+                    id="mPass"
+                    placeholder="Пароль сети"
+                    autocomplete="off"
+                    maxlength="64"
+                />
+                <div class="row">
+                    <button class="btn" id="mCancel">Отмена</button>
+                    <button class="btn primary" id="mConnect">
+                        Подключить
+                    </button>
+                </div>
+            </div>
+        </div>
 
-function fmtUptime(s) {
-  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600),
-        m = Math.floor(s % 3600 / 60), sec = s % 60;
-  if (d) return `${d}д ${h}ч ${m}м`;
-  if (h) return `${h}ч ${m}м ${sec}с`;
-  return `${m}м ${sec}с`;
-}
+        <div id="toast"></div>
+        <div id="tip"></div>
 
-function fmtKib(bytes) {
-  return (bytes / 1024).toFixed(0) + " Кб";
-}
+        <script>
+            /* =====================================================================
+   Data sources (all existing endpoints, unchanged):
+     GET  /api/status           - polled every second, feeds cards + 5-min live window
+     GET  /api/history          - 24 h of 1-min points {period, co2[], temp[], rh[]}
+     GET  /api/scan             - [{ssid, rssi, auth}]
+     GET  /api/networks         - saved networks [{ssid}]
+     POST /api/networks/add     - {ssid, password}
+     POST /api/networks/delete  - {ssid}
+     POST /api/connect          - restart the STA connection cycle
+     POST /api/settings         - {led_brightness}
+     POST /api/scd40/calibrate  - {ppm}
+   ===================================================================== */
 
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, c =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
+            const $ = (id) => document.getElementById(id);
+            const css = (v) =>
+                getComputedStyle(document.documentElement)
+                    .getPropertyValue(v)
+                    .trim();
 
-function kvRows(rows) {
-  return rows.map(([k, v]) =>
-    `<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
-}
+            function esc(s) {
+                return String(s).replace(
+                    /[&<>"']/g,
+                    (c) =>
+                        ({
+                            "&": "&amp;",
+                            "<": "&lt;",
+                            ">": "&gt;",
+                            '"': "&quot;",
+                            "'": "&#39;",
+                        })[c],
+                );
+            }
 
-let lastOk = null;
+            function fmtUptime(s) {
+                const d = Math.floor(s / 86400),
+                    h = Math.floor((s % 86400) / 3600),
+                    m = Math.floor((s % 3600) / 60),
+                    sec = s % 60;
+                if (d) return `${d}д ${h}ч ${m}м`;
+                if (h) return `${h}ч ${m}м ${sec}с`;
+                return `${m}м ${sec}с`;
+            }
 
-function setStale(stale) {
-  document.body.classList.toggle("stale", stale);
-  if (stale && lastOk) {
-    const ago = Math.round((Date.now() - lastOk) / 1000);
-    document.getElementById("error-since").textContent =
-      `Последнее обновление ${ago} с назад.`;
-  }
-}
+            const fmtKib = (b) => (b / 1024).toFixed(0) + " КБ";
 
-async function refresh() {
-  try {
-    const r = await fetch("/api/status");
-    if (!r.ok) throw new Error(r.status);
-    const s = await r.json();
-    lastOk = Date.now();
-    setStale(false);
+            function kvRows(rows) {
+                return rows
+                    .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`)
+                    .join("");
+            }
 
-    let text, color, rows;
-    if (s.ap_mode) {
-      text = "Точка доступа";
-      color = "#3b82f6";
-      rows = [
-        ["Сеть", esc(s.ssid)],
-        ["IP", s.ip],
-        ["Канал", s.channel],
-        ["MAC", s.mac],
-        ["Клиентов", s.clients.length],
-      ];
-      s.clients.forEach((c, i) =>
-        rows.push([`Клиент ${i + 1}`, `${c.mac} · ${c.rssi} дБм`]));
-    } else {
-      text = `${s.rssi} дБм`;
-      color = rssiColor(s.rssi);
-      rows = [
-        ["Сеть", esc(s.ssid)],
-        ["IP", s.ip],
-        ["Шлюз", s.gw],
-        ["DNS", s.dns],
-        ["Канал", s.channel],
-        ["Стандарт", s.phy],
-        ["Защита", s.auth],
-        ["BSSID роутера", s.bssid],
-        ["MAC станции", s.mac],
-      ];
-    }
-    document.getElementById("wifi-dot").style.background = color;
-    document.getElementById("wifi-text").textContent = text;
-    document.getElementById("wifi-rows").innerHTML = kvRows(rows);
+            /* ---------- toast ---------- */
+            let toastTimer;
+            function toast(msg) {
+                const t = $("toast");
+                t.textContent = msg;
+                t.classList.add("show");
+                clearTimeout(toastTimer);
+                toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+            }
 
-    pushLive(s);
+            /* ---------- CO2 level ---------- */
+            function co2Level(ppm) {
+                if (ppm < 800)
+                    return { cls: "good", text: "Норма", color: css("--co2") };
+                if (ppm < 1200)
+                    return {
+                        cls: "warn",
+                        text: "Повышен",
+                        color: css("--co2-warn"),
+                    };
+                return {
+                    cls: "bad",
+                    text: "Проветрить!",
+                    color: css("--co2-bad"),
+                };
+            }
 
-    const airOk = s.scd40_ok;
-    const airValue = document.getElementById("air-value");
-    airValue.textContent = `${airOk ? s.co2 : "--"} ppm CO₂`;
-    airValue.style.color = airOk ? co2Color(s.co2) : "";
-    document.getElementById("air-rows").innerHTML = kvRows([
-      ["Температура", (airOk ? s.air_temp.toFixed(1) : "--") + " °C"],
-      ["Влажность", (airOk ? s.air_rh.toFixed(0) : "--") + " %"],
-    ]);
+            /* ---------- status polling ---------- */
+            let lastOk = null;
+            let lastStatus = null;
+            let brightLoaded = false;
 
-    document.getElementById("sys-rows").innerHTML = kvRows([
-      ["Время (UTC)", s.time],
-      ["Прошивка", `${s.app_version} · ${s.build}`],
-      ["ESP-IDF", s.idf_ver],
-      ["Чип", `ESP32-C6 ${s.chip_rev} · ${s.cpu_mhz} МГц · флеш ${s.flash_mb} МБ`],
-      ["Причина перезагрузки", s.reset_reason],
-      ["Температура чипа", s.temp.toFixed(1) + " °C"],
-      ["Аптайм", fmtUptime(s.uptime)],
-      ["Загрузка CPU", s.cpu_load + " %"],
-      ["Задач FreeRTOS", s.tasks],
-      ["HTTP-соединений", s.http_conns],
-      ["Память", `${fmtKib(s.heap_free)}/${fmtKib(s.heap_total)} (min ${fmtKib(s.heap_min)})`],
-      ["Наибольший блок", fmtKib(s.heap_largest)],
-      ["NVS", `${s.nvs_used}/${s.nvs_total} записей`],
-    ]);
-    document.getElementById("heap-bar").style.width =
-      (100 * s.heap_free / s.heap_total).toFixed(0) + "%";
+            function setStale(stale) {
+                document.body.classList.toggle("stale", stale);
+                if (stale) {
+                    const ago = lastOk
+                        ? Math.round((Date.now() - lastOk) / 1000)
+                        : null;
+                    $("connText").textContent =
+                        "Нет связи" + (ago ? ` · ${ago} с` : "");
+                } else {
+                    $("connText").textContent = "Онлайн";
+                }
+            }
 
-    if (!brightLoaded) { /* один раз, чтобы не дёргать ползунок под рукой */
-      brightLoaded = true;
-      document.getElementById("bright").value = s.led_brightness;
-      brightPreview();
-    }
-  } catch (e) {
-    setStale(true);
-  }
-}
+            async function refresh() {
+                try {
+                    const r = await fetch("/api/status");
+                    if (!r.ok) throw new Error(r.status);
+                    const s = await r.json();
+                    lastStatus = s;
+                    lastOk = Date.now();
+                    setStale(false);
 
-/* --- графики (uPlot) --- */
+                    $("hdrSub").textContent =
+                        (s.ap_mode ? "Точка доступа " : "") +
+                        s.ssid +
+                        " · " +
+                        s.ip;
 
-let plots = null;
-let hist = null;          /* последний ответ /api/history (поминутные точки) */
-let chartRange = "day";   /* '5m' | 'hour' | 'day' — общий для всех графиков */
+                    /* sensor cards */
+                    const ok = s.scd40_ok;
+                    $("tVal").textContent = ok ? s.air_temp.toFixed(1) : "--";
+                    $("hVal").textContent = ok ? s.air_rh.toFixed(0) : "--";
+                    $("cVal").textContent = ok ? s.co2 : "--";
+                    const b = $("cBadge");
+                    if (ok) {
+                        const l = co2Level(s.co2);
+                        b.className = "badge " + l.cls;
+                        b.textContent = l.text;
+                    } else {
+                        b.className = "badge off";
+                        b.textContent = "Нет данных";
+                    }
+                    pushLive(s);
 
-/* Живые показания для окна «5 мин»: наполняются секундным опросом статуса */
-const live = { x: [], co2: [], temp: [], rh: [] };
-const LIVE_SPAN = 300;
+                    /* system card */
+                    let rows;
+                    if (s.ap_mode) {
+                        rows = [
+                            ["Режим", "Точка доступа"],
+                            ["Сеть", esc(s.ssid)],
+                            ["IP-адрес", s.ip],
+                            ["Канал", s.channel],
+                            ["MAC", s.mac],
+                            ["Клиентов", s.clients.length],
+                        ];
+                        s.clients.forEach((c, i) =>
+                            rows.push([
+                                `Клиент ${i + 1}`,
+                                `${c.mac} · ${c.rssi} dBm`,
+                            ]),
+                        );
+                    } else {
+                        const pct = Math.min(
+                            100,
+                            Math.max(0, (s.rssi + 100) * 1.6),
+                        ).toFixed(0);
+                        rows = [
+                            ["Сеть Wi-Fi", `${esc(s.ssid)}`],
+                            ["Сигнал", `${s.rssi} dBm (ch ${s.channel})`],
+                            ["Стандарт", `${s.phy}`],
+                            ["IP-адрес", s.ip],
+                        ];
+                    }
+                    const heapPct = (
+                        (100 * s.heap_free) /
+                        s.heap_total
+                    ).toFixed(0);
+                    rows.push(
+                        ["Чип", `ESP32-C6 ${s.chip_rev} ${s.cpu_mhz} МГц`],
+                        ["Загрузка CPU", s.cpu_load + "%"],
+                        [
+                            "Память (heap)",
+                            `${fmtKib(s.heap_free)} / ${fmtKib(s.heap_total)}`,
+                        ],
+                        [
+                            "Мин. heap / блок",
+                            `${fmtKib(s.heap_min)} / ${fmtKib(s.heap_largest)}`,
+                        ],
+                        ["Температура чипа", s.temp.toFixed(1) + " °C"],
+                        ["Задачи / Cоединения", `${s.tasks}/${s.http_conns}`],
+                        ["NVS", `${s.nvs_used}/${s.nvs_total}`],
+                        ["Аптайм", fmtUptime(s.uptime)],
+                        ["Причина перезагрузки", s.reset_reason],
+                        ["Время (UTC)", s.time],
+                        [
+                            "Прошивка",
+                            `${esc(s.app_version)}, ${esc(s.build)}, idf: ${esc(s.idf_ver)}`,
+                        ],
+                    );
+                    $("sysRows").innerHTML = kvRows(rows);
 
-function cssVar(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
+                    if (!brightLoaded) {
+                        /* once, to avoid fighting the user's hand */
+                        brightLoaded = true;
+                        $("briRange").value = s.led_brightness;
+                        $("briVal").textContent = s.led_brightness;
+                    }
+                } catch (e) {
+                    setStale(true);
+                }
+            }
 
-function fmtTime(v) {
-  return new Date(v * 1000).toLocaleTimeString("ru-RU",
-    { hour: "2-digit", minute: "2-digit" });
-}
+            /* ---------- charts (canvas, no libraries) ---------- */
+            let period = "1d"; /* '5m' | '1h' | '1d' */
+            let hist = null; /* last /api/history response (1-min points) */
 
-function fmtTimeS(v) {
-  return new Date(v * 1000).toLocaleTimeString("ru-RU",
-    { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
+            /* Live readings for the 5-min window, fed by the 1 s status polling */
+            const live = { x: [], co2: [], temp: [], rh: [] };
+            const LIVE_SPAN = 300;
 
-function mkPlot(elId, label, unit, dec) {
-  const el = document.getElementById(elId);
-  const axis = {
-    stroke: cssVar("--muted"),
-    grid: { stroke: cssVar("--border") },
-    ticks: { stroke: cssVar("--border") },
-  };
-  return new uPlot({
-    width: el.clientWidth,
-    height: 150,
-    cursor: { y: false },
-    series: [
-      { label: "Время", value: (u, v) => v == null ? "--" : fmtTimeS(v) },
-      { label, stroke: cssVar("--accent"), width: 1.5, spanGaps: false,
-        value: (u, v) => v == null ? "--" : v.toFixed(dec) + " " + unit },
-    ],
-    axes: [
-      { ...axis, values: (u, splits) => splits.map(fmtTime) },
-      { ...axis, size: 46 },
-    ],
-  }, [[], []], el);
-}
+            function pushLive(s) {
+                if (!s.scd40_ok) return;
+                const t = Math.floor(Date.now() / 1000);
+                if (live.x.length && live.x[live.x.length - 1] === t) return;
+                live.x.push(t);
+                live.co2.push(s.co2);
+                live.temp.push(s.air_temp);
+                live.rh.push(s.air_rh);
+                while (live.x.length && live.x[0] < t - LIVE_SPAN) {
+                    live.x.shift();
+                    live.co2.shift();
+                    live.temp.shift();
+                    live.rh.shift();
+                }
+                renderCharts();
+            }
 
-/* Хвост массива, дополненный null-ами слева до ровно n точек. */
-function padTo(arr, n) {
-  const tail = arr.slice(-n);
-  return Array(n - tail.length).fill(null).concat(tail);
-}
+            async function loadHistory() {
+                try {
+                    const r = await fetch("/api/history");
+                    if (!r.ok) throw new Error(r.status);
+                    hist = await r.json();
+                    renderCharts();
+                } catch (e) {}
+            }
 
-/* Перерисовывает все три графика в текущем масштабе. */
-function renderCharts() {
-  if (!plots) return;
-  let xs, series;
-  if (chartRange === "5m") {
-    /* секундная сетка; live-точки раскладываются по своим секундам */
-    const now = Math.floor(Date.now() / 1000);
-    xs = Array.from({ length: LIVE_SPAN }, (_, i) => now - (LIVE_SPAN - 1 - i));
-    series = [live.co2, live.temp, live.rh].map(vals => {
-      const out = Array(LIVE_SPAN).fill(null);
-      live.x.forEach((t, j) => {
-        const k = t - (now - LIVE_SPAN + 1);
-        if (k >= 0 && k < LIVE_SPAN) out[k] = vals[j];
-      });
-      return out;
-    });
-  } else {
-    if (!hist) return;
-    const n = chartRange === "hour" ? 60 : 1440;
-    const now = Math.floor(Date.now() / 60000) * 60;
-    xs = Array.from({ length: n }, (_, i) => now - (n - 1 - i) * 60);
-    series = [hist.co2, hist.temp, hist.rh].map(a => padTo(a, n));
-  }
-  plots.forEach((p, i) => p.setData([xs, series[i]]));
-}
+            /* Tail of arr left-padded with nulls to exactly n points. */
+            function padTo(arr, n) {
+                const tail = arr.slice(-n);
+                return Array(n - tail.length)
+                    .fill(null)
+                    .concat(tail);
+            }
 
-function setRange(r) {
-  chartRange = r;
-  document.querySelectorAll("#range-btns button").forEach(b =>
-    b.classList.toggle("secondary", b.dataset.r !== r));
-  renderCharts();
-}
+            /* Data arrays for the current window; null = gap. `times` holds the unix
+             * timestamp of every slot (uniform grid: 1 s live / 1 min history). */
+            function windowSeries() {
+                if (period === "5m") {
+                    /* per-second grid, live points land on their own seconds */
+                    const now = Math.floor(Date.now() / 1000);
+                    const t0 = now - LIVE_SPAN + 1;
+                    const mk = (vals) => {
+                        const out = Array(LIVE_SPAN).fill(null);
+                        live.x.forEach((t, j) => {
+                            const k = t - t0;
+                            if (k >= 0 && k < LIVE_SPAN) out[k] = vals[j];
+                        });
+                        return out;
+                    };
+                    return {
+                        t: mk(live.temp),
+                        h: mk(live.rh),
+                        c: mk(live.co2),
+                        times: Array.from(
+                            { length: LIVE_SPAN },
+                            (_, i) => t0 + i,
+                        ),
+                    };
+                }
+                if (!hist) return null;
+                const n = period === "1h" ? 60 : 1440;
+                const nowM = Math.floor(Date.now() / 60000) * 60;
+                return {
+                    t: padTo(hist.temp, n),
+                    h: padTo(hist.rh, n),
+                    c: padTo(hist.co2, n),
+                    times: Array.from(
+                        { length: n },
+                        (_, i) => nowM - (n - 1 - i) * 60,
+                    ),
+                };
+            }
 
-/* Копит живые показания из секундного опроса статуса (окно «5 мин»). */
-function pushLive(s) {
-  if (!s.scd40_ok) return;
-  const t = Math.floor(Date.now() / 1000);
-  if (live.x.length && live.x[live.x.length - 1] === t) return;
-  live.x.push(t);
-  live.co2.push(s.co2);
-  live.temp.push(s.air_temp);
-  live.rh.push(s.air_rh);
-  while (live.x.length && live.x[0] < t - LIVE_SPAN) {
-    live.x.shift(); live.co2.shift(); live.temp.shift(); live.rh.shift();
-  }
-  if (chartRange === "5m") renderCharts();
-}
+            /* One record per chart; data/times/stroke are refreshed by renderCharts() */
+            const charts = {
+                t: { canvas: $("tChart"), unit: "°C", dec: 1 },
+                h: { canvas: $("hChart"), unit: "%", dec: 0 },
+                c: { canvas: $("cChart"), unit: "ppm", dec: 0 },
+            };
+            const M = {
+                l: 36,
+                r: 6,
+                t: 4,
+                b: 15,
+            }; /* chart margins for axis labels */
 
-async function loadHistory() {
-  try {
-    const r = await fetch("/api/history");
-    if (!r.ok) throw new Error(r.status);
-    hist = await r.json();
-    if (!plots) {
-      document.getElementById("charts-wait").style.display = "none";
-      plots = [
-        mkPlot("chart-co2", "CO₂", "ppm", 0),
-        mkPlot("chart-temp", "Температура", "°C", 1),
-        mkPlot("chart-rh", "Влажность", "%", 0),
-      ];
-      addEventListener("resize", () => plots.forEach(p =>
-        p.setSize({ width: p.root.parentElement.clientWidth, height: 150 })));
-    }
-    if (chartRange !== "5m") renderCharts();
-  } catch (e) {}
-}
+            /* Round tick step: 1/2/5 x 10^k covering roughly `raw` */
+            function niceStep(raw) {
+                const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+                const f = raw / pow;
+                return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * pow;
+            }
 
-/* --- калибровка SCD40 --- */
+            const fmtTick = (t) =>
+                new Date(t * 1000).toLocaleTimeString("ru-RU", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                });
 
-async function calibrate() {
-  const ppm = +document.getElementById("frc-ppm").value;
-  if (!confirm(`Калибровка перезапишет заводскую поправку. Датчик должен ` +
-      `не меньше 3 минут работать в воздухе с известной концентрацией ` +
-      `(на улице ~420 ppm). Калибровать на ${ppm} ppm?`)) return;
-  const btn = document.getElementById("frc-btn");
-  btn.disabled = true;
-  try {
-    const r = await fetch("/api/scd40/calibrate", {
-      method: "POST",
-      body: JSON.stringify({ ppm }),
-    });
-    if (!r.ok) throw new Error(await r.text());
-    alert(`Готово. Применённая поправка: ${(await r.json()).correction} ppm`);
-  } catch (e) {
-    alert("Ошибка калибровки: " + e.message);
-  } finally {
-    btn.disabled = false;
-  }
-}
+            function fmtTipTime(t) {
+                const d = new Date(t * 1000);
+                const opts = { hour: "2-digit", minute: "2-digit" };
+                if (period === "5m") opts.second = "2-digit";
+                let s = d.toLocaleTimeString("ru-RU", opts);
+                if (d.toDateString() !== new Date().toDateString()) {
+                    s =
+                        d.toLocaleDateString("ru-RU", {
+                            day: "2-digit",
+                            month: "2-digit",
+                        }) +
+                        " " +
+                        s;
+                }
+                return s;
+            }
 
-/* --- настройки --- */
+            function draw(ch) {
+                const { canvas, data, times } = ch;
+                if (!data) return;
+                const dpr = window.devicePixelRatio || 1;
+                const w = canvas.clientWidth,
+                    h = canvas.clientHeight;
+                if (!w) return;
+                canvas.width = w * dpr;
+                canvas.height = h * dpr;
+                const ctx = canvas.getContext("2d");
+                ctx.scale(dpr, dpr);
+                ctx.clearRect(0, 0, w, h);
+                ctx.font = "10px " + css("--font");
 
-let brightLoaded = false;
+                const pw = w - M.l - M.r,
+                    ph = h - M.t - M.b;
+                ch.pw = pw; /* used by the hover handler to map px -> index */
 
-function brightPreview() {
-  document.getElementById("bright-val").textContent =
-    document.getElementById("bright").value;
-}
+                const vals = data.filter((v) => v != null);
+                if (vals.length < 2) {
+                    ctx.fillStyle = css("--text-faint");
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.fillText("нет данных", w / 2, h / 2);
+                    return;
+                }
 
-async function brightApply() {
-  await fetch("/api/settings", {
-    method: "POST",
-    body: JSON.stringify({ led_brightness: +document.getElementById("bright").value }),
-  });
-}
+                const min = Math.min(...vals),
+                    max = Math.max(...vals);
+                const pad = (max - min) * 0.15 || 1;
+                const lo = min - pad,
+                    hi = max + pad;
+                const x = (i) => M.l + (i / (data.length - 1)) * pw;
+                const y = (v) => M.t + ph - ((v - lo) / (hi - lo)) * ph;
 
-/* --- управление сетями --- */
+                ctx.lineWidth = 1;
+                ctx.fillStyle = css("--text-faint");
 
-let savedNets = [];
+                /* y axis: round-valued gridlines with labels on the left */
+                const ystep = niceStep((hi - lo) / 3);
+                const ydec = ystep < 1 ? 1 : 0;
+                ctx.textAlign = "right";
+                ctx.textBaseline = "middle";
+                for (
+                    let v = Math.ceil(lo / ystep) * ystep;
+                    v <= hi + ystep * 0.01;
+                    v += ystep
+                ) {
+                    const yy = y(v);
+                    ctx.strokeStyle = "rgba(139,152,169,.12)";
+                    ctx.beginPath();
+                    ctx.moveTo(M.l, yy);
+                    ctx.lineTo(w - M.r, yy);
+                    ctx.stroke();
+                    ctx.fillText(v.toFixed(ydec), M.l - 5, yy);
+                }
 
-async function loadNets() {
-  try {
-    const r = await fetch("/api/networks");
-    savedNets = await r.json();
-    document.getElementById("saved-rows").innerHTML = savedNets.length
-      ? kvRows(savedNets.map((n, i) =>
-          [esc(n.ssid), `<span class="del" onclick="delNet(${i})">удалить</span>`]))
-      : '<div class="sub">нет сохранённых сетей</div>';
-  } catch (e) {}
-}
+                /* x axis: time labels aligned to a round step, <= 6 ticks */
+                const tstep = times[1] - times[0];
+                const span = times[times.length - 1] - times[0];
+                const xsteps = [
+                    60, 300, 600, 900, 1800, 3600, 7200, 14400, 21600, 43200,
+                ];
+                const xstep = xsteps.find((s) => span / s <= 6) || 86400;
+                ctx.textAlign = "center";
+                ctx.textBaseline = "top";
+                for (
+                    let tt = Math.ceil(times[0] / xstep) * xstep;
+                    tt <= times[times.length - 1];
+                    tt += xstep
+                ) {
+                    const xx = x((tt - times[0]) / tstep);
+                    if (xx < M.l + 14 || xx > w - 16)
+                        continue; /* label would clip */
+                    ctx.strokeStyle = "rgba(139,152,169,.08)";
+                    ctx.beginPath();
+                    ctx.moveTo(xx, M.t);
+                    ctx.lineTo(xx, M.t + ph);
+                    ctx.stroke();
+                    ctx.fillStyle = css("--text-faint");
+                    ctx.fillText(fmtTick(tt), xx, M.t + ph + 4);
+                }
 
-async function delNet(i) {
-  await fetch("/api/networks/delete", {
-    method: "POST",
-    body: JSON.stringify({ ssid: savedNets[i].ssid }),
-  });
-  loadNets();
-}
+                /* split into contiguous segments: nulls (offline periods) break the line */
+                const segments = [];
+                let seg = [];
+                data.forEach((v, i) => {
+                    if (v == null) {
+                        if (seg.length) segments.push(seg);
+                        seg = [];
+                    } else seg.push([i, v]);
+                });
+                if (seg.length) segments.push(seg);
 
-async function addNet() {
-  const ssid = document.getElementById("net-ssid").value.trim();
-  if (!ssid) return;
-  const r = await fetch("/api/networks/add", {
-    method: "POST",
-    body: JSON.stringify({ ssid, password: document.getElementById("net-pass").value }),
-  });
-  if (r.ok) {
-    document.getElementById("net-ssid").value = "";
-    document.getElementById("net-pass").value = "";
-  } else {
-    alert("Не удалось добавить сеть: " + await r.text());
-  }
-  loadNets();
-}
+                const grad = ctx.createLinearGradient(0, M.t, 0, M.t + ph);
+                grad.addColorStop(0, ch.stroke + "38");
+                grad.addColorStop(1, ch.stroke + "00");
 
-async function doScan() {
-  const btn = document.getElementById("scan-btn");
-  btn.disabled = true;
-  btn.textContent = "Сканирую…";
-  try {
-    const r = await fetch("/api/scan");
-    if (!r.ok) throw new Error(r.status);
-    const list = await r.json();
-    document.getElementById("scan-rows").innerHTML = list.length
-      ? kvRows(list.map(a =>
-          [`<span class="pick" onclick="pickNet(this.textContent)">${esc(a.ssid)}</span>`,
-           `${a.rssi} дБм · ${a.auth}`]))
-      : '<div class="sub">сетей не найдено</div>';
-  } catch (e) {
-    document.getElementById("scan-rows").innerHTML =
-      '<div class="sub">ошибка сканирования</div>';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Сканировать";
-  }
-}
+                for (const s of segments) {
+                    if (s.length < 2) continue;
+                    ctx.beginPath();
+                    ctx.moveTo(x(s[0][0]), M.t + ph);
+                    s.forEach(([i, v]) => ctx.lineTo(x(i), y(v)));
+                    ctx.lineTo(x(s[s.length - 1][0]), M.t + ph);
+                    ctx.closePath();
+                    ctx.fillStyle = grad;
+                    ctx.fill();
 
-function pickNet(ssid) {
-  document.getElementById("net-ssid").value = ssid;
-  document.getElementById("net-pass").focus();
-}
+                    ctx.beginPath();
+                    s.forEach(([i, v], j) =>
+                        j ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)),
+                    );
+                    ctx.strokeStyle = ch.stroke;
+                    ctx.lineWidth = 1.8;
+                    ctx.lineJoin = "round";
+                    ctx.stroke();
+                }
 
-async function doConnect() {
-  await fetch("/api/connect", { method: "POST" });
-}
+                /* last valid point */
+                const last = segments[segments.length - 1];
+                const [li, lv] = last[last.length - 1];
+                ctx.beginPath();
+                ctx.arc(x(li), y(lv), 3, 0, 7);
+                ctx.fillStyle = ch.stroke;
+                ctx.fill();
 
-refresh();
-setInterval(refresh, 1000);
-loadHistory();
-setInterval(loadHistory, 60000);
-loadNets();
-</script>
-</body>
+                /* hover crosshair */
+                if (ch.hover != null && data[ch.hover] != null) {
+                    const hx = x(ch.hover),
+                        hy = y(data[ch.hover]);
+                    ctx.strokeStyle = "rgba(139,152,169,.5)";
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(hx, M.t);
+                    ctx.lineTo(hx, M.t + ph);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.arc(hx, hy, 3.5, 0, 7);
+                    ctx.fillStyle = ch.stroke;
+                    ctx.fill();
+                    ctx.strokeStyle = css("--bg");
+                    ctx.stroke();
+                }
+            }
+
+            /* ---------- chart hover: crosshair + tooltip ---------- */
+            function chartHover(ch, ev) {
+                if (!ch.data || !ch.pw) return;
+                const rect = ch.canvas.getBoundingClientRect();
+                let i = Math.round(
+                    ((ev.clientX - rect.left - M.l) / ch.pw) *
+                        (ch.data.length - 1),
+                );
+                i = Math.max(0, Math.min(ch.data.length - 1, i));
+                if (ch.data[i] == null) {
+                    /* over a gap: snap to the nearest measured point */
+                    let found = -1;
+                    for (let d = 1; d < 30 && found < 0; d++) {
+                        if (ch.data[i - d] != null) found = i - d;
+                        else if (ch.data[i + d] != null) found = i + d;
+                    }
+                    if (found < 0) {
+                        chartLeave(ch);
+                        return;
+                    }
+                    i = found;
+                }
+                ch.hover = i;
+                draw(ch);
+
+                const tip = $("tip");
+                tip.innerHTML =
+                    `<b>${ch.data[i].toFixed(ch.dec)} ${ch.unit}</b>` +
+                    `<span>${fmtTipTime(ch.times[i])}</span>`;
+                tip.style.display = "block";
+                let tx = ev.clientX + 14;
+                if (tx + tip.offsetWidth > innerWidth - 8)
+                    tx = ev.clientX - tip.offsetWidth - 14;
+                tip.style.left = tx + "px";
+                tip.style.top =
+                    Math.max(8, ev.clientY - tip.offsetHeight - 12) + "px";
+            }
+
+            function chartLeave(ch) {
+                ch.hover = null;
+                draw(ch);
+                $("tip").style.display = "none";
+            }
+
+            for (const k in charts) {
+                const ch = charts[k];
+                ch.canvas.addEventListener("pointermove", (ev) =>
+                    chartHover(ch, ev),
+                );
+                ch.canvas.addEventListener("pointerdown", (ev) =>
+                    chartHover(ch, ev),
+                );
+                ch.canvas.addEventListener("pointerleave", () =>
+                    chartLeave(ch),
+                );
+            }
+
+            function trendArrow(el, vals) {
+                if (vals.length < 2) {
+                    el.textContent = "—";
+                    el.className = "trend flat";
+                    return;
+                }
+                const d =
+                    vals[vals.length - 1] - vals[Math.max(0, vals.length - 6)];
+                const eps = (Math.max(...vals) - Math.min(...vals)) * 0.05;
+                el.textContent =
+                    d > eps
+                        ? "↑ " + Math.abs(d).toFixed(1)
+                        : d < -eps
+                          ? "↓ " + Math.abs(d).toFixed(1)
+                          : "→";
+                el.className =
+                    "trend " + (d > eps ? "up" : d < -eps ? "down" : "flat");
+            }
+
+            function renderCharts() {
+                const s = windowSeries();
+                if (!s) return;
+
+                const tv = s.t.filter((v) => v != null),
+                    hv = s.h.filter((v) => v != null),
+                    cv = s.c.filter((v) => v != null);
+                $("tMin").textContent = tv.length
+                    ? Math.min(...tv).toFixed(1) + "°"
+                    : "--";
+                $("tMax").textContent = tv.length
+                    ? Math.max(...tv).toFixed(1) + "°"
+                    : "--";
+                $("hMin").textContent = hv.length
+                    ? Math.min(...hv).toFixed(0) + "%"
+                    : "--";
+                $("hMax").textContent = hv.length
+                    ? Math.max(...hv).toFixed(0) + "%"
+                    : "--";
+                $("cMin").textContent = cv.length
+                    ? Math.min(...cv).toFixed(0)
+                    : "--";
+                $("cMax").textContent = cv.length
+                    ? Math.max(...cv).toFixed(0)
+                    : "--";
+
+                trendArrow($("tTrend"), tv);
+                trendArrow($("hTrend"), hv);
+
+                charts.t.data = s.t;
+                charts.h.data = s.h;
+                charts.c.data = s.c;
+                charts.t.stroke = css("--temp");
+                charts.h.stroke = css("--hum");
+                charts.c.stroke = cv.length
+                    ? co2Level(cv[cv.length - 1]).color
+                    : css("--co2");
+                for (const k in charts) {
+                    charts[k].times = s.times;
+                    draw(charts[k]);
+                }
+            }
+
+            $("periodSeg").addEventListener("click", (e) => {
+                const btn = e.target.closest("button");
+                if (!btn) return;
+                period = btn.dataset.p;
+                document
+                    .querySelectorAll("#periodSeg button")
+                    .forEach((b) => b.classList.toggle("active", b === btn));
+                renderCharts();
+            });
+
+            /* ---------- wifi: scan + connect ---------- */
+            const rssiLevel = (r) =>
+                r > -55 ? 4 : r > -67 ? 3 : r > -78 ? 2 : 1;
+            const rssiIcon = (r) =>
+                `<span class="rssi" data-l="${rssiLevel(r)}"><i></i><i></i><i></i><i></i></span>`;
+
+            $("scanBtn").addEventListener("click", async () => {
+                const btn = $("scanBtn"),
+                    list = $("wifiList");
+                btn.disabled = true;
+                list.innerHTML =
+                    '<div class="scan-hint"><span class="spin"></span>Сканирование…</div>';
+                try {
+                    const r = await fetch("/api/scan");
+                    if (!r.ok) throw new Error(r.status);
+                    const nets = await r.json();
+                    list.innerHTML = nets.length
+                        ? ""
+                        : '<div class="scan-hint">Сетей не найдено</div>';
+                    nets.forEach((n) => {
+                        const current =
+                            lastStatus &&
+                            !lastStatus.ap_mode &&
+                            n.ssid === lastStatus.ssid;
+                        const el = document.createElement("div");
+                        el.className =
+                            "wifi-item" + (current ? " current" : "");
+                        el.innerHTML = `${rssiIcon(n.rssi)}
+        <span class="ssid">${esc(n.ssid)}</span>
+        <span class="meta">${n.rssi} dBm · ${esc(n.auth)}</span>
+        <span class="lock">${current ? "✓" : n.auth !== "open" ? "🔒" : ""}</span>`;
+                        el.addEventListener("click", () =>
+                            current
+                                ? toast("Уже подключено к " + n.ssid)
+                                : openWifiModal(n),
+                        );
+                        list.appendChild(el);
+                    });
+                } catch (e) {
+                    list.innerHTML =
+                        '<div class="scan-hint">Ошибка сканирования</div>';
+                }
+                btn.disabled = false;
+            });
+
+            let modalNet = null;
+            function openWifiModal(n) {
+                modalNet = n;
+                $("mSsid").textContent = n.ssid;
+                $("mMeta").textContent =
+                    (n.auth === "open"
+                        ? "Открытая сеть"
+                        : "Защищённая (" + n.auth + ")") +
+                    " · " +
+                    n.rssi +
+                    " dBm";
+                $("mPass").value = "";
+                $("mPass").style.display = n.auth === "open" ? "none" : "";
+                $("wifiModal").classList.add("show");
+                if (n.auth !== "open") setTimeout(() => $("mPass").focus(), 60);
+            }
+            $("mCancel").addEventListener("click", () =>
+                $("wifiModal").classList.remove("show"),
+            );
+            $("wifiModal").addEventListener("click", (e) => {
+                if (e.target === $("wifiModal"))
+                    $("wifiModal").classList.remove("show");
+            });
+            $("mConnect").addEventListener("click", async () => {
+                const btn = $("mConnect");
+                btn.disabled = true;
+                btn.textContent = "Сохранение…";
+                try {
+                    const r = await fetch("/api/networks/add", {
+                        method: "POST",
+                        body: JSON.stringify({
+                            ssid: modalNet.ssid,
+                            password: $("mPass").value,
+                        }),
+                    });
+                    if (!r.ok) throw new Error(await r.text());
+                    $("wifiModal").classList.remove("show");
+                    toast(
+                        "Сеть сохранена, подключаюсь к " + modalNet.ssid + "…",
+                    );
+                    loadNets();
+                    /* the reply may be lost if Wi-Fi switches right away - that's fine */
+                    fetch("/api/connect", { method: "POST" }).catch(() => {});
+                } catch (e) {
+                    toast("Не удалось сохранить сеть: " + e.message);
+                }
+                btn.disabled = false;
+                btn.textContent = "Подключить";
+            });
+
+            /* ---------- wifi: saved networks ---------- */
+            let savedNets = [];
+
+            async function loadNets() {
+                try {
+                    const r = await fetch("/api/networks");
+                    savedNets = await r.json();
+                    const list = $("savedList");
+                    if (!savedNets.length) {
+                        list.innerHTML =
+                            '<div class="scan-hint">Нет сохранённых сетей</div>';
+                        return;
+                    }
+                    list.innerHTML = "";
+                    savedNets.forEach((n, i) => {
+                        const current =
+                            lastStatus &&
+                            !lastStatus.ap_mode &&
+                            n.ssid === lastStatus.ssid;
+                        const el = document.createElement("div");
+                        el.className =
+                            "wifi-item" + (current ? " current" : "");
+                        el.style.cursor = "default";
+                        el.innerHTML = `<span class="ssid">${esc(n.ssid)}</span>
+        <span class="lock">${current ? "✓" : ""}</span>
+        <span class="del" title="Удалить">✕</span>`;
+                        el.querySelector(".del").addEventListener("click", () =>
+                            delNet(i),
+                        );
+                        list.appendChild(el);
+                    });
+                } catch (e) {}
+            }
+
+            async function delNet(i) {
+                await fetch("/api/networks/delete", {
+                    method: "POST",
+                    body: JSON.stringify({ ssid: savedNets[i].ssid }),
+                });
+                toast("Сеть удалена: " + savedNets[i].ssid);
+                loadNets();
+            }
+
+            $("reconnBtn").addEventListener("click", () => {
+                toast("Переподключение…");
+                fetch("/api/connect", { method: "POST" }).catch(() => {});
+            });
+
+            /* ---------- settings ---------- */
+            $("briRange").addEventListener(
+                "input",
+                (e) => ($("briVal").textContent = e.target.value),
+            );
+            $("briRange").addEventListener("change", async (e) => {
+                await fetch("/api/settings", {
+                    method: "POST",
+                    body: JSON.stringify({ led_brightness: +e.target.value }),
+                });
+                toast("Яркость сохранена");
+            });
+
+            $("frcBtn").addEventListener("click", async () => {
+                const ppm = +$("frcPpm").value;
+                if (
+                    !confirm(
+                        `Калибровка перезапишет заводскую поправку. Датчик должен ` +
+                            `не меньше 3 минут работать в воздухе с известной концентрацией ` +
+                            `(на улице ~420 ppm). Калибровать на ${ppm} ppm?`,
+                    )
+                )
+                    return;
+                const btn = $("frcBtn");
+                btn.disabled = true;
+                try {
+                    const r = await fetch("/api/scd40/calibrate", {
+                        method: "POST",
+                        body: JSON.stringify({ ppm }),
+                    });
+                    if (!r.ok) throw new Error(await r.text());
+                    toast(
+                        `Готово. Применённая поправка: ${(await r.json()).correction} ppm`,
+                    );
+                } catch (e) {
+                    toast("Ошибка калибровки: " + e.message);
+                } finally {
+                    btn.disabled = false;
+                }
+            });
+
+            /* ---------- main loop ---------- */
+            refresh();
+            setInterval(refresh, 1000);
+            loadHistory();
+            setInterval(loadHistory, 60000);
+            loadNets();
+            window.addEventListener("resize", renderCharts);
+        </script>
+    </body>
 </html>
