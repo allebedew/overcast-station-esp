@@ -278,6 +278,41 @@
             .seg button:not(.active):hover {
                 color: var(--text);
             }
+            .seg.lang button {
+                padding: 4px 9px;
+                min-height: 26px;
+                font-size: 11px;
+            }
+            .icon-btn {
+                width: 34px;
+                height: 34px;
+                border-radius: 9px;
+                border: 1px solid var(--border);
+                background: var(--panel);
+                color: var(--text-dim);
+                cursor: pointer;
+                display: grid;
+                place-items: center;
+                transition:
+                    border-color 0.15s,
+                    background 0.15s,
+                    color 0.15s;
+            }
+            .icon-btn svg {
+                display: block;
+            }
+            .icon-btn:hover {
+                border-color: var(--accent);
+                color: var(--text);
+            }
+            .icon-btn.active {
+                background: var(--accent);
+                border-color: var(--accent);
+                color: #fff;
+            }
+            body:not(.show-panels) .grid-bottom {
+                display: none;
+            }
 
             /* --- Key/value table --- */
             .kv {
@@ -634,10 +669,37 @@
             <header>
                 <div class="logo">🌡</div>
                 <div>
-                    <h1>Метеостанция</h1>
+                    <h1 data-i18n="appName">Метеостанция</h1>
                     <div class="sub" id="hdrSub">weather.local · ESP32-C6</div>
                 </div>
                 <div class="spacer"></div>
+                <div class="seg lang" id="langSeg">
+                    <button data-l="ru">RU</button>
+                    <button data-l="en">EN</button>
+                </div>
+                <button
+                    class="icon-btn"
+                    id="panelsBtn"
+                    data-i18n-title="panelsToggle"
+                    title="Показать/скрыть систему, Wi-Fi и настройки"
+                >
+                    <!-- flat gear (Feather Icons, MIT) -->
+                    <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <circle cx="12" cy="12" r="3" />
+                        <path
+                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+                        />
+                    </svg>
+                </button>
                 <div class="conn">
                     <span class="dot"></span><span id="connText">Онлайн</span>
                 </div>
@@ -645,11 +707,15 @@
 
             <!-- PERIOD SWITCH -->
             <div class="period-bar">
-                <span class="label">Показания датчиков</span>
+                <span class="label" data-i18n="sensorReadings"
+                    >Показания датчиков</span
+                >
                 <div class="seg" id="periodSeg">
-                    <button data-p="5m">5 мин</button>
-                    <button data-p="1h">1 час</button>
-                    <button data-p="1d" class="active">Сутки</button>
+                    <button data-p="5m" class="active" data-i18n="p5m">
+                        5 мин
+                    </button>
+                    <button data-p="1h" data-i18n="p1h">1 час</button>
+                    <button data-p="1d" data-i18n="p1d">Сутки</button>
                 </div>
             </div>
 
@@ -657,7 +723,8 @@
             <div class="grid-sensors">
                 <div class="card sensor">
                     <h2>
-                        <span class="ic">🌡</span> Температура
+                        <span class="ic">🌡</span>
+                        <span data-i18n="temperature">Температура</span>
                         <span class="trend flat" id="tTrend">—</span>
                     </h2>
                     <div class="reading">
@@ -665,14 +732,20 @@
                         ><span class="unit">°C</span>
                     </div>
                     <div class="minmax">
-                        <span>мин <b id="tMin">--</b></span
-                        ><span>макс <b id="tMax">--</b></span>
+                        <span
+                            ><span data-i18n="min">мин</span>
+                            <b id="tMin">--</b></span
+                        ><span
+                            ><span data-i18n="max">макс</span>
+                            <b id="tMax">--</b></span
+                        >
                     </div>
                     <canvas id="tChart"></canvas>
                 </div>
                 <div class="card sensor">
                     <h2>
-                        <span class="ic">💧</span> Влажность
+                        <span class="ic">💧</span>
+                        <span data-i18n="humidity">Влажность</span>
                         <span class="trend flat" id="hTrend">—</span>
                     </h2>
                     <div class="reading">
@@ -680,23 +753,35 @@
                         ><span class="unit">%</span>
                     </div>
                     <div class="minmax">
-                        <span>мин <b id="hMin">--</b></span
-                        ><span>макс <b id="hMax">--</b></span>
+                        <span
+                            ><span data-i18n="min">мин</span>
+                            <b id="hMin">--</b></span
+                        ><span
+                            ><span data-i18n="max">макс</span>
+                            <b id="hMax">--</b></span
+                        >
                     </div>
                     <canvas id="hChart"></canvas>
                 </div>
                 <div class="card sensor">
                     <h2>
                         <span class="ic">☁️</span> CO₂
-                        <span class="badge off" id="cBadge">Нет данных</span>
+                        <span class="badge off" id="cBadge" data-i18n="noData"
+                            >Нет данных</span
+                        >
                     </h2>
                     <div class="reading">
                         <span class="value" id="cVal">--</span
                         ><span class="unit">ppm</span>
                     </div>
                     <div class="minmax">
-                        <span>мин <b id="cMin">--</b></span
-                        ><span>макс <b id="cMax">--</b></span>
+                        <span
+                            ><span data-i18n="min">мин</span>
+                            <b id="cMin">--</b></span
+                        ><span
+                            ><span data-i18n="max">макс</span>
+                            <b id="cMax">--</b></span
+                        >
                     </div>
                     <canvas id="cChart"></canvas>
                 </div>
@@ -706,11 +791,14 @@
             <div class="grid-bottom">
                 <!-- SYSTEM -->
                 <div class="card">
-                    <h2><span class="ic">⚙️</span> Система</h2>
+                    <h2>
+                        <span class="ic">⚙️</span>
+                        <span data-i18n="system">Система</span>
+                    </h2>
                     <table class="kv">
                         <tbody id="sysRows">
                             <tr>
-                                <td>Загрузка…</td>
+                                <td data-i18n="loading">Загрузка…</td>
                                 <td></td>
                             </tr>
                         </tbody>
@@ -719,23 +807,35 @@
 
                 <!-- WIFI -->
                 <div class="card">
-                    <h2><span class="ic">📶</span> Wi-Fi сети</h2>
-                    <button class="btn block" id="scanBtn">
+                    <h2>
+                        <span class="ic">📶</span>
+                        <span data-i18n="wifiNetworks">Wi-Fi сети</span>
+                    </h2>
+                    <button
+                        class="btn block"
+                        id="scanBtn"
+                        data-i18n="scanNetworks"
+                    >
                         Сканировать сети
                     </button>
                     <div class="wifi-list" id="wifiList">
-                        <div class="scan-hint">
+                        <div class="scan-hint" data-i18n="scanHint">
                             Нажмите «Сканировать», чтобы найти доступные сети
                         </div>
                     </div>
-                    <div class="saved-head">Сохранённые сети</div>
+                    <div class="saved-head" data-i18n="savedNetworks">
+                        Сохранённые сети
+                    </div>
                     <div class="wifi-list" id="savedList">
-                        <div class="scan-hint">загрузка…</div>
+                        <div class="scan-hint" data-i18n="loading">
+                            Загрузка…
+                        </div>
                     </div>
                     <button
                         class="btn block"
                         id="reconnBtn"
                         style="margin-top: 10px"
+                        data-i18n="reconnect"
                     >
                         Переподключиться
                     </button>
@@ -743,11 +843,15 @@
 
                 <!-- SETTINGS -->
                 <div class="card">
-                    <h2><span class="ic">🎛</span> Настройки</h2>
+                    <h2>
+                        <span class="ic">🎛</span>
+                        <span data-i18n="settings">Настройки</span>
+                    </h2>
 
                     <div class="set-row">
                         <div class="head">
-                            <span class="name">Яркость светодиода</span
+                            <span class="name" data-i18n="ledBrightness"
+                                >Яркость светодиода</span
                             ><span class="val" id="briVal">—</span>
                         </div>
                         <input
@@ -761,7 +865,8 @@
 
                     <div class="set-row">
                         <div class="head">
-                            <span class="name">Калибровка CO₂ (FRC)</span
+                            <span class="name" data-i18n="frcTitle"
+                                >Калибровка CO₂ (FRC)</span
                             ><span class="val">ppm</span>
                         </div>
                         <div class="frc-row">
@@ -772,13 +877,21 @@
                                 min="400"
                                 max="2000"
                             />
-                            <button class="btn" id="frcBtn">Калибровать</button>
+                            <button
+                                class="btn"
+                                id="frcBtn"
+                                data-i18n="calibrate"
+                            >
+                                Калибровать
+                            </button>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <footer>Метеостанция · ESP32-C6 · http://weather.local</footer>
+            <footer data-i18n="footer">
+                Метеостанция · ESP32-C6 · http://weather.local
+            </footer>
         </div>
 
         <!-- WIFI CONNECT MODAL -->
@@ -790,12 +903,19 @@
                     type="password"
                     id="mPass"
                     placeholder="Пароль сети"
+                    data-i18n-ph="netPassword"
                     autocomplete="off"
                     maxlength="64"
                 />
                 <div class="row">
-                    <button class="btn" id="mCancel">Отмена</button>
-                    <button class="btn primary" id="mConnect">
+                    <button class="btn" id="mCancel" data-i18n="cancel">
+                        Отмена
+                    </button>
+                    <button
+                        class="btn primary"
+                        id="mConnect"
+                        data-i18n="connect"
+                    >
                         Подключить
                     </button>
                 </div>
@@ -825,6 +945,221 @@
                     .getPropertyValue(v)
                     .trim();
 
+            /* ---------- i18n ---------- */
+            const I18N = {
+                ru: {
+                    appName: "Метеостанция",
+                    online: "Онлайн",
+                    noLink: "Нет связи",
+                    sensorReadings: "Показания датчиков",
+                    p5m: "5м",
+                    p1h: "1ч",
+                    p1d: "24ч",
+                    temperature: "Температура",
+                    humidity: "Влажность",
+                    min: "мин",
+                    max: "макс",
+                    noData: "Нет данных",
+                    system: "Система",
+                    loading: "Загрузка…",
+                    wifiNetworks: "Wi-Fi сети",
+                    scanNetworks: "Сканировать сети",
+                    scanHint:
+                        "Нажмите «Сканировать», чтобы найти доступные сети",
+                    savedNetworks: "Сохранённые сети",
+                    reconnect: "Переподключиться",
+                    settings: "Настройки",
+                    ledBrightness: "Яркость светодиода",
+                    frcTitle: "Калибровка CO₂ (FRC)",
+                    calibrate: "Калибровать",
+                    footer: "Метеостанция · ESP32-C6 · http://weather.local",
+                    cancel: "Отмена",
+                    connect: "Подключить",
+                    netPassword: "Пароль сети",
+                    mode: "Режим",
+                    apMode: "Точка доступа",
+                    network: "Сеть",
+                    ipAddr: "IP-адрес",
+                    channel: "Канал",
+                    clients: "Клиентов",
+                    client: "Клиент",
+                    wifiNet: "Сеть Wi-Fi",
+                    signal: "Сигнал",
+                    phy: "Стандарт",
+                    chip: "Чип",
+                    cpuLoad: "Загрузка CPU",
+                    heapMem: "Память (heap)",
+                    heapMin: "Мин. heap / блок",
+                    chipTemp: "Температура чипа",
+                    tasksConns: "Задачи / Соединения",
+                    uptime: "Аптайм",
+                    resetReason: "Причина перезагрузки",
+                    timeUtc: "Время (UTC)",
+                    firmware: "Прошивка",
+                    uD: "д",
+                    uH: "ч",
+                    uM: "м",
+                    uS: "с",
+                    kb: "КБ",
+                    mhz: "МГц",
+                    chartNoData: "нет данных",
+                    co2Good: "Норма",
+                    co2Warn: "Повышен",
+                    co2Bad: "Проветрить!",
+                    scanning: "Сканирование…",
+                    noNetsFound: "Сетей не найдено",
+                    scanError: "Ошибка сканирования",
+                    alreadyConn: "Уже подключено к ",
+                    openNet: "Открытая сеть",
+                    securedNet: "Защищённая",
+                    saving: "Сохранение…",
+                    netSaved: "Сеть сохранена, подключаюсь к ",
+                    netSaveFail: "Не удалось сохранить сеть: ",
+                    noSavedNets: "Нет сохранённых сетей",
+                    delete: "Удалить",
+                    netRemoved: "Сеть удалена: ",
+                    reconnecting: "Переподключение…",
+                    brightSaved: "Яркость сохранена",
+                    frcConfirm:
+                        "Калибровка перезапишет заводскую поправку. Датчик должен " +
+                        "не меньше 3 минут работать в воздухе с известной концентрацией " +
+                        "(на улице ~420 ppm). Калибровать на {ppm} ppm?",
+                    frcDone: "Готово. Применённая поправка: ",
+                    frcError: "Ошибка калибровки: ",
+                    panelsToggle: "Показать/скрыть систему, Wi-Fi и настройки",
+                },
+                en: {
+                    appName: "Weather Station",
+                    online: "Online",
+                    noLink: "No link",
+                    sensorReadings: "Sensor readings",
+                    p5m: "5m",
+                    p1h: "1h",
+                    p1d: "24h",
+                    temperature: "Temperature",
+                    humidity: "Humidity",
+                    min: "min",
+                    max: "max",
+                    noData: "No data",
+                    system: "System",
+                    loading: "Loading…",
+                    wifiNetworks: "Wi-Fi networks",
+                    scanNetworks: "Scan networks",
+                    scanHint: "Press “Scan” to find nearby networks",
+                    savedNetworks: "Saved networks",
+                    reconnect: "Reconnect",
+                    settings: "Settings",
+                    ledBrightness: "LED brightness",
+                    frcTitle: "CO₂ calibration (FRC)",
+                    calibrate: "Calibrate",
+                    footer: "Weather Station · ESP32-C6 · http://weather.local",
+                    cancel: "Cancel",
+                    connect: "Connect",
+                    netPassword: "Network password",
+                    mode: "Mode",
+                    apMode: "Access point",
+                    network: "Network",
+                    ipAddr: "IP address",
+                    channel: "Channel",
+                    clients: "Clients",
+                    client: "Client",
+                    wifiNet: "Wi-Fi network",
+                    signal: "Signal",
+                    phy: "Standard",
+                    chip: "Chip",
+                    cpuLoad: "CPU load",
+                    heapMem: "Memory (heap)",
+                    heapMin: "Min heap / block",
+                    chipTemp: "Chip temperature",
+                    tasksConns: "Tasks / Connections",
+                    uptime: "Uptime",
+                    resetReason: "Reset reason",
+                    timeUtc: "Time (UTC)",
+                    firmware: "Firmware",
+                    uD: "d",
+                    uH: "h",
+                    uM: "m",
+                    uS: "s",
+                    kb: "KB",
+                    mhz: "MHz",
+                    chartNoData: "no data",
+                    co2Good: "Good",
+                    co2Warn: "Elevated",
+                    co2Bad: "Ventilate!",
+                    scanning: "Scanning…",
+                    noNetsFound: "No networks found",
+                    scanError: "Scan error",
+                    alreadyConn: "Already connected to ",
+                    openNet: "Open network",
+                    securedNet: "Secured",
+                    saving: "Saving…",
+                    netSaved: "Network saved, connecting to ",
+                    netSaveFail: "Failed to save network: ",
+                    noSavedNets: "No saved networks",
+                    delete: "Delete",
+                    netRemoved: "Network removed: ",
+                    reconnecting: "Reconnecting…",
+                    brightSaved: "Brightness saved",
+                    frcConfirm:
+                        "Calibration overwrites the factory offset. The sensor must " +
+                        "run for at least 3 minutes in air with a known CO₂ " +
+                        "concentration (~420 ppm outdoors). Calibrate to {ppm} ppm?",
+                    frcDone: "Done. Applied correction: ",
+                    frcError: "Calibration error: ",
+                    panelsToggle: "Show/hide system, Wi-Fi and settings",
+                },
+            };
+            let lang =
+                localStorage.getItem("lang") ||
+                (navigator.language && navigator.language.startsWith("ru")
+                    ? "ru"
+                    : "en");
+            const t = (k) => I18N[lang][k] ?? I18N.ru[k] ?? k;
+            const locale = () => (lang === "ru" ? "ru-RU" : "en-GB");
+
+            function applyLang() {
+                document.documentElement.lang = lang;
+                document.title = t("appName");
+                document
+                    .querySelectorAll("[data-i18n]")
+                    .forEach((el) => (el.textContent = t(el.dataset.i18n)));
+                document
+                    .querySelectorAll("[data-i18n-ph]")
+                    .forEach((el) => (el.placeholder = t(el.dataset.i18nPh)));
+                document
+                    .querySelectorAll("[data-i18n-title]")
+                    .forEach((el) => (el.title = t(el.dataset.i18nTitle)));
+                document
+                    .querySelectorAll("#langSeg button")
+                    .forEach((b) =>
+                        b.classList.toggle("active", b.dataset.l === lang),
+                    );
+                setStale(document.body.classList.contains("stale"));
+                renderCharts();
+            }
+
+            $("langSeg").addEventListener("click", (e) => {
+                const btn = e.target.closest("button");
+                if (!btn || btn.dataset.l === lang) return;
+                lang = btn.dataset.l;
+                localStorage.setItem("lang", lang);
+                applyLang();
+                loadNets(); /* re-render list hints and delete tooltips */
+            });
+
+            /* ---------- collapsible system panels (hidden by default) ---------- */
+            let panelsShown = localStorage.getItem("panels") === "1";
+            function applyPanels() {
+                document.body.classList.toggle("show-panels", panelsShown);
+                $("panelsBtn").classList.toggle("active", panelsShown);
+            }
+            $("panelsBtn").addEventListener("click", () => {
+                panelsShown = !panelsShown;
+                localStorage.setItem("panels", panelsShown ? "1" : "0");
+                applyPanels();
+            });
+            applyPanels();
+
             function esc(s) {
                 return String(s).replace(
                     /[&<>"']/g,
@@ -844,12 +1179,12 @@
                     h = Math.floor((s % 86400) / 3600),
                     m = Math.floor((s % 3600) / 60),
                     sec = s % 60;
-                if (d) return `${d}д ${h}ч ${m}м`;
-                if (h) return `${h}ч ${m}м ${sec}с`;
-                return `${m}м ${sec}с`;
+                if (d) return `${d}${t("uD")} ${h}${t("uH")} ${m}${t("uM")}`;
+                if (h) return `${h}${t("uH")} ${m}${t("uM")} ${sec}${t("uS")}`;
+                return `${m}${t("uM")} ${sec}${t("uS")}`;
             }
 
-            const fmtKib = (b) => (b / 1024).toFixed(0) + " КБ";
+            const fmtKib = (b) => (b / 1024).toFixed(0) + " " + t("kb");
 
             function kvRows(rows) {
                 return rows
@@ -870,16 +1205,20 @@
             /* ---------- CO2 level ---------- */
             function co2Level(ppm) {
                 if (ppm < 800)
-                    return { cls: "good", text: "Норма", color: css("--co2") };
+                    return {
+                        cls: "good",
+                        text: t("co2Good"),
+                        color: css("--co2"),
+                    };
                 if (ppm < 1200)
                     return {
                         cls: "warn",
-                        text: "Повышен",
+                        text: t("co2Warn"),
                         color: css("--co2-warn"),
                     };
                 return {
                     cls: "bad",
-                    text: "Проветрить!",
+                    text: t("co2Bad"),
                     color: css("--co2-bad"),
                 };
             }
@@ -896,9 +1235,9 @@
                         ? Math.round((Date.now() - lastOk) / 1000)
                         : null;
                     $("connText").textContent =
-                        "Нет связи" + (ago ? ` · ${ago} с` : "");
+                        t("noLink") + (ago ? ` · ${ago} ${t("uS")}` : "");
                 } else {
-                    $("connText").textContent = "Онлайн";
+                    $("connText").textContent = t("online");
                 }
             }
 
@@ -912,7 +1251,7 @@
                     setStale(false);
 
                     $("hdrSub").textContent =
-                        (s.ap_mode ? "Точка доступа " : "") +
+                        (s.ap_mode ? t("apMode") + " " : "") +
                         s.ssid +
                         " · " +
                         s.ip;
@@ -929,37 +1268,32 @@
                         b.textContent = l.text;
                     } else {
                         b.className = "badge off";
-                        b.textContent = "Нет данных";
+                        b.textContent = t("noData");
                     }
-                    pushLive(s);
 
                     /* system card */
                     let rows;
                     if (s.ap_mode) {
                         rows = [
-                            ["Режим", "Точка доступа"],
-                            ["Сеть", esc(s.ssid)],
-                            ["IP-адрес", s.ip],
-                            ["Канал", s.channel],
+                            [t("mode"), t("apMode")],
+                            [t("network"), esc(s.ssid)],
+                            [t("ipAddr"), s.ip],
+                            [t("channel"), s.channel],
                             ["MAC", s.mac],
-                            ["Клиентов", s.clients.length],
+                            [t("clients"), s.clients.length],
                         ];
                         s.clients.forEach((c, i) =>
                             rows.push([
-                                `Клиент ${i + 1}`,
+                                `${t("client")} ${i + 1}`,
                                 `${c.mac} · ${c.rssi} dBm`,
                             ]),
                         );
                     } else {
-                        const pct = Math.min(
-                            100,
-                            Math.max(0, (s.rssi + 100) * 1.6),
-                        ).toFixed(0);
                         rows = [
-                            ["Сеть Wi-Fi", `${esc(s.ssid)}`],
-                            ["Сигнал", `${s.rssi} dBm (ch ${s.channel})`],
-                            ["Стандарт", `${s.phy}`],
-                            ["IP-адрес", s.ip],
+                            [t("wifiNet"), `${esc(s.ssid)}`],
+                            [t("signal"), `${s.rssi} dBm (ch ${s.channel})`],
+                            [t("phy"), `${s.phy}`],
+                            [t("ipAddr"), s.ip],
                         ];
                     }
                     const heapPct = (
@@ -967,24 +1301,27 @@
                         s.heap_total
                     ).toFixed(0);
                     rows.push(
-                        ["Чип", `ESP32-C6 ${s.chip_rev} ${s.cpu_mhz} МГц`],
-                        ["Загрузка CPU", s.cpu_load + "%"],
                         [
-                            "Память (heap)",
+                            t("chip"),
+                            `ESP32-C6 ${s.chip_rev} ${s.cpu_mhz} ${t("mhz")}`,
+                        ],
+                        [t("cpuLoad"), s.cpu_load + "%"],
+                        [
+                            t("heapMem"),
                             `${fmtKib(s.heap_free)} / ${fmtKib(s.heap_total)}`,
                         ],
                         [
-                            "Мин. heap / блок",
+                            t("heapMin"),
                             `${fmtKib(s.heap_min)} / ${fmtKib(s.heap_largest)}`,
                         ],
-                        ["Температура чипа", s.temp.toFixed(1) + " °C"],
-                        ["Задачи / Cоединения", `${s.tasks}/${s.http_conns}`],
+                        [t("chipTemp"), s.temp.toFixed(1) + " °C"],
+                        [t("tasksConns"), `${s.tasks}/${s.http_conns}`],
                         ["NVS", `${s.nvs_used}/${s.nvs_total}`],
-                        ["Аптайм", fmtUptime(s.uptime)],
-                        ["Причина перезагрузки", s.reset_reason],
-                        ["Время (UTC)", s.time],
+                        [t("uptime"), fmtUptime(s.uptime)],
+                        [t("resetReason"), s.reset_reason],
+                        [t("timeUtc"), s.time],
                         [
-                            "Прошивка",
+                            t("firmware"),
                             `${esc(s.app_version)}, ${esc(s.build)}, idf: ${esc(s.idf_ver)}`,
                         ],
                     );
@@ -1002,38 +1339,32 @@
             }
 
             /* ---------- charts (canvas, no libraries) ---------- */
-            let period = "1d"; /* '5m' | '1h' | '1d' */
-            let hist = null; /* last /api/history response (1-min points) */
+            /* Each period maps to a server-side ring buffer (/api/history?p=):
+             * 5m = 1 s samples, 1h = 5 s points, 1d = 1 min points. The
+             * active tier is re-fetched at its own cadence. */
+            let period = "5m"; /* '5m' | '1h' | '1d' */
+            const TIERS = {
+                "5m": { len: 300, refresh: 2 },
+                "1h": { len: 720, refresh: 10 },
+                "1d": { len: 1440, refresh: 60 },
+            };
+            const hists = { "5m": null, "1h": null, "1d": null };
 
-            /* Live readings for the 5-min window, fed by the 1 s status polling */
-            const live = { x: [], co2: [], temp: [], rh: [] };
-            const LIVE_SPAN = 300;
-
-            function pushLive(s) {
-                if (!s.scd40_ok) return;
-                const t = Math.floor(Date.now() / 1000);
-                if (live.x.length && live.x[live.x.length - 1] === t) return;
-                live.x.push(t);
-                live.co2.push(s.co2);
-                live.temp.push(s.air_temp);
-                live.rh.push(s.air_rh);
-                while (live.x.length && live.x[0] < t - LIVE_SPAN) {
-                    live.x.shift();
-                    live.co2.shift();
-                    live.temp.shift();
-                    live.rh.shift();
-                }
-                renderCharts();
-            }
-
-            async function loadHistory() {
+            async function loadHistory(p) {
                 try {
-                    const r = await fetch("/api/history");
+                    const r = await fetch("/api/history?p=" + p);
                     if (!r.ok) throw new Error(r.status);
-                    hist = await r.json();
-                    renderCharts();
+                    hists[p] = await r.json();
+                    if (p === period) renderCharts();
                 } catch (e) {}
             }
+
+            let histTick = 0;
+            setInterval(() => {
+                histTick++;
+                if (histTick % TIERS[period].refresh === 0)
+                    loadHistory(period);
+            }, 1000);
 
             /* Tail of arr left-padded with nulls to exactly n points. */
             function padTo(arr, n) {
@@ -1044,40 +1375,20 @@
             }
 
             /* Data arrays for the current window; null = gap. `times` holds the unix
-             * timestamp of every slot (uniform grid: 1 s live / 1 min history). */
+             * timestamp of every slot (uniform grid of `period` seconds). */
             function windowSeries() {
-                if (period === "5m") {
-                    /* per-second grid, live points land on their own seconds */
-                    const now = Math.floor(Date.now() / 1000);
-                    const t0 = now - LIVE_SPAN + 1;
-                    const mk = (vals) => {
-                        const out = Array(LIVE_SPAN).fill(null);
-                        live.x.forEach((t, j) => {
-                            const k = t - t0;
-                            if (k >= 0 && k < LIVE_SPAN) out[k] = vals[j];
-                        });
-                        return out;
-                    };
-                    return {
-                        t: mk(live.temp),
-                        h: mk(live.rh),
-                        c: mk(live.co2),
-                        times: Array.from(
-                            { length: LIVE_SPAN },
-                            (_, i) => t0 + i,
-                        ),
-                    };
-                }
-                if (!hist) return null;
-                const n = period === "1h" ? 60 : 1440;
-                const nowM = Math.floor(Date.now() / 60000) * 60;
+                const hd = hists[period];
+                if (!hd) return null;
+                const step = hd.period;
+                const n = TIERS[period].len;
+                const now = Math.floor(Date.now() / 1000 / step) * step;
                 return {
-                    t: padTo(hist.temp, n),
-                    h: padTo(hist.rh, n),
-                    c: padTo(hist.co2, n),
+                    t: padTo(hd.temp, n),
+                    h: padTo(hd.rh, n),
+                    c: padTo(hd.co2, n),
                     times: Array.from(
                         { length: n },
-                        (_, i) => nowM - (n - 1 - i) * 60,
+                        (_, i) => now - (n - 1 - i) * step,
                     ),
                 };
             }
@@ -1102,20 +1413,20 @@
                 return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * pow;
             }
 
-            const fmtTick = (t) =>
-                new Date(t * 1000).toLocaleTimeString("ru-RU", {
+            const fmtTick = (ts) =>
+                new Date(ts * 1000).toLocaleTimeString(locale(), {
                     hour: "2-digit",
                     minute: "2-digit",
                 });
 
-            function fmtTipTime(t) {
-                const d = new Date(t * 1000);
+            function fmtTipTime(ts) {
+                const d = new Date(ts * 1000);
                 const opts = { hour: "2-digit", minute: "2-digit" };
-                if (period === "5m") opts.second = "2-digit";
-                let s = d.toLocaleTimeString("ru-RU", opts);
+                if (period !== "1d") opts.second = "2-digit";
+                let s = d.toLocaleTimeString(locale(), opts);
                 if (d.toDateString() !== new Date().toDateString()) {
                     s =
-                        d.toLocaleDateString("ru-RU", {
+                        d.toLocaleDateString(locale(), {
                             day: "2-digit",
                             month: "2-digit",
                         }) +
@@ -1148,7 +1459,7 @@
                     ctx.fillStyle = css("--text-faint");
                     ctx.textAlign = "center";
                     ctx.textBaseline = "middle";
-                    ctx.fillText("нет данных", w / 2, h / 2);
+                    ctx.fillText(t("chartNoData"), w / 2, h / 2);
                     return;
                 }
 
@@ -1396,7 +1707,8 @@
                 document
                     .querySelectorAll("#periodSeg button")
                     .forEach((b) => b.classList.toggle("active", b === btn));
-                renderCharts();
+                renderCharts(); /* cached data first, if any */
+                loadHistory(period);
             });
 
             /* ---------- wifi: scan + connect ---------- */
@@ -1410,14 +1722,16 @@
                     list = $("wifiList");
                 btn.disabled = true;
                 list.innerHTML =
-                    '<div class="scan-hint"><span class="spin"></span>Сканирование…</div>';
+                    '<div class="scan-hint"><span class="spin"></span>' +
+                    t("scanning") +
+                    "</div>";
                 try {
                     const r = await fetch("/api/scan");
                     if (!r.ok) throw new Error(r.status);
                     const nets = await r.json();
                     list.innerHTML = nets.length
                         ? ""
-                        : '<div class="scan-hint">Сетей не найдено</div>';
+                        : `<div class="scan-hint">${t("noNetsFound")}</div>`;
                     nets.forEach((n) => {
                         const current =
                             lastStatus &&
@@ -1432,14 +1746,13 @@
         <span class="lock">${current ? "✓" : n.auth !== "open" ? "🔒" : ""}</span>`;
                         el.addEventListener("click", () =>
                             current
-                                ? toast("Уже подключено к " + n.ssid)
+                                ? toast(t("alreadyConn") + n.ssid)
                                 : openWifiModal(n),
                         );
                         list.appendChild(el);
                     });
                 } catch (e) {
-                    list.innerHTML =
-                        '<div class="scan-hint">Ошибка сканирования</div>';
+                    list.innerHTML = `<div class="scan-hint">${t("scanError")}</div>`;
                 }
                 btn.disabled = false;
             });
@@ -1450,8 +1763,8 @@
                 $("mSsid").textContent = n.ssid;
                 $("mMeta").textContent =
                     (n.auth === "open"
-                        ? "Открытая сеть"
-                        : "Защищённая (" + n.auth + ")") +
+                        ? t("openNet")
+                        : t("securedNet") + " (" + n.auth + ")") +
                     " · " +
                     n.rssi +
                     " dBm";
@@ -1470,7 +1783,7 @@
             $("mConnect").addEventListener("click", async () => {
                 const btn = $("mConnect");
                 btn.disabled = true;
-                btn.textContent = "Сохранение…";
+                btn.textContent = t("saving");
                 try {
                     const r = await fetch("/api/networks/add", {
                         method: "POST",
@@ -1481,17 +1794,15 @@
                     });
                     if (!r.ok) throw new Error(await r.text());
                     $("wifiModal").classList.remove("show");
-                    toast(
-                        "Сеть сохранена, подключаюсь к " + modalNet.ssid + "…",
-                    );
+                    toast(t("netSaved") + modalNet.ssid + "…");
                     loadNets();
                     /* the reply may be lost if Wi-Fi switches right away - that's fine */
                     fetch("/api/connect", { method: "POST" }).catch(() => {});
                 } catch (e) {
-                    toast("Не удалось сохранить сеть: " + e.message);
+                    toast(t("netSaveFail") + e.message);
                 }
                 btn.disabled = false;
-                btn.textContent = "Подключить";
+                btn.textContent = t("connect");
             });
 
             /* ---------- wifi: saved networks ---------- */
@@ -1503,8 +1814,7 @@
                     savedNets = await r.json();
                     const list = $("savedList");
                     if (!savedNets.length) {
-                        list.innerHTML =
-                            '<div class="scan-hint">Нет сохранённых сетей</div>';
+                        list.innerHTML = `<div class="scan-hint">${t("noSavedNets")}</div>`;
                         return;
                     }
                     list.innerHTML = "";
@@ -1519,7 +1829,7 @@
                         el.style.cursor = "default";
                         el.innerHTML = `<span class="ssid">${esc(n.ssid)}</span>
         <span class="lock">${current ? "✓" : ""}</span>
-        <span class="del" title="Удалить">✕</span>`;
+        <span class="del" title="${t("delete")}">✕</span>`;
                         el.querySelector(".del").addEventListener("click", () =>
                             delNet(i),
                         );
@@ -1533,12 +1843,12 @@
                     method: "POST",
                     body: JSON.stringify({ ssid: savedNets[i].ssid }),
                 });
-                toast("Сеть удалена: " + savedNets[i].ssid);
+                toast(t("netRemoved") + savedNets[i].ssid);
                 loadNets();
             }
 
             $("reconnBtn").addEventListener("click", () => {
-                toast("Переподключение…");
+                toast(t("reconnecting"));
                 fetch("/api/connect", { method: "POST" }).catch(() => {});
             });
 
@@ -1552,19 +1862,12 @@
                     method: "POST",
                     body: JSON.stringify({ led_brightness: +e.target.value }),
                 });
-                toast("Яркость сохранена");
+                toast(t("brightSaved"));
             });
 
             $("frcBtn").addEventListener("click", async () => {
                 const ppm = +$("frcPpm").value;
-                if (
-                    !confirm(
-                        `Калибровка перезапишет заводскую поправку. Датчик должен ` +
-                            `не меньше 3 минут работать в воздухе с известной концентрацией ` +
-                            `(на улице ~420 ppm). Калибровать на ${ppm} ppm?`,
-                    )
-                )
-                    return;
+                if (!confirm(t("frcConfirm").replace("{ppm}", ppm))) return;
                 const btn = $("frcBtn");
                 btn.disabled = true;
                 try {
@@ -1573,21 +1876,19 @@
                         body: JSON.stringify({ ppm }),
                     });
                     if (!r.ok) throw new Error(await r.text());
-                    toast(
-                        `Готово. Применённая поправка: ${(await r.json()).correction} ppm`,
-                    );
+                    toast(t("frcDone") + (await r.json()).correction + " ppm");
                 } catch (e) {
-                    toast("Ошибка калибровки: " + e.message);
+                    toast(t("frcError") + e.message);
                 } finally {
                     btn.disabled = false;
                 }
             });
 
             /* ---------- main loop ---------- */
+            applyLang();
             refresh();
             setInterval(refresh, 1000);
-            loadHistory();
-            setInterval(loadHistory, 60000);
+            loadHistory(period);
             loadNets();
             window.addEventListener("resize", renderCharts);
         </script>

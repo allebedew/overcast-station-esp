@@ -74,8 +74,10 @@ static const char *json_escape(const char *src, char *dst, size_t dstlen)
  * мигает светодиодом и логирует каждый HTTP-запрос. */
 static esp_err_t handle_request(httpd_req_t *req)
 {
-    /* /api/status is polled every 2 s by the web UI — too noisy to log */
-    if (strcmp(req->uri, "/api/status") != 0) {
+    /* /api/status and /api/history are polled every 1-2 s by the web
+     * UI — too noisy to log */
+    if (strcmp(req->uri, "/api/status") != 0 &&
+        strncmp(req->uri, "/api/history", 12) != 0) {
         char ip[INET6_ADDRSTRLEN] = "?";
         struct sockaddr_in6 addr;
         socklen_t addr_len = sizeof(addr);
@@ -272,22 +274,38 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     return httpd_resp_send(req, json, len);
 }
 
-/* 24 h of 1-min points as arrays per metric (null = gap). The full
- * response is ~15-20 KB, so it is streamed in chunks. */
+/* History as arrays per metric (null = gap); ?p=5m|1h|1d selects the
+ * ring (default 1d). The largest response is ~15-20 KB, so it is
+ * streamed in chunks. */
 static esp_err_t history_get_handler(httpd_req_t *req)
 {
+    history_tier_t tier = HISTORY_1D;
+    char query[16], val_p[8];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "p", val_p, sizeof(val_p)) == ESP_OK) {
+        if (strcmp(val_p, "5m") == 0) {
+            tier = HISTORY_5M;
+        } else if (strcmp(val_p, "1h") == 0) {
+            tier = HISTORY_1H;
+        } else if (strcmp(val_p, "1d") != 0) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                       "bad period");
+        }
+    }
+
     static char buf[1024]; /* single httpd task */
     httpd_resp_set_type(req, "application/json");
 
-    int len = snprintf(buf, sizeof(buf), "{\"period\":60");
+    int len = snprintf(buf, sizeof(buf), "{\"period\":%d",
+                       history_interval(tier));
     static const char *names[] = { "co2", "temp", "rh" };
     for (int m = 0; m < 3; m++) {
         len += snprintf(buf + len, sizeof(buf) - len, ",\"%s\":[", names[m]);
-        int count = history_count();
+        int count = history_count(tier);
         for (int i = 0; i < count; i++) {
             history_point_t p;
             char val[16] = "null";
-            if (history_get(i, &p) && p.valid) {
+            if (history_get(tier, i, &p) && p.valid) {
                 if (m == 0) {
                     snprintf(val, sizeof(val), "%u", p.co2_ppm);
                 } else if (m == 1) {

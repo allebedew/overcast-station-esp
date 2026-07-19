@@ -19,8 +19,13 @@ sensors are not connected yet.
   reason, firmware/build version), a Wi-Fi card (scan list → tap a network →
   password modal → save + reconnect; saved networks with delete; reconnect
   button) and a settings card (LED brightness, SCD40 FRC calibration).
+  The system/Wi-Fi/settings cards are hidden by default behind a gear toggle
+  in the header (state persists in localStorage), so the page opens as a
+  compact sensor dashboard.
   Auto-refreshes every 1 s; the header connection pill turns red and the page
-  dims when the device is unreachable.
+  dims when the device is unreachable. Bilingual (RU/EN): all strings live in
+  an in-page dictionary, the header has a language switch, the choice persists
+  in localStorage and defaults to the browser language.
 - **OTA** — push model: `./flash-ota.sh [host]` builds and uploads the binary
   to `POST /api/ota` (auth via `X-OTA-Key` header, key defined in `ota.c`).
   Two 4 MB app partitions + otadata; rollback is enabled — a new image must
@@ -38,16 +43,20 @@ sensors are not connected yet.
   button on the page — run the sensor ≥3 min in known-CO₂ air first.
   Pressure compensation is hardcoded (985 hPa at the site, 245 m) until a
   real pressure sensor provides live values.
-- **History & charts** — 24 h of SCD40 readings averaged into 1-min points
-  (RAM ring, ~9 KB). The ring is snapshotted to LittleFS every 10 min and on
-  graceful shutdown (OTA reboot), and restored on boot — downtime shows up
-  as a gap, anchored via SNTP time. The web UI draws CO₂/temperature/humidity
-  sparkline charts inside the sensor cards with a small dependency-free
-  canvas renderer: switchable window (5 min live from the 1 s status
-  polling / hour / day, one switch for all charts), time/value axis labels,
-  hover crosshair with a value + time tooltip; offline periods show as
-  gaps. uPlot is no longer used by the page, but its assets are still
-  embedded and served at `/uplot.js` + `/uplot.css` (removal pending).
+- **History & charts** — SCD40 readings in three ring buffers:
+  5 min of 1 s samples (RAM only), 1 h of 5 s points (the sensor's native
+  rate) and 24 h of 1-min averages, ~20 KB RAM total. The two longer rings
+  are snapshotted to LittleFS (`/data/hist_1h.bin` every 5 min,
+  `/data/history.bin` every 10 min, both on graceful shutdown / OTA reboot)
+  and restored on boot — downtime shows up as a gap, anchored via SNTP time;
+  points collected before the deferred restore are merged in after the gap.
+  The web UI draws CO₂/temperature/humidity sparkline charts inside the
+  sensor cards with a small dependency-free canvas renderer: switchable
+  window (5 min / hour / day, one switch for all charts) fetched from
+  `/api/history?p=` and re-polled at 2/10/60 s respectively, time/value
+  axis labels, hover crosshair with a value + time tooltip; offline periods
+  show as gaps. uPlot is no longer used by the page, but its assets are
+  still embedded and served at `/uplot.js` + `/uplot.css` (removal pending).
 - **Telegram notifications** — push-only bot (no incoming commands yet):
   welcome message on boot (chip temp + IP), notification on IP change,
   air alerts from the SCD40 — CO₂ crossing the 800/1200 ppm thresholds
@@ -73,7 +82,7 @@ tasks/callbacks. Modules under `main/`, each with a small public header:
 | `button.c` | BOOT button via espressif/button |
 | `sensors.c` | internal chip temperature + SCD40 polling task (I2C master bus, Sensirion protocol with CRC-8) |
 | `timesync.c` | SNTP client; `timesync_is_synced()` flag |
-| `history.c` | 24 h RAM ring of 1-min averaged sensor points; fed by `sensors.c`, flushed by an esp_timer once a minute; persisted to `/data/history.bin` (10-min snapshots + shutdown handler) |
+| `history.c` | three RAM rings (5 min @ 1 s, 1 h @ 5 s, 24 h @ 1 min); fed by `sensors.c`, driven by a 1 s esp_timer; the two longer rings persist to `/data/hist_1h.bin` / `/data/history.bin` (5/10-min snapshots + shutdown handler) |
 | `storage.c` | mounts the LittleFS `storage` partition at `/data` |
 | `telegram.c` | message queue + sender task (Telegram Bot API over HTTPS); `telegram_notify(fmt, ...)` |
 | `alerts.c` | notification rules & thresholds; own task polls sensors/network every 10 s |
@@ -85,7 +94,7 @@ tasks/callbacks. Modules under `main/`, each with a small public header:
 |---|---|---|
 | `/` | GET | embedded single-page UI (index.html) |
 | `/api/status` | GET | full status JSON: Wi-Fi (STA details or AP client list), system info, heap, settings |
-| `/api/history` | GET | 24 h of 1-min points: `{period, co2: [...], temp: [...], rh: [...]}`, `null` = gap |
+| `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`) selects the ring; returns `{period: <s>, co2: [...], temp: [...], rh: [...]}`, `null` = gap |
 | `/api/scan` | GET | scan for Wi-Fi networks, returns `[{ssid, rssi, auth}]` |
 | `/api/networks` | GET | list of saved networks (SSIDs only) |
 | `/api/networks/add` | POST | save a network; body `{"ssid": "...", "password": "..."}`, updates password if SSID exists |

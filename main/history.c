@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 #include "freertos/FreeRTOS.h"
@@ -11,157 +12,261 @@
 #include "esp_timer.h"
 #include "timesync.h"
 
-#define SNAPSHOT_FILE     "/data/history.bin"
-#define SNAPSHOT_TMP      "/data/history.tmp"
-#define SNAPSHOT_MAGIC    0x48495354 /* "HIST" */
-#define SNAPSHOT_VERSION  1
-#define SAVE_PERIOD_MIN   10
+#define SNAPSHOT_MAGIC   0x48495354 /* "HIST" */
+#define SNAPSHOT_VERSION 1
 
 static const char *TAG = "history";
 
-/* Writers: sensor task (add) and esp_timer task (flush); reader: httpd. */
+/* Writers: sensor task (add) and esp_timer task (tick); reader: httpd. */
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 
-static history_point_t s_ring[HISTORY_LEN];
-static int s_head;  /* next write position */
-static int s_count;
+typedef struct {
+    const char *file; /* NULL = RAM only */
+    const char *tmp;
+    int len;
+    int interval_s;
+    int save_period_s; /* flash snapshot cadence */
+    history_point_t *ring;
+    int head; /* next write position */
+    int count;
+    /* accumulator for the slot in progress (tiers with interval > 1 s) */
+    uint32_t acc_co2;
+    float acc_temp, acc_rh;
+    int acc_n;
+} tier_t;
 
-/* accumulator for the minute in progress */
-static uint32_t s_acc_co2;
-static float s_acc_temp, s_acc_rh;
-static int s_acc_n;
+static history_point_t s_ring_5m[5 * 60];
+static history_point_t s_ring_1h[60 * 60 / 5];
+static history_point_t s_ring_1d[24 * 60];
 
-/* Snapshot of the ring persisted to LittleFS: every SAVE_PERIOD_MIN
- * minutes and on graceful shutdown (OTA reboot). last_ts anchors the
- * newest point in absolute time so the downtime gap can be restored. */
+static tier_t s_tiers[HISTORY_TIER_COUNT] = {
+    [HISTORY_5M] = {
+        .len = 5 * 60,
+        .interval_s = 1,
+        .ring = s_ring_5m,
+    },
+    [HISTORY_1H] = {
+        .file = "/data/hist_1h.bin",
+        .tmp = "/data/hist_1h.tmp",
+        .len = 60 * 60 / 5,
+        .interval_s = 5,
+        .save_period_s = 5 * 60,
+        .ring = s_ring_1h,
+    },
+    [HISTORY_1D] = {
+        .file = "/data/history.bin",
+        .tmp = "/data/history.tmp",
+        .len = 24 * 60,
+        .interval_s = 60,
+        .save_period_s = 10 * 60,
+        .ring = s_ring_1d,
+    },
+};
+
+/* Snapshot file: header + all `len` slots (only the first `count` are
+ * meaningful). Byte-compatible with the old single-ring format, so a
+ * pre-existing 24 h file is read back as-is after an OTA update. */
 typedef struct {
     uint32_t magic;
     uint16_t version;
     uint16_t count;
     int64_t last_ts; /* unix time of the newest point; 0 = clock unsynced */
-    history_point_t points[HISTORY_LEN];
-} snapshot_t;
+} snap_hdr_t;
 
-static snapshot_t s_snap; /* shared by save/restore, ~12 KB in BSS */
+/* Shared by save/restore; no overlap: restore runs once at the first
+ * minute tick, the earliest save happens minutes later. */
+static history_point_t s_snap_points[24 * 60]; /* sized for the largest tier */
 static TaskHandle_t s_save_task;
 static bool s_restored;
 
-static void save_snapshot(void)
-{
-    taskENTER_CRITICAL(&s_lock);
-    s_snap.count = s_count;
-    for (int i = 0; i < s_count; i++) {
-        s_snap.points[i] = s_ring[(s_head - s_count + i + HISTORY_LEN) % HISTORY_LEN];
-    }
-    taskEXIT_CRITICAL(&s_lock);
-    s_snap.magic = SNAPSHOT_MAGIC;
-    s_snap.version = SNAPSHOT_VERSION;
-    s_snap.last_ts = timesync_is_synced() ? time(NULL) : 0;
+/* Latest raw reading, replayed into the 1 s tier while it stays fresh. */
+static history_point_t s_last;
+static int64_t s_last_us = INT64_MIN;
+#define LAST_FRESH_US (6 * 1000000LL) /* SCD40 updates every 5 s */
 
-    FILE *f = fopen(SNAPSHOT_TMP, "wb");
-    if (!f) {
-        ESP_LOGW(TAG, "snapshot open failed");
-        return;
+/* Callers hold s_lock. */
+static void ring_push(tier_t *t, const history_point_t *p)
+{
+    t->ring[t->head] = *p;
+    t->head = (t->head + 1) % t->len;
+    if (t->count < t->len) {
+        t->count++;
     }
-    bool ok = fwrite(&s_snap, sizeof(s_snap), 1, f) == 1;
-    fclose(f);
-    if (!ok || rename(SNAPSHOT_TMP, SNAPSHOT_FILE) != 0) {
-        ESP_LOGW(TAG, "snapshot write failed");
-        return;
-    }
-    ESP_LOGI(TAG, "snapshot saved (%u points)", s_snap.count);
 }
 
-/* Loads the snapshot into the ring, padding the downtime with gap
- * points when both the snapshot and the current clock are SNTP-anchored. */
-static void restore_snapshot(void)
+static void save_snapshot(tier_t *t)
 {
-    FILE *f = fopen(SNAPSHOT_FILE, "rb");
+    snap_hdr_t hdr = {
+        .magic = SNAPSHOT_MAGIC,
+        .version = SNAPSHOT_VERSION,
+        .last_ts = timesync_is_synced() ? time(NULL) : 0,
+    };
+    taskENTER_CRITICAL(&s_lock);
+    hdr.count = t->count;
+    for (int i = 0; i < t->count; i++) {
+        s_snap_points[i] = t->ring[(t->head - t->count + i + t->len) % t->len];
+    }
+    taskEXIT_CRITICAL(&s_lock);
+    memset(&s_snap_points[hdr.count], 0,
+           (t->len - hdr.count) * sizeof(history_point_t));
+
+    FILE *f = fopen(t->tmp, "wb");
+    if (!f) {
+        ESP_LOGW(TAG, "%s: open failed", t->tmp);
+        return;
+    }
+    bool ok = fwrite(&hdr, sizeof(hdr), 1, f) == 1 &&
+              fwrite(s_snap_points, sizeof(history_point_t), t->len, f)
+                  == (size_t)t->len;
+    fclose(f);
+    if (!ok || rename(t->tmp, t->file) != 0) {
+        ESP_LOGW(TAG, "%s: write failed", t->file);
+        return;
+    }
+    ESP_LOGI(TAG, "%s: saved %u points", t->file, hdr.count);
+}
+
+/* Loads the snapshot into the ring: snapshot points, then a downtime gap
+ * (computable only when both the snapshot and the current clock are
+ * SNTP-anchored), then whatever points were collected since boot. */
+static void restore_snapshot(tier_t *t)
+{
+    FILE *f = fopen(t->file, "rb");
     if (!f) {
         return;
     }
-    bool ok = fread(&s_snap, sizeof(s_snap), 1, f) == 1;
+    snap_hdr_t hdr;
+    bool ok = fread(&hdr, sizeof(hdr), 1, f) == 1 &&
+              hdr.magic == SNAPSHOT_MAGIC &&
+              hdr.version == SNAPSHOT_VERSION && hdr.count <= t->len &&
+              fread(s_snap_points, sizeof(history_point_t), hdr.count, f)
+                  == hdr.count;
     fclose(f);
-    if (!ok || s_snap.magic != SNAPSHOT_MAGIC ||
-        s_snap.version != SNAPSHOT_VERSION || s_snap.count > HISTORY_LEN) {
-        ESP_LOGW(TAG, "snapshot invalid, ignored");
+    if (!ok) {
+        ESP_LOGW(TAG, "%s: invalid snapshot, ignored", t->file);
         return;
     }
 
+    /* restore runs at the first minute tick, so the ring holds at most
+     * 60 / interval points collected since boot */
+    history_point_t fresh[60 / 5];
+    int fresh_n;
+
+    taskENTER_CRITICAL(&s_lock);
+    fresh_n = t->count < (int)(sizeof(fresh) / sizeof(fresh[0]))
+                  ? t->count
+                  : (int)(sizeof(fresh) / sizeof(fresh[0]));
+    for (int i = 0; i < fresh_n; i++) {
+        fresh[i] = t->ring[(t->head - fresh_n + i + t->len) % t->len];
+    }
+    taskEXIT_CRITICAL(&s_lock);
+
     int gap = 0;
-    if (s_snap.last_ts > 0 && timesync_is_synced()) {
-        gap = (int)((time(NULL) - s_snap.last_ts) / 60) - 1;
-        gap = gap < 0 ? 0 : gap > HISTORY_LEN ? HISTORY_LEN : gap;
+    if (hdr.last_ts > 0 && timesync_is_synced()) {
+        gap = (int)((time(NULL) - hdr.last_ts) / t->interval_s) - fresh_n - 1;
+        gap = gap < 0 ? 0 : gap > t->len ? t->len : gap;
     }
 
     taskENTER_CRITICAL(&s_lock);
     const history_point_t hole = { .valid = false };
-    s_head = 0;
-    s_count = 0;
-    for (int i = 0; i < s_snap.count; i++) {
-        s_ring[s_head] = s_snap.points[i];
-        s_head = (s_head + 1) % HISTORY_LEN;
-        if (s_count < HISTORY_LEN) s_count++;
+    t->head = 0;
+    t->count = 0;
+    for (int i = 0; i < hdr.count; i++) {
+        ring_push(t, &s_snap_points[i]);
     }
     for (int i = 0; i < gap; i++) {
-        s_ring[s_head] = hole;
-        s_head = (s_head + 1) % HISTORY_LEN;
-        if (s_count < HISTORY_LEN) s_count++;
+        ring_push(t, &hole);
+    }
+    for (int i = 0; i < fresh_n; i++) {
+        ring_push(t, &fresh[i]);
     }
     taskEXIT_CRITICAL(&s_lock);
-    ESP_LOGI(TAG, "snapshot restored: %u points, %d min downtime",
-             s_snap.count, gap);
+    ESP_LOGI(TAG, "%s: restored %u points, %d slot gap",
+             t->file, hdr.count, gap);
 }
 
 static void save_task(void *arg)
 {
     for (;;) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        save_snapshot();
+        uint32_t bits = 0;
+        xTaskNotifyWait(0, UINT32_MAX, &bits, portMAX_DELAY);
+        for (int i = 0; i < HISTORY_TIER_COUNT; i++) {
+            if ((bits & (1u << i)) && s_tiers[i].file) {
+                save_snapshot(&s_tiers[i]);
+            }
+        }
     }
 }
 
 /* esp_restart hook: OTA reboots keep the freshest possible history */
 static void shutdown_save(void)
 {
-    save_snapshot();
+    for (int i = 0; i < HISTORY_TIER_COUNT; i++) {
+        if (s_tiers[i].file) {
+            save_snapshot(&s_tiers[i]);
+        }
+    }
 }
 
-/* Once a minute: turn the accumulated readings into one ring point.
- * With no readings the point is written as a gap, so the time axis
- * stays uniform even when the sensor is offline. */
-static void flush_cb(void *arg)
+/* Turns the readings accumulated over the tier interval into one ring
+ * point. With no readings the point is a gap, so the time axis stays
+ * uniform even when the sensor is offline. */
+static void flush_tier(tier_t *t)
 {
-    /* restore is deferred to the first tick: by now SNTP has usually
-     * synced, so the downtime gap can be computed */
-    if (!s_restored) {
-        s_restored = true;
-        restore_snapshot();
-    }
-
     taskENTER_CRITICAL(&s_lock);
-    history_point_t p = { .valid = s_acc_n > 0 };
+    history_point_t p = { .valid = t->acc_n > 0 };
     if (p.valid) {
-        p.co2_ppm = s_acc_co2 / s_acc_n;
-        p.temp_cx10 = (int16_t)lroundf(10.0f * s_acc_temp / s_acc_n);
-        p.rh_pct = (uint8_t)lroundf(s_acc_rh / s_acc_n);
+        p.co2_ppm = t->acc_co2 / t->acc_n;
+        p.temp_cx10 = (int16_t)lroundf(10.0f * t->acc_temp / t->acc_n);
+        p.rh_pct = (uint8_t)lroundf(t->acc_rh / t->acc_n);
     }
-    s_acc_co2 = 0;
-    s_acc_temp = 0;
-    s_acc_rh = 0;
-    s_acc_n = 0;
+    t->acc_co2 = 0;
+    t->acc_temp = 0;
+    t->acc_rh = 0;
+    t->acc_n = 0;
+    ring_push(t, &p);
+    taskEXIT_CRITICAL(&s_lock);
+}
 
-    s_ring[s_head] = p;
-    s_head = (s_head + 1) % HISTORY_LEN;
-    if (s_count < HISTORY_LEN) {
-        s_count++;
-    }
+static void tick_cb(void *arg)
+{
+    static uint32_t ticks;
+    ticks++;
+
+    /* 1 s tier: replay the latest reading while it stays fresh */
+    taskENTER_CRITICAL(&s_lock);
+    history_point_t p = s_last;
+    p.valid = s_last.valid &&
+              esp_timer_get_time() - s_last_us <= LAST_FRESH_US;
+    ring_push(&s_tiers[HISTORY_5M], &p);
     taskEXIT_CRITICAL(&s_lock);
 
-    static int flushes;
-    if (++flushes >= SAVE_PERIOD_MIN) {
-        flushes = 0;
-        xTaskNotifyGive(s_save_task); /* file I/O is too slow for esp_timer */
+    if (ticks % s_tiers[HISTORY_1H].interval_s == 0) {
+        flush_tier(&s_tiers[HISTORY_1H]);
+    }
+    if (ticks % s_tiers[HISTORY_1D].interval_s == 0) {
+        /* restore is deferred to the first minute tick: by now SNTP has
+         * usually synced, so the downtime gap can be computed */
+        if (!s_restored) {
+            s_restored = true;
+            for (int i = 0; i < HISTORY_TIER_COUNT; i++) {
+                if (s_tiers[i].file) {
+                    restore_snapshot(&s_tiers[i]);
+                }
+            }
+        }
+        flush_tier(&s_tiers[HISTORY_1D]);
+    }
+
+    uint32_t save_bits = 0;
+    for (int i = 0; i < HISTORY_TIER_COUNT; i++) {
+        if (s_tiers[i].file && ticks % s_tiers[i].save_period_s == 0) {
+            save_bits |= 1u << i;
+        }
+    }
+    if (save_bits) {
+        /* file I/O is too slow for the esp_timer task */
+        xTaskNotify(s_save_task, save_bits, eSetBits);
     }
 }
 
@@ -171,38 +276,54 @@ void history_init(void)
     ESP_ERROR_CHECK(esp_register_shutdown_handler(shutdown_save));
 
     const esp_timer_create_args_t args = {
-        .callback = flush_cb,
+        .callback = tick_cb,
         .name = "history",
     };
     esp_timer_handle_t timer;
     ESP_ERROR_CHECK(esp_timer_create(&args, &timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(timer, 60 * 1000000ULL));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(timer, 1000000ULL));
 }
 
 void history_add(uint16_t co2_ppm, float temp_c, float rh_pct)
 {
     taskENTER_CRITICAL(&s_lock);
-    s_acc_co2 += co2_ppm;
-    s_acc_temp += temp_c;
-    s_acc_rh += rh_pct;
-    s_acc_n++;
+    for (int i = HISTORY_1H; i < HISTORY_TIER_COUNT; i++) {
+        tier_t *t = &s_tiers[i];
+        t->acc_co2 += co2_ppm;
+        t->acc_temp += temp_c;
+        t->acc_rh += rh_pct;
+        t->acc_n++;
+    }
+    s_last = (history_point_t){
+        .valid = true,
+        .co2_ppm = co2_ppm,
+        .temp_cx10 = (int16_t)lroundf(10.0f * temp_c),
+        .rh_pct = (uint8_t)lroundf(rh_pct),
+    };
+    s_last_us = esp_timer_get_time();
     taskEXIT_CRITICAL(&s_lock);
 }
 
-int history_count(void)
+int history_count(history_tier_t tier)
 {
     taskENTER_CRITICAL(&s_lock);
-    int count = s_count;
+    int count = s_tiers[tier].count;
     taskEXIT_CRITICAL(&s_lock);
     return count;
 }
 
-bool history_get(int idx, history_point_t *out)
+int history_interval(history_tier_t tier)
 {
+    return s_tiers[tier].interval_s;
+}
+
+bool history_get(history_tier_t tier, int idx, history_point_t *out)
+{
+    tier_t *t = &s_tiers[tier];
     taskENTER_CRITICAL(&s_lock);
-    bool ok = idx >= 0 && idx < s_count;
+    bool ok = idx >= 0 && idx < t->count;
     if (ok) {
-        *out = s_ring[(s_head - s_count + idx + HISTORY_LEN) % HISTORY_LEN];
+        *out = t->ring[(t->head - t->count + idx + t->len) % t->len];
     }
     taskEXIT_CRITICAL(&s_lock);
     return ok;
