@@ -1,6 +1,8 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include "esp_err.h"
 
 typedef enum {
@@ -14,7 +16,9 @@ typedef enum {
 
 typedef struct {
     char ssid[33];
+    uint8_t bssid[6];
     int rssi;
+    int channel;  /* primary channel */
     int authmode; /* wifi_auth_mode_t */
 } wifi_scan_ap_t;
 
@@ -51,6 +55,12 @@ int wifi_get_rssi(void);
 /* Текущий Wi-Fi канал (в любом режиме); 0, если радио не запущено. */
 int wifi_get_channel(void);
 
-/* Блокирующее сканирование эфира (~2-3 с). Возвращает число найденных
- * сетей (без дублей SSID) или -1 при ошибке. */
+/* BSSID (MAC of the connected AP) formatted as "xx:xx:xx:xx:xx:xx" into out
+ * (needs >= 18 bytes). Returns false and leaves out untouched if not
+ * connected as a station. */
+bool wifi_get_bssid(char *out, size_t len);
+
+/* Blocking air scan (~2-3 s). Returns the number of APs found (one entry
+ * per BSSID, so the same SSID may repeat across access points) or -1 on
+ * error. */
 int wifi_scan(wifi_scan_ap_t *out, int max_count);

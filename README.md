@@ -7,8 +7,12 @@ sensors are not connected yet.
 ## Implemented
 
 - **Wi-Fi (STA)** — up to 5 saved networks in NVS, tried sequentially:
-  5 attempts per network, 5 s pause between attempts. After all networks fail
-  (or when the store is empty at boot) the device falls back to AP mode.
+  5 attempts per network, 5 s pause between attempts; each attempt does an
+  all-channel scan and joins the strongest BSSID for that SSID (so on a
+  multi-AP network it latches onto the nearest access point), unless the
+  network is pinned to a specific BSSID (picked from the scan list), in which
+  case it connects only to that AP. After all networks fail (or when the store
+  is empty at boot) it falls back to AP mode.
 - **AP mode** — `WeatherStation` / `weather123`, used for provisioning.
   Runs as APSTA so Wi-Fi scanning keeps working. Toggled manually with the
   BOOT button (GPIO9, single click: AP ↔ reconnect STA).
@@ -16,9 +20,11 @@ sensors are not connected yet.
   (mDNS). Dark dashboard: three sensor cards (temperature / humidity / CO₂)
   with current value, trend arrow, min/max and a sparkline chart, plus a
   system card (Wi-Fi details, chip temp, heap, CPU load, NVS, uptime, reset
-  reason, firmware/build version), a Wi-Fi card (scan list → tap a network →
-  password modal → save + reconnect; saved networks with delete; reconnect
-  button) and a settings card (LED brightness, SCD40 FRC calibration).
+  reason, firmware/build version), a Wi-Fi card (one list — saved networks by
+  default, augmented with scanned APs on Scan; saved and the connected AP are
+  badged; tap an AP → password modal with an optional "pin BSSID" toggle →
+  save; per-network delete; reconnect button) and a settings card (LED
+  brightness, SCD40 FRC calibration).
   The system/Wi-Fi/settings cards are hidden by default behind a gear toggle
   in the header (state persists in localStorage), so the page opens as a
   compact sensor dashboard.
@@ -58,7 +64,8 @@ sensors are not connected yet.
   show as gaps. uPlot is no longer used by the page, but its assets are
   still embedded and served at `/uplot.js` + `/uplot.css` (removal pending).
 - **Telegram notifications** — push-only bot (no incoming commands yet):
-  welcome message on boot (chip temp + IP), notification on IP change,
+  welcome message on boot (chip temp + IP + BSSID + channel + RSSI),
+  notification on IP change,
   air alerts from the SCD40 — CO₂ crossing the 800/1200 ppm thresholds
   (±25 ppm hysteresis), temperature drift ≥2 °C, humidity drift ≥10 %.
   Bot token / chat id are compile-time constants in `telegram.c`
@@ -95,9 +102,9 @@ tasks/callbacks. Modules under `main/`, each with a small public header:
 | `/` | GET | embedded single-page UI (index.html) |
 | `/api/status` | GET | full status JSON: Wi-Fi (STA details or AP client list), system info, heap, settings |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`) selects the ring; returns `{period: <s>, co2: [...], temp: [...], rh: [...]}`, `null` = gap |
-| `/api/scan` | GET | scan for Wi-Fi networks, returns `[{ssid, rssi, auth}]` |
-| `/api/networks` | GET | list of saved networks (SSIDs only) |
-| `/api/networks/add` | POST | save a network; body `{"ssid": "...", "password": "..."}`, updates password if SSID exists |
+| `/api/scan` | GET | scan for Wi-Fi networks, returns `[{ssid, bssid, ch, rssi, auth}]` (one entry per BSSID — same SSID may repeat across APs) |
+| `/api/networks` | GET | list of saved networks `[{ssid, bssid?}]` (bssid present only when the network is pinned to an AP) |
+| `/api/networks/add` | POST | save a network; body `{"ssid": "...", "password": "...", "bssid": "aa:bb:.."}` (bssid optional — pins the connection to that AP; omit/all-zero = connect to strongest), updates existing SSID |
 | `/api/networks/delete` | POST | remove a saved network; body `{"ssid": "..."}` |
 | `/api/connect` | POST | leave AP mode / restart the STA connection cycle |
 | `/api/settings` | POST | apply settings; body `{"led_brightness": 1–255}`, persisted in NVS |

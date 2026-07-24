@@ -35,18 +35,24 @@ void wifi_store_init(void)
     s_lock = xSemaphoreCreateMutex();
 
     nvs_handle_t h;
-    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
         size_t size = sizeof(s_networks);
-        if (nvs_get_blob(h, NVS_KEY_LIST, s_networks, &size) == ESP_OK &&
-            size % sizeof(wifi_cred_t) == 0) {
+        esp_err_t r = nvs_get_blob(h, NVS_KEY_LIST, s_networks, &size);
+        if (r == ESP_OK && size % sizeof(wifi_cred_t) == 0) {
             s_count = size / sizeof(wifi_cred_t);
+        } else if (r == ESP_OK) {
+            /* Records saved before the bssid field was added: drop them. */
+            nvs_erase_key(h, NVS_KEY_LIST);
+            nvs_commit(h);
+            ESP_LOGW(TAG, "Discarded saved networks in old format");
         }
         nvs_close(h);
     }
     ESP_LOGI(TAG, "%d saved network(s)", s_count);
 }
 
-esp_err_t wifi_store_add(const char *ssid, const char *password)
+esp_err_t wifi_store_add(const char *ssid, const char *password,
+                         const uint8_t bssid[6])
 {
     if (!ssid || !ssid[0] || strlen(ssid) > 32 ||
         (password && strlen(password) > 64)) {
@@ -66,6 +72,11 @@ esp_err_t wifi_store_add(const char *ssid, const char *password)
     strlcpy(s_networks[i].ssid, ssid, sizeof(s_networks[i].ssid));
     strlcpy(s_networks[i].password, password ? password : "",
             sizeof(s_networks[i].password));
+    if (bssid) {
+        memcpy(s_networks[i].bssid, bssid, sizeof(s_networks[i].bssid));
+    } else {
+        memset(s_networks[i].bssid, 0, sizeof(s_networks[i].bssid));
+    }
     save();
     xSemaphoreGive(s_lock);
 

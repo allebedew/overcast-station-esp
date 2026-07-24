@@ -54,8 +54,12 @@ static void check_ip(void)
     }
     if (!online) {
         online = true;
-        telegram_notify("Станция запущена: чип %.1f °C, IP " IPSTR,
-                        sensors_chip_temp(), IP2STR(&ip));
+        char bssid[18];
+        const char *b = wifi_get_bssid(bssid, sizeof(bssid)) ? bssid : "n/a";
+        telegram_notify("Станция запущена: чип %.1f °C, IP " IPSTR
+                        ", BSSID %s, канал %d, RSSI %d дБм",
+                        sensors_chip_temp(), IP2STR(&ip), b,
+                        wifi_get_channel(), wifi_get_rssi());
     } else if (ip.addr != last_ip.addr) {
         telegram_notify("IP изменился: " IPSTR " → " IPSTR,
                         IP2STR(&last_ip), IP2STR(&ip));

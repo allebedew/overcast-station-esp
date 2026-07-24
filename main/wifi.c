@@ -1,5 +1,6 @@
 #include "wifi.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -73,6 +74,19 @@ int wifi_get_channel(void)
     return primary;
 }
 
+bool wifi_get_bssid(char *out, size_t len)
+{
+    wifi_ap_record_t ap_info;
+    if (s_status != WIFI_STATUS_CONNECTED ||
+        esp_wifi_sta_get_ap_info(&ap_info) != ESP_OK) {
+        return false;
+    }
+    snprintf(out, len, "%02x:%02x:%02x:%02x:%02x:%02x",
+             ap_info.bssid[0], ap_info.bssid[1], ap_info.bssid[2],
+             ap_info.bssid[3], ap_info.bssid[4], ap_info.bssid[5]);
+    return true;
+}
+
 int wifi_scan(wifi_scan_ap_t *out, int max_count)
 {
     if (esp_wifi_scan_start(NULL, true) != ESP_OK) {
@@ -94,17 +108,14 @@ int wifi_scan(wifi_scan_ap_t *out, int max_count)
     for (int i = 0; i < num && n < max_count; i++) {
         const char *ssid = (const char *)recs[i].ssid;
         if (!ssid[0]) {
-            continue; /* скрытые сети пропускаем */
+            continue; /* skip hidden networks */
         }
-        bool dup = false;
-        for (int j = 0; j < n && !dup; j++) {
-            dup = strcmp(out[j].ssid, ssid) == 0;
-        }
-        if (dup) {
-            continue;
-        }
+        /* One entry per BSSID (no SSID de-dup): a managed network broadcasts
+         * the same SSID from many APs, and we want each AP visible. */
         strlcpy(out[n].ssid, ssid, sizeof(out[n].ssid));
+        memcpy(out[n].bssid, recs[i].bssid, sizeof(out[n].bssid));
         out[n].rssi = recs[i].rssi;
+        out[n].channel = recs[i].primary;
         out[n].authmode = recs[i].authmode;
         n++;
     }
@@ -159,6 +170,21 @@ static void apply_current_network(void)
     strlcpy((char *)cfg.sta.ssid, net.ssid, sizeof(cfg.sta.ssid));
     strlcpy((char *)cfg.sta.password, net.password, sizeof(cfg.sta.password));
     cfg.sta.threshold.authmode = net.password[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+    /* Scan every channel and pick the strongest BSSID for this SSID instead of
+     * the first match: on a managed network the same SSID comes from many APs,
+     * and the default fast scan would latch onto a weaker/farther one. */
+    cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    /* If the network is pinned to a BSSID, connect only to that AP (the
+     * all-channel scan above still finds it on whatever channel it uses);
+     * an all-zero BSSID means "unpinned" and keeps the by-signal choice. */
+    for (int i = 0; i < 6; i++) {
+        if (net.bssid[i]) {
+            cfg.sta.bssid_set = true;
+            memcpy(cfg.sta.bssid, net.bssid, sizeof(cfg.sta.bssid));
+            break;
+        }
+    }
     strlcpy(s_current_ssid, net.ssid, sizeof(s_current_ssid));
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &cfg));
@@ -195,8 +221,18 @@ void wifi_reconnect(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
     apply_current_network();
     ESP_LOGI(TAG, "Reconnecting to \"%s\"...", s_current_ssid);
-    /* при выходе из APSTA событие STA_START не приходит — подключаемся сами */
-    try_connect();
+    if (s_status == WIFI_STATUS_CONNECTED) {
+        /* Already associated (e.g. the user saved a new BSSID for the same
+         * SSID): esp_wifi_connect() would be a no-op and the state machine
+         * would hang in CONNECTING forever. Drop the link instead — the
+         * STA_DISCONNECTED event then drives the reconnect with the new
+         * config. */
+        set_status(WIFI_STATUS_CONNECTING);
+        esp_wifi_disconnect();
+    } else {
+        /* при выходе из APSTA событие STA_START не приходит — подключаемся сами */
+        try_connect();
+    }
 }
 
 static void retry_timer_cb(void *arg)

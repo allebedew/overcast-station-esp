@@ -1,5 +1,6 @@
 #include "webserver.h"
 
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
@@ -339,14 +340,17 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
                                    "scan failed");
     }
 
-    static char json[1024];
+    static char json[2048];
     char essid[67];
     int off = snprintf(json, sizeof(json), "[");
     for (int i = 0; i < n && off < (int)sizeof(json) - 2; i++) {
         off += snprintf(json + off, sizeof(json) - off,
-                        "%s{\"ssid\":\"%s\",\"rssi\":%d,\"auth\":\"%s\"}",
+                        "%s{\"ssid\":\"%s\",\"bssid\":\"" MACSTR "\","
+                        "\"ch\":%d,\"rssi\":%d,\"auth\":\"%s\"}",
                         i ? "," : "",
                         json_escape(aps[i].ssid, essid, sizeof(essid)),
+                        MAC2STR(aps[i].bssid),
+                        aps[i].channel,
                         aps[i].rssi,
                         authmode_str((wifi_auth_mode_t)aps[i].authmode));
     }
@@ -358,13 +362,25 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
 
 static esp_err_t networks_get_handler(httpd_req_t *req)
 {
-    char json[512];
-    char ssid[33], essid[67];
+    static char json[1024];
+    char essid[67];
+    wifi_cred_t net;
     int off = snprintf(json, sizeof(json), "[");
-    for (int i = 0; wifi_store_get_ssid(i, ssid); i++) {
-        off += snprintf(json + off, sizeof(json) - off,
-                        "%s{\"ssid\":\"%s\"}", i ? "," : "",
-                        json_escape(ssid, essid, sizeof(essid)));
+    for (int i = 0; wifi_store_get(i, &net); i++) {
+        bool pinned = false;
+        for (int k = 0; k < 6; k++) {
+            if (net.bssid[k]) {
+                pinned = true;
+                break;
+            }
+        }
+        off += snprintf(json + off, sizeof(json) - off, "%s{\"ssid\":\"%s\"",
+                        i ? "," : "", json_escape(net.ssid, essid, sizeof(essid)));
+        if (pinned) {
+            off += snprintf(json + off, sizeof(json) - off,
+                            ",\"bssid\":\"" MACSTR "\"", MAC2STR(net.bssid));
+        }
+        off += snprintf(json + off, sizeof(json) - off, "}");
     }
     off += snprintf(json + off, sizeof(json) - off, "]");
 
@@ -391,6 +407,14 @@ static cJSON *read_json_body(httpd_req_t *req)
     return cJSON_Parse(body);
 }
 
+/* Parses "xx:xx:xx:xx:xx:xx" into 6 bytes; false on any other format. */
+static bool parse_bssid(const char *s, uint8_t out[6])
+{
+    return s && sscanf(s, "%2hhx:%2hhx:%2hhx:%2hhx:%2hhx:%2hhx",
+                       &out[0], &out[1], &out[2],
+                       &out[3], &out[4], &out[5]) == 6;
+}
+
 static esp_err_t network_add_post_handler(httpd_req_t *req)
 {
     cJSON *root = read_json_body(req);
@@ -399,7 +423,11 @@ static esp_err_t network_add_post_handler(httpd_req_t *req)
     }
     const char *ssid = cJSON_GetStringValue(cJSON_GetObjectItem(root, "ssid"));
     const char *password = cJSON_GetStringValue(cJSON_GetObjectItem(root, "password"));
-    esp_err_t err = ssid ? wifi_store_add(ssid, password) : ESP_ERR_INVALID_ARG;
+    const char *bssid_str = cJSON_GetStringValue(cJSON_GetObjectItem(root, "bssid"));
+    uint8_t bssid[6];
+    bool have_bssid = parse_bssid(bssid_str, bssid);
+    esp_err_t err = ssid ? wifi_store_add(ssid, password, have_bssid ? bssid : NULL)
+                         : ESP_ERR_INVALID_ARG;
     cJSON_Delete(root);
 
     if (err != ESP_OK) {

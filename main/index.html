@@ -413,13 +413,65 @@
             .wifi-item.current {
                 border-color: var(--ok);
             }
+            .wifi-item .wifi-text {
+                flex: 1;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 1px;
+            }
             .wifi-item .ssid {
                 font-size: 13px;
                 font-weight: 500;
-                flex: 1;
+                min-width: 0;
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+            }
+            .wifi-item .bssid {
+                font-size: 10px;
+                color: var(--text-faint);
+                font-family: ui-monospace, monospace;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .m-check {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 12px;
+                color: var(--text-faint);
+                margin: 2px 0 16px;
+                cursor: pointer;
+            }
+            .m-check input {
+                width: auto;
+                margin: 0;
+                cursor: pointer;
+            }
+            .wifi-item .ssid-line {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                min-width: 0;
+            }
+            .wbadge {
+                flex: none;
+                font-size: 9px;
+                font-weight: 600;
+                line-height: 1.5;
+                padding: 0 5px;
+                border-radius: 6px;
+                border: 1px solid var(--border);
+                color: var(--text-faint);
+            }
+            .wbadge.conn {
+                border-color: var(--ok);
+                color: var(--ok);
+            }
+            .rssi.off {
+                opacity: 0.3;
             }
             .wifi-item .meta {
                 font-size: 11px;
@@ -819,14 +871,6 @@
                         Сканировать сети
                     </button>
                     <div class="wifi-list" id="wifiList">
-                        <div class="scan-hint" data-i18n="scanHint">
-                            Нажмите «Сканировать», чтобы найти доступные сети
-                        </div>
-                    </div>
-                    <div class="saved-head" data-i18n="savedNetworks">
-                        Сохранённые сети
-                    </div>
-                    <div class="wifi-list" id="savedList">
                         <div class="scan-hint" data-i18n="loading">
                             Загрузка…
                         </div>
@@ -837,7 +881,7 @@
                         style="margin-top: 10px"
                         data-i18n="reconnect"
                     >
-                        Переподключиться
+                        Переподключиться к сохранённым сетям
                     </button>
                 </div>
 
@@ -900,13 +944,20 @@
                 <h3 id="mSsid">Подключение</h3>
                 <div class="m-sub" id="mMeta"></div>
                 <input
-                    type="password"
+                    type="text"
                     id="mPass"
                     placeholder="Пароль сети"
                     data-i18n-ph="netPassword"
                     autocomplete="off"
+                    autocapitalize="off"
+                    autocorrect="off"
+                    spellcheck="false"
                     maxlength="64"
                 />
+                <label class="m-check">
+                    <input type="checkbox" id="mPin" checked />
+                    <span data-i18n="pinBssid">Привязать к точке (BSSID)</span>
+                </label>
                 <div class="row">
                     <button class="btn" id="mCancel" data-i18n="cancel">
                         Отмена
@@ -930,9 +981,9 @@
    Data sources (all existing endpoints, unchanged):
      GET  /api/status           - polled every second, feeds cards + 5-min live window
      GET  /api/history          - 24 h of 1-min points {period, co2[], temp[], rh[]}
-     GET  /api/scan             - [{ssid, rssi, auth}]
-     GET  /api/networks         - saved networks [{ssid}]
-     POST /api/networks/add     - {ssid, password}
+     GET  /api/scan             - [{ssid, bssid, ch, rssi, auth}] (one per BSSID)
+     GET  /api/networks         - saved networks [{ssid, bssid?}] (bssid = pinned AP)
+     POST /api/networks/add     - {ssid, password, bssid?} (bssid pins the AP)
      POST /api/networks/delete  - {ssid}
      POST /api/connect          - restart the STA connection cycle
      POST /api/settings         - {led_brightness}
@@ -967,7 +1018,7 @@
                     scanHint:
                         "Нажмите «Сканировать», чтобы найти доступные сети",
                     savedNetworks: "Сохранённые сети",
-                    reconnect: "Переподключиться",
+                    reconnect: "Переподключиться к сохранённым сетям",
                     settings: "Настройки",
                     ledBrightness: "Яркость светодиода",
                     frcTitle: "Калибровка CO₂ (FRC)",
@@ -1012,6 +1063,11 @@
                     alreadyConn: "Уже подключено к ",
                     openNet: "Открытая сеть",
                     securedNet: "Защищённая",
+                    pinBssid: "Привязать к точке (BSSID)",
+                    byStrongest: "по сильнейшему сигналу",
+                    connected: "подключено",
+                    savedBadge: "сохранено",
+                    outOfRange: "вне зоны",
                     saving: "Сохранение…",
                     netSaved: "Сеть сохранена, подключаюсь к ",
                     netSaveFail: "Не удалось сохранить сеть: ",
@@ -1047,7 +1103,7 @@
                     scanNetworks: "Scan networks",
                     scanHint: "Press “Scan” to find nearby networks",
                     savedNetworks: "Saved networks",
-                    reconnect: "Reconnect",
+                    reconnect: "Reconnect to saved networks",
                     settings: "Settings",
                     ledBrightness: "LED brightness",
                     frcTitle: "CO₂ calibration (FRC)",
@@ -1092,6 +1148,11 @@
                     alreadyConn: "Already connected to ",
                     openNet: "Open network",
                     securedNet: "Secured",
+                    pinBssid: "Pin to this AP (BSSID)",
+                    byStrongest: "strongest signal",
+                    connected: "connected",
+                    savedBadge: "saved",
+                    outOfRange: "out of range",
                     saving: "Saving…",
                     netSaved: "Network saved, connecting to ",
                     netSaveFail: "Failed to save network: ",
@@ -1717,43 +1778,24 @@
             const rssiIcon = (r) =>
                 `<span class="rssi" data-l="${rssiLevel(r)}"><i></i><i></i><i></i><i></i></span>`;
 
+            let scannedNets = [];
+            let savedNets = [];
+
             $("scanBtn").addEventListener("click", async () => {
-                const btn = $("scanBtn"),
-                    list = $("wifiList");
+                const btn = $("scanBtn");
                 btn.disabled = true;
-                list.innerHTML =
+                $("wifiList").innerHTML =
                     '<div class="scan-hint"><span class="spin"></span>' +
                     t("scanning") +
                     "</div>";
                 try {
                     const r = await fetch("/api/scan");
                     if (!r.ok) throw new Error(r.status);
-                    const nets = await r.json();
-                    list.innerHTML = nets.length
-                        ? ""
-                        : `<div class="scan-hint">${t("noNetsFound")}</div>`;
-                    nets.forEach((n) => {
-                        const current =
-                            lastStatus &&
-                            !lastStatus.ap_mode &&
-                            n.ssid === lastStatus.ssid;
-                        const el = document.createElement("div");
-                        el.className =
-                            "wifi-item" + (current ? " current" : "");
-                        el.innerHTML = `${rssiIcon(n.rssi)}
-        <span class="ssid">${esc(n.ssid)}</span>
-        <span class="meta">${n.rssi} dBm · ${esc(n.auth)}</span>
-        <span class="lock">${current ? "✓" : n.auth !== "open" ? "🔒" : ""}</span>`;
-                        el.addEventListener("click", () =>
-                            current
-                                ? toast(t("alreadyConn") + n.ssid)
-                                : openWifiModal(n),
-                        );
-                        list.appendChild(el);
-                    });
+                    scannedNets = await r.json();
                 } catch (e) {
-                    list.innerHTML = `<div class="scan-hint">${t("scanError")}</div>`;
+                    toast(t("scanError"));
                 }
+                renderWifiList();
                 btn.disabled = false;
             });
 
@@ -1767,8 +1809,10 @@
                         : t("securedNet") + " (" + n.auth + ")") +
                     " · " +
                     n.rssi +
-                    " dBm";
+                    " dBm · " +
+                    n.bssid;
                 $("mPass").value = "";
+                $("mPin").checked = true;
                 $("mPass").style.display = n.auth === "open" ? "none" : "";
                 $("wifiModal").classList.add("show");
                 if (n.auth !== "open") setTimeout(() => $("mPass").focus(), 60);
@@ -1785,12 +1829,14 @@
                 btn.disabled = true;
                 btn.textContent = t("saving");
                 try {
+                    const payload = {
+                        ssid: modalNet.ssid,
+                        password: $("mPass").value,
+                    };
+                    if ($("mPin").checked) payload.bssid = modalNet.bssid;
                     const r = await fetch("/api/networks/add", {
                         method: "POST",
-                        body: JSON.stringify({
-                            ssid: modalNet.ssid,
-                            password: $("mPass").value,
-                        }),
+                        body: JSON.stringify(payload),
                     });
                     if (!r.ok) throw new Error(await r.text());
                     $("wifiModal").classList.remove("show");
@@ -1805,45 +1851,122 @@
                 btn.textContent = t("connect");
             });
 
-            /* ---------- wifi: saved networks ---------- */
-            let savedNets = [];
+            /* ---------- wifi: unified network list ---------- */
+            const rssiOff =
+                '<span class="rssi off"><i></i><i></i><i></i><i></i></span>';
+
+            function connectedTo(ssid, bssid) {
+                if (!lastStatus || lastStatus.ap_mode || ssid !== lastStatus.ssid)
+                    return false;
+                if (bssid && lastStatus.bssid)
+                    return bssid.toLowerCase() === lastStatus.bssid.toLowerCase();
+                return true;
+            }
+
+            function renderWifiList() {
+                const list = $("wifiList");
+                const savedBy = new Map(savedNets.map((s) => [s.ssid, s]));
+                const seen = new Set();
+                const rows = [];
+                scannedNets.forEach((n) => {
+                    seen.add(n.ssid);
+                    rows.push({
+                        ssid: n.ssid,
+                        bssid: n.bssid,
+                        ch: n.ch,
+                        rssi: n.rssi,
+                        auth: n.auth,
+                        inScan: true,
+                        saved: savedBy.has(n.ssid),
+                        connected: connectedTo(n.ssid, n.bssid),
+                    });
+                });
+                savedNets.forEach((sv) => {
+                    if (seen.has(sv.ssid)) return;
+                    rows.push({
+                        ssid: sv.ssid,
+                        bssid: sv.bssid || null,
+                        inScan: false,
+                        saved: true,
+                        connected: connectedTo(sv.ssid, sv.bssid),
+                    });
+                });
+                if (!rows.length) {
+                    list.innerHTML = `<div class="scan-hint">${t(
+                        scannedNets.length ? "noNetsFound" : "noSavedNets",
+                    )}</div>`;
+                    return;
+                }
+                list.innerHTML = "";
+                rows.forEach((row) => list.appendChild(wifiRow(row)));
+            }
+
+            function wifiRow(row) {
+                const el = document.createElement("div");
+                el.className = "wifi-item" + (row.connected ? " current" : "");
+                const badges =
+                    (row.connected
+                        ? `<span class="wbadge conn">${t("connected")}</span>`
+                        : "") +
+                    (row.saved
+                        ? `<span class="wbadge saved">${t("savedBadge")}</span>`
+                        : "");
+                const detail = row.inScan
+                    ? `${esc(row.bssid)} · ch ${row.ch} · ${row.rssi} dBm · ${esc(
+                          row.auth,
+                      )}`
+                    : (row.bssid ? esc(row.bssid) : t("byStrongest")) +
+                      (scannedNets.length ? " · " + t("outOfRange") : "");
+                const right =
+                    (row.inScan && !row.connected && row.auth !== "open"
+                        ? '<span class="lock">🔒</span>'
+                        : "") +
+                    (row.saved
+                        ? `<span class="del" title="${t("delete")}">✕</span>`
+                        : "");
+                el.innerHTML = `${row.inScan ? rssiIcon(row.rssi) : rssiOff}
+        <div class="wifi-text">
+          <span class="ssid-line"><span class="ssid">${esc(
+              row.ssid,
+          )}</span>${badges}</span>
+          <span class="bssid">${detail}</span>
+        </div>
+        ${right}`;
+                if (row.saved) {
+                    el.querySelector(".del").addEventListener("click", (e) => {
+                        e.stopPropagation();
+                        delNet(row.ssid);
+                    });
+                }
+                if (row.inScan) {
+                    el.style.cursor = "pointer";
+                    el.addEventListener("click", () =>
+                        row.connected
+                            ? toast(t("alreadyConn") + row.ssid)
+                            : openWifiModal(row),
+                    );
+                } else {
+                    el.style.cursor = "default";
+                }
+                return el;
+            }
 
             async function loadNets() {
                 try {
                     const r = await fetch("/api/networks");
                     savedNets = await r.json();
-                    const list = $("savedList");
-                    if (!savedNets.length) {
-                        list.innerHTML = `<div class="scan-hint">${t("noSavedNets")}</div>`;
-                        return;
-                    }
-                    list.innerHTML = "";
-                    savedNets.forEach((n, i) => {
-                        const current =
-                            lastStatus &&
-                            !lastStatus.ap_mode &&
-                            n.ssid === lastStatus.ssid;
-                        const el = document.createElement("div");
-                        el.className =
-                            "wifi-item" + (current ? " current" : "");
-                        el.style.cursor = "default";
-                        el.innerHTML = `<span class="ssid">${esc(n.ssid)}</span>
-        <span class="lock">${current ? "✓" : ""}</span>
-        <span class="del" title="${t("delete")}">✕</span>`;
-                        el.querySelector(".del").addEventListener("click", () =>
-                            delNet(i),
-                        );
-                        list.appendChild(el);
-                    });
-                } catch (e) {}
+                } catch (e) {
+                    savedNets = [];
+                }
+                renderWifiList();
             }
 
-            async function delNet(i) {
+            async function delNet(ssid) {
                 await fetch("/api/networks/delete", {
                     method: "POST",
-                    body: JSON.stringify({ ssid: savedNets[i].ssid }),
+                    body: JSON.stringify({ ssid }),
                 });
-                toast(t("netRemoved") + savedNets[i].ssid);
+                toast(t("netRemoved") + ssid);
                 loadNets();
             }
 
