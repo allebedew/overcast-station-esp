@@ -1,6 +1,12 @@
 #pragma once
 
+#include <stdbool.h>
+
 #include "esp_http_server.h"
+
+/* True while a firmware image is being received (the LED task polls this to
+ * show the purple "OTA in progress" pattern). */
+bool ota_is_active(void);
 
 /* Обработчик POST /api/ota: принимает бинарник прошивки в теле запроса,
  * пишет его в свободный OTA-раздел и перезагружает устройство.

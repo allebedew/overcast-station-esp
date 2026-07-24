@@ -1288,6 +1288,9 @@
             let lastOk = null;
             let lastStatus = null;
             let brightLoaded = false;
+            let polling = false;
+            const STALE_AFTER_MS = 3000; /* no successful poll this long → offline */
+            const POLL_TIMEOUT_MS = 2500; /* give up on a single stuck request */
 
             function setStale(stale) {
                 document.body.classList.toggle("stale", stale);
@@ -1303,8 +1306,15 @@
             }
 
             async function refresh() {
+                if (polling) return; /* don't stack requests while one is stuck */
+                polling = true;
+                const ctrl = new AbortController();
+                const to = setTimeout(() => ctrl.abort(), POLL_TIMEOUT_MS);
                 try {
-                    const r = await fetch("/api/status");
+                    const r = await fetch("/api/status", {
+                        signal: ctrl.signal,
+                        cache: "no-store",
+                    });
                     if (!r.ok) throw new Error(r.status);
                     const s = await r.json();
                     lastStatus = s;
@@ -1396,8 +1406,18 @@
                     }
                 } catch (e) {
                     setStale(true);
+                } finally {
+                    clearTimeout(to);
+                    polling = false;
                 }
             }
+
+            /* Watchdog: flip to offline as soon as polls stop succeeding, even
+             * if the pending request hasn't rejected yet (a dropped link can
+             * hang for a long time before fetch gives up). */
+            setInterval(() => {
+                if (lastOk && Date.now() - lastOk > STALE_AFTER_MS) setStale(true);
+            }, 500);
 
             /* ---------- charts (canvas, no libraries) ---------- */
             /* Each period maps to a server-side ring buffer (/api/history?p=):

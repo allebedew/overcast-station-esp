@@ -23,29 +23,6 @@ static void log_task_list(void)
     ESP_LOGI(TAG, "Task list:\nName          State  Prio  Stack  Num\n%s", task_list_buf);
 }
 
-static void on_wifi_status(wifi_status_t status)
-{
-    switch (status) {
-    case WIFI_STATUS_CONNECTING:
-        led_set_status(LED_STATUS_WIFI_CONNECTING);
-        break;
-    case WIFI_STATUS_CONNECTED:
-        led_set_status(LED_STATUS_WIFI_CONNECTED);
-        break;
-    case WIFI_STATUS_FAILED:
-        led_set_status(LED_STATUS_WIFI_FAILED);
-        break;
-    case WIFI_STATUS_AP_MODE:
-        led_set_pulse_count(wifi_get_ap_client_count());
-        led_set_status(LED_STATUS_WIFI_AP);
-        break;
-    case WIFI_STATUS_WAITING_RETRY:
-    case WIFI_STATUS_DISCONNECTED:
-        led_set_status(LED_STATUS_WIFI_DISCONNECTED);
-        break;
-    }
-}
-
 void app_main(void)
 {
     /* NVS нужен модулям ниже (яркость LED, список сетей Wi-Fi) */
@@ -57,10 +34,8 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     led_init();
-    led_set_status(LED_STATUS_WIFI_DISCONNECTED);
     button_init();
 
-    wifi_set_status_callback(on_wifi_status);
     ESP_ERROR_CHECK(wifi_connect());
     storage_init();
     history_init();

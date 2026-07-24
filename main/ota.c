@@ -5,7 +5,6 @@
 
 #include "esp_log.h"
 #include "esp_ota_ops.h"
-#include "led.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 
@@ -16,6 +15,13 @@
 #define OTA_REBOOT_DELAY_MS 1000
 
 static const char *TAG = "ota";
+
+static volatile bool s_ota_active;
+
+bool ota_is_active(void)
+{
+    return s_ota_active;
+}
 
 static void reboot_cb(void *arg)
 {
@@ -54,15 +60,14 @@ esp_err_t ota_post_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "OTA start: %u bytes -> %s",
              (unsigned)req->content_len, target->label);
 
-    /* на время загрузки — фиолетовое мигание; при ошибке вернём как было */
-    led_status_t prev_led = led_get_status();
-    led_set_status(LED_STATUS_OTA);
+    /* purple blink while uploading; cleared on error (the LED task polls this) */
+    s_ota_active = true;
 
     esp_ota_handle_t ota;
     esp_err_t err = esp_ota_begin(target, OTA_WITH_SEQUENTIAL_WRITES, &ota);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin: %s", esp_err_to_name(err));
-        led_set_status(prev_led);
+        s_ota_active = false;
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                                    "ota begin failed");
     }
@@ -103,7 +108,7 @@ esp_err_t ota_post_handler(httpd_req_t *req)
     }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "OTA failed: %s", esp_err_to_name(err));
-        led_set_status(prev_led);
+        s_ota_active = false;
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid image");
     }
 

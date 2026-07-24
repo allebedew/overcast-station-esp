@@ -36,11 +36,17 @@ sensors are not connected yet.
   to `POST /api/ota` (auth via `X-OTA-Key` header, key defined in `ota.c`).
   Two 4 MB app partitions + otadata; rollback is enabled — a new image must
   confirm itself at the end of `app_main`, otherwise the bootloader reverts.
-- **Status LED** (WS2812 on GPIO8, own FreeRTOS task, 250 ms tick):
-  - yellow blinking — connecting; yellow solid — waiting between retries
-  - green — connected; blinks off briefly on every HTTP request
-  - red — error; purple blinking — OTA upload in progress
+- **Status LED** (WS2812 on GPIO8, own FreeRTOS task, 100 ms tick). The task
+  polls the other modules each tick and shows, by priority (highest first):
+  - purple blinking — OTA upload in progress
+  - red blinking — error, blink count = code (2 = SCD40 not responding; a
+    missing reading is ignored for the first 10 s after boot while the sensor
+    warms up)
   - blue — AP mode; every 3 s it pulses off N times = number of AP clients
+  - green blinking — connecting to Wi-Fi
+  - connected & healthy — solid, color by CO₂ level with a smooth
+    green→yellow→red gradient (green ≤400, yellow 800, red ≥1200 ppm);
+    dips off briefly on every HTTP request
 - **SCD40 (CO₂ / temperature / humidity)** — I2C on GPIO2 (SDA) / GPIO3 (SCL),
   periodic measurement mode (fresh reading every 5 s — the sensor's maximum).
   Hot-plug: an absent/failing sensor is re-probed every 5 s, the web UI shows
@@ -81,11 +87,11 @@ tasks/callbacks. Modules under `main/`, each with a small public header:
 
 | Module | Role |
 |---|---|
-| `wifi.c` | connection state machine, events → status callback (used by main.c to drive the LED) |
+| `wifi.c` | connection state machine; state exposed via `wifi_get_status()` (polled by the LED task) |
 | `wifi_store.c` | saved credentials in NVS (namespace `wifi_creds`), mutex-protected |
 | `webserver.c` | esp_http_server + mDNS; all handlers go through one wrapper that logs the request (except `/api/status` — polled every 1 s) and blinks the LED; static buffers are safe (single httpd task) |
 | `ota.c` | `POST /api/ota` handler + rollback confirmation |
-| `led.c` | LED task; status enum, brightness (persisted) |
+| `led.c` | LED task; polls wifi/sensors/ota each tick and picks the pattern, brightness (persisted) |
 | `button.c` | BOOT button via espressif/button |
 | `sensors.c` | internal chip temperature + SCD40 polling task (I2C master bus, Sensirion protocol with CRC-8) |
 | `timesync.c` | SNTP client; `timesync_is_synced()` flag |
