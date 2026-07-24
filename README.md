@@ -14,8 +14,13 @@ sensors are not connected yet.
   case it connects only to that AP. After all networks fail (or when the store
   is empty at boot) it falls back to AP mode.
 - **AP mode** — `WeatherStation` / `weather123`, used for provisioning.
-  Runs as APSTA so Wi-Fi scanning keeps working. Toggled manually with the
-  BOOT button (GPIO9, single click: AP ↔ reconnect STA).
+  Runs as APSTA, so Wi-Fi scanning keeps working and — when enabled from an
+  already-connected state — the existing STA association to the router survives
+  (SoftAP just shares the STA channel): the device stays reachable on the main
+  network while the AP is up. `/api/status` reports the station and the access
+  point as two independent objects (`sta` and `ap`), so both are exposed
+  regardless of mode, and the web UI shows them as separate sections. Toggled
+  manually with the BOOT button (GPIO9, single click: AP ↔ reconnect STA).
 - **Web UI** — single page embedded into the firmware, `http://weather.local`
   (mDNS). Dark dashboard: three sensor cards (temperature / humidity / CO₂)
   with current value, trend arrow, min/max and a sparkline chart, plus a

@@ -175,41 +175,65 @@ static int cpu_load_percent(void)
 
 static esp_err_t status_get_handler(httpd_req_t *req)
 {
-    bool ap_mode = wifi_get_status() == WIFI_STATUS_AP_MODE;
+    bool ap_active = wifi_get_status() == WIFI_STATUS_AP_MODE;
 
-    esp_netif_ip_info_t ip_info = {0};
-    esp_netif_dns_info_t dns = {0};
-    esp_netif_t *netif = esp_netif_get_handle_from_ifkey(
-        ap_mode ? "WIFI_AP_DEF" : "WIFI_STA_DEF");
-    if (netif) {
-        esp_netif_get_ip_info(netif, &ip_info);
-        esp_netif_get_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns);
+    /* STA and AP are reported as independent objects: in APSTA both interfaces
+     * can be up at once, so the station link is exposed even while the AP is on
+     * (and vice versa). Static buffers are safe — one httpd task. */
+
+    static char sta_json[400];
+    {
+        esp_netif_ip_info_t ip = {0};
+        esp_netif_dns_info_t dns = {0};
+        esp_netif_t *nif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        if (nif) {
+            esp_netif_get_ip_info(nif, &ip);
+            esp_netif_get_dns_info(nif, ESP_NETIF_DNS_MAIN, &dns);
+        }
+        uint8_t mac[6] = {0};
+        esp_wifi_get_mac(WIFI_IF_STA, mac);
+        wifi_ap_record_t ap = {0};
+        bool connected = esp_wifi_sta_get_ap_info(&ap) == ESP_OK;
+        char ssid[67];
+        json_escape((const char *)ap.ssid, ssid, sizeof(ssid));
+        snprintf(sta_json, sizeof(sta_json),
+                 "\"sta\":{\"connected\":%s,\"ssid\":\"%s\",\"ip\":\"" IPSTR "\","
+                 "\"gw\":\"" IPSTR "\",\"dns\":\"" IPSTR "\",\"mac\":\"" MACSTR "\","
+                 "\"channel\":%d,\"rssi\":%d,\"bssid\":\"" MACSTR "\",\"phy\":\"%s\","
+                 "\"auth\":\"%s\"}",
+                 connected ? "true" : "false", ssid, IP2STR(&ip.ip), IP2STR(&ip.gw),
+                 IP2STR(&dns.ip.u_addr.ip4), MAC2STR(mac), ap.primary, ap.rssi,
+                 MAC2STR(ap.bssid), phy_str(&ap), authmode_str(ap.authmode));
     }
 
-    uint8_t mac[6] = {0};
-    esp_wifi_get_mac(ap_mode ? WIFI_IF_AP : WIFI_IF_STA, mac);
-
-    /* буферы статические: обработчики выполняются в единственной задаче httpd */
-    static char wifi_json[300];
-    if (ap_mode) {
-        wifi_sta_list_t sta_list = {0};
-        esp_wifi_ap_get_sta_list(&sta_list);
-        int off = snprintf(wifi_json, sizeof(wifi_json), "\"clients\":[");
-        for (int i = 0; i < sta_list.num && off < (int)sizeof(wifi_json); i++) {
-            off += snprintf(wifi_json + off, sizeof(wifi_json) - off,
-                            "%s{\"mac\":\"" MACSTR "\",\"rssi\":%d}",
-                            i ? "," : "",
-                            MAC2STR(sta_list.sta[i].mac), sta_list.sta[i].rssi);
+    static char ap_json[440];
+    {
+        esp_netif_ip_info_t ip = {0};
+        esp_netif_t *nif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+        if (nif) {
+            esp_netif_get_ip_info(nif, &ip);
         }
-        if (off < (int)sizeof(wifi_json)) {
-            snprintf(wifi_json + off, sizeof(wifi_json) - off, "]");
+        uint8_t mac[6] = {0};
+        esp_wifi_get_mac(WIFI_IF_AP, mac);
+        char ssid[67];
+        json_escape(wifi_get_ap_ssid(), ssid, sizeof(ssid));
+        int off = snprintf(ap_json, sizeof(ap_json),
+                           "\"ap\":{\"active\":%s,\"ssid\":\"%s\",\"ip\":\"" IPSTR "\","
+                           "\"mac\":\"" MACSTR "\",\"channel\":%d,\"clients\":[",
+                           ap_active ? "true" : "false", ssid, IP2STR(&ip.ip),
+                           MAC2STR(mac), wifi_get_channel());
+        if (ap_active) {
+            wifi_sta_list_t sta_list = {0};
+            esp_wifi_ap_get_sta_list(&sta_list);
+            for (int i = 0; i < sta_list.num && off < (int)sizeof(ap_json); i++) {
+                off += snprintf(ap_json + off, sizeof(ap_json) - off,
+                                "%s{\"mac\":\"" MACSTR "\",\"rssi\":%d}", i ? "," : "",
+                                MAC2STR(sta_list.sta[i].mac), sta_list.sta[i].rssi);
+            }
         }
-    } else {
-        wifi_ap_record_t ap = {0};
-        esp_wifi_sta_get_ap_info(&ap);
-        snprintf(wifi_json, sizeof(wifi_json),
-                 "\"rssi\":%d,\"bssid\":\"" MACSTR "\",\"phy\":\"%s\",\"auth\":\"%s\"",
-                 ap.rssi, MAC2STR(ap.bssid), phy_str(&ap), authmode_str(ap.authmode));
+        if (off < (int)sizeof(ap_json)) {
+            snprintf(ap_json + off, sizeof(ap_json) - off, "]}");
+        }
     }
 
     const esp_app_desc_t *app = esp_app_get_description();
@@ -234,13 +258,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         strftime(time_str, sizeof(time_str), "%d.%m.%Y %H:%M:%S", &tm);
     }
 
-    char essid[67];
-    json_escape(wifi_get_ssid(), essid, sizeof(essid));
-
-    static char json[1280];
+    static char json[1600];
     int len = snprintf(json, sizeof(json),
-        "{\"ap_mode\":%s,\"ssid\":\"%s\",\"ip\":\"" IPSTR "\",\"gw\":\"" IPSTR "\","
-        "\"dns\":\"" IPSTR "\",\"mac\":\"" MACSTR "\",\"channel\":%d,%s,"
+        "{\"ap_mode\":%s,%s,%s,"
         "\"uptime\":%lld,\"temp\":%.1f,\"time\":\"%s\",\"time_synced\":%s,"
         "\"scd40_ok\":%s,\"co2\":%u,\"air_temp\":%.1f,\"air_rh\":%.1f,"
         "\"app_version\":\"%s\",\"build\":\"%s %s\",\"idf_ver\":\"%s\","
@@ -249,10 +269,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"http_conns\":%d,"
         "\"heap_free\":%u,\"heap_min\":%u,\"heap_total\":%u,\"heap_largest\":%u,"
         "\"nvs_used\":%u,\"nvs_total\":%u,\"led_brightness\":%u}",
-        ap_mode ? "true" : "false",
-        essid, IP2STR(&ip_info.ip), IP2STR(&ip_info.gw),
-        IP2STR(&dns.ip.u_addr.ip4), MAC2STR(mac), wifi_get_channel(),
-        wifi_json,
+        ap_active ? "true" : "false",
+        sta_json, ap_json,
         esp_timer_get_time() / 1000000,
         sensors_chip_temp(), time_str,
         timesync_is_synced() ? "true" : "false",

@@ -337,6 +337,17 @@
                 font-variant-numeric: tabular-nums;
                 overflow-wrap: anywhere;
             }
+            .kv tr.kv-h td {
+                padding: 14px 0 4px;
+                text-align: left;
+                font-size: 11px;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+                color: var(--text-dim);
+            }
+            .kv tr.kv-h:first-child td {
+                padding-top: 0;
+            }
             .bar-mini {
                 display: inline-block;
                 width: 70px;
@@ -1034,6 +1045,11 @@
                     channel: "Канал",
                     clients: "Клиентов",
                     client: "Клиент",
+                    wifiSta: "Wi-Fi (станция)",
+                    device: "Устройство",
+                    state: "Состояние",
+                    notConn: "Не подключено",
+                    apOff: "Выключена",
                     wifiNet: "Сеть Wi-Fi",
                     signal: "Сигнал",
                     phy: "Стандарт",
@@ -1119,6 +1135,11 @@
                     channel: "Channel",
                     clients: "Clients",
                     client: "Client",
+                    wifiSta: "Wi-Fi (station)",
+                    device: "Device",
+                    state: "State",
+                    notConn: "Not connected",
+                    apOff: "Off",
                     wifiNet: "Wi-Fi network",
                     signal: "Signal",
                     phy: "Standard",
@@ -1249,7 +1270,11 @@
 
             function kvRows(rows) {
                 return rows
-                    .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`)
+                    .map((r) =>
+                        r.h !== undefined
+                            ? `<tr class="kv-h"><td colspan="2">${r.h}</td></tr>`
+                            : `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`,
+                    )
                     .join("");
             }
 
@@ -1321,11 +1346,14 @@
                     lastOk = Date.now();
                     setStale(false);
 
-                    $("hdrSub").textContent =
-                        (s.ap_mode ? t("apMode") + " " : "") +
-                        s.ssid +
-                        " · " +
-                        s.ip;
+                    {
+                        const sta = s.sta || {};
+                        const ap = s.ap || {};
+                        const bits = [];
+                        if (sta.connected) bits.push(sta.ssid + " · " + sta.ip);
+                        if (ap.active) bits.push(t("apMode") + " · " + ap.ip);
+                        $("hdrSub").textContent = bits.join("  ·  ") || t("notConn");
+                    }
 
                     /* sensor cards */
                     const ok = s.scd40_ok;
@@ -1342,31 +1370,41 @@
                         b.textContent = t("noData");
                     }
 
-                    /* system card */
-                    let rows;
-                    if (s.ap_mode) {
-                        rows = [
-                            [t("mode"), t("apMode")],
-                            [t("network"), esc(s.ssid)],
-                            [t("ipAddr"), s.ip],
-                            [t("channel"), s.channel],
-                            ["MAC", s.mac],
-                            [t("clients"), s.clients.length],
-                        ];
-                        s.clients.forEach((c, i) =>
+                    /* system card: Wi-Fi station and access point shown as
+                     * separate sections (in APSTA both can be up at once) */
+                    const sta = s.sta || {};
+                    const ap = s.ap || {};
+                    const rows = [{ h: t("wifiSta") }];
+                    if (sta.connected) {
+                        rows.push(
+                            [t("wifiNet"), esc(sta.ssid)],
+                            [t("signal"), `${sta.rssi} dBm (ch ${sta.channel})`],
+                            [t("phy"), sta.phy],
+                            [t("ipAddr"), sta.ip],
+                            ["MAC", sta.mac],
+                        );
+                    } else {
+                        rows.push([t("state"), t("notConn")]);
+                    }
+                    rows.push({ h: t("apMode") });
+                    if (ap.active) {
+                        rows.push(
+                            [t("network"), esc(ap.ssid)],
+                            [t("ipAddr"), ap.ip],
+                            [t("channel"), ap.channel],
+                            ["MAC", ap.mac],
+                            [t("clients"), ap.clients.length],
+                        );
+                        ap.clients.forEach((c, i) =>
                             rows.push([
                                 `${t("client")} ${i + 1}`,
                                 `${c.mac} · ${c.rssi} dBm`,
                             ]),
                         );
                     } else {
-                        rows = [
-                            [t("wifiNet"), `${esc(s.ssid)}`],
-                            [t("signal"), `${s.rssi} dBm (ch ${s.channel})`],
-                            [t("phy"), `${s.phy}`],
-                            [t("ipAddr"), s.ip],
-                        ];
+                        rows.push([t("state"), t("apOff")]);
                     }
+                    rows.push({ h: t("device") });
                     const heapPct = (
                         (100 * s.heap_free) /
                         s.heap_total
@@ -1876,10 +1914,10 @@
                 '<span class="rssi off"><i></i><i></i><i></i><i></i></span>';
 
             function connectedTo(ssid, bssid) {
-                if (!lastStatus || lastStatus.ap_mode || ssid !== lastStatus.ssid)
-                    return false;
-                if (bssid && lastStatus.bssid)
-                    return bssid.toLowerCase() === lastStatus.bssid.toLowerCase();
+                const sta = lastStatus && lastStatus.sta;
+                if (!sta || !sta.connected || ssid !== sta.ssid) return false;
+                if (bssid && sta.bssid)
+                    return bssid.toLowerCase() === sta.bssid.toLowerCase();
                 return true;
             }
 

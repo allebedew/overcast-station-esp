@@ -54,6 +54,11 @@ const char *wifi_get_ssid(void)
     return s_status == WIFI_STATUS_AP_MODE ? WIFI_AP_SSID : s_current_ssid;
 }
 
+const char *wifi_get_ap_ssid(void)
+{
+    return WIFI_AP_SSID;
+}
+
 int wifi_get_rssi(void)
 {
     wifi_ap_record_t ap_info;

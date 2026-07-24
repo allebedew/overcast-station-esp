@@ -49,6 +49,9 @@ int wifi_get_ap_client_count(void);
 /* SSID сети: в режиме станции — текущей, в режиме AP — собственный. */
 const char *wifi_get_ssid(void);
 
+/* Own SoftAP SSID (constant, regardless of current mode). */
+const char *wifi_get_ap_ssid(void);
+
 /* Уровень сигнала точки доступа в дБм; 0, если не подключены как станция. */
 int wifi_get_rssi(void);
 
