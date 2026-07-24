@@ -25,6 +25,8 @@
 #include "ota.h"
 #include "sensors.h"
 #include "timesync.h"
+#include "weather_api.h"
+#include "weather_store.h"
 #include "wifi.h"
 #include "wifi_store.h"
 
@@ -249,6 +251,14 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     scd40_data_t air;
     bool air_ok = sensors_scd40_get(&air);
 
+    weather_api_data_t weather;
+    bool weather_ok = weather_api_get(&weather);
+
+    weather_location_t wloc;
+    bool wloc_ok = weather_store_get_active_location(&wloc);
+    char weather_name[67];
+    json_escape(wloc_ok ? wloc.name : "", weather_name, sizeof(weather_name));
+
     char time_str[32] = "--.--.---- --:--:--";
     if (timesync_is_synced()) {
         time_t now;
@@ -258,11 +268,20 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         strftime(time_str, sizeof(time_str), "%d.%m.%Y %H:%M:%S", &tm);
     }
 
-    static char json[1600];
+    static char json[2304];
     int len = snprintf(json, sizeof(json),
         "{\"ap_mode\":%s,%s,%s,"
         "\"uptime\":%lld,\"temp\":%.1f,\"time\":\"%s\",\"time_synced\":%s,"
         "\"scd40_ok\":%s,\"co2\":%u,\"air_temp\":%.1f,\"air_rh\":%.1f,"
+        "\"weather_ok\":%s,\"weather_temp\":%.1f,\"weather_feels\":%.1f,"
+        "\"weather_tmin\":%.1f,\"weather_tmax\":%.1f,"
+        "\"weather_hum\":%.0f,\"weather_press\":%.0f,\"weather_press_msl\":%.0f,"
+        "\"weather_uvi\":%.1f,\"weather_wind\":%.1f,\"weather_gust\":%.1f,"
+        "\"weather_wind_dir\":%d,\"weather_precip\":%.1f,"
+        "\"weather_clouds\":%d,\"weather_code\":%d,"
+        "\"weather_elev\":%.0f,\"weather_utc_offset\":%d,\"weather_age\":%d,"
+        "\"weather_name\":\"%s\",\"weather_active\":%d,"
+        "\"weather_lat\":%.4f,\"weather_lon\":%.4f,"
         "\"app_version\":\"%s\",\"build\":\"%s %s\",\"idf_ver\":\"%s\","
         "\"chip_rev\":\"v%d.%d\",\"cpu_mhz\":%d,\"flash_mb\":%lu,"
         "\"reset_reason\":\"%s\",\"cpu_load\":%d,\"tasks\":%u,"
@@ -275,6 +294,15 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         sensors_chip_temp(), time_str,
         timesync_is_synced() ? "true" : "false",
         air_ok ? "true" : "false", air.co2_ppm, air.temp_c, air.rh_pct,
+        weather_ok ? "true" : "false", weather.temp_c, weather.feels_c,
+        weather.temp_min_c, weather.temp_max_c,
+        weather.humidity_pct, weather.pressure_hpa, weather.pressure_msl_hpa,
+        weather.uvi, weather.wind_kmh, weather.gust_kmh,
+        weather.wind_dir_deg, weather.precip_mm,
+        weather.cloud_pct, weather.weather_code,
+        weather.elevation_m, weather.utc_offset_s, (int)weather.age_s,
+        weather_name, weather_store_get_active(),
+        wloc_ok ? wloc.lat : 0, wloc_ok ? wloc.lon : 0,
         app->version, app->date, app->time, app->idf_ver,
         chip.revision / 100, chip.revision % 100,
         CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
@@ -471,6 +499,85 @@ static esp_err_t network_delete_post_handler(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
+static esp_err_t locations_get_handler(httpd_req_t *req)
+{
+    static char json[1024];
+    char name[100];
+    int off = snprintf(json, sizeof(json), "{\"active\":%d,\"locations\":[",
+                       weather_store_get_active());
+    weather_location_t loc;
+    for (int i = 0; weather_store_get(i, &loc); i++) {
+        off += snprintf(json + off, sizeof(json) - off,
+                        "%s{\"name\":\"%s\",\"lat\":%.4f,\"lon\":%.4f}",
+                        i ? "," : "", json_escape(loc.name, name, sizeof(name)),
+                        loc.lat, loc.lon);
+    }
+    off += snprintf(json + off, sizeof(json) - off, "]}");
+
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json, off);
+}
+
+/* Coordinates are resolved from a place name by the browser (Open-Meteo
+ * geocoding) and posted here already numeric. */
+static esp_err_t location_add_post_handler(httpd_req_t *req)
+{
+    cJSON *root = read_json_body(req);
+    if (!root) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    }
+    const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(root, "name"));
+    const cJSON *lat = cJSON_GetObjectItem(root, "lat");
+    const cJSON *lon = cJSON_GetObjectItem(root, "lon");
+    esp_err_t err = (name && cJSON_IsNumber(lat) && cJSON_IsNumber(lon))
+        ? weather_store_add(name, (float)lat->valuedouble, (float)lon->valuedouble)
+        : ESP_ERR_INVALID_ARG;
+    cJSON_Delete(root);
+
+    if (err != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                   err == ESP_ERR_NO_MEM ? "list is full"
+                                                         : "bad location");
+    }
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
+static esp_err_t location_delete_handler(httpd_req_t *req)
+{
+    cJSON *root = read_json_body(req);
+    if (!root) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    }
+    const cJSON *index = cJSON_GetObjectItem(root, "index");
+    esp_err_t err = cJSON_IsNumber(index) ? weather_store_remove(index->valueint)
+                                          : ESP_ERR_INVALID_ARG;
+    cJSON_Delete(root);
+
+    if (err != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "not found");
+    }
+    weather_api_refresh(); /* the active location may have shifted */
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
+static esp_err_t location_active_put_handler(httpd_req_t *req)
+{
+    cJSON *root = read_json_body(req);
+    if (!root) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    }
+    const cJSON *index = cJSON_GetObjectItem(root, "index");
+    esp_err_t err = cJSON_IsNumber(index) ? weather_store_set_active(index->valueint)
+                                          : ESP_ERR_INVALID_ARG;
+    cJSON_Delete(root);
+
+    if (err != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad index");
+    }
+    weather_api_refresh();
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
 static esp_err_t settings_post_handler(httpd_req_t *req)
 {
     cJSON *root = read_json_body(req);
@@ -535,7 +642,11 @@ void webserver_start(void)
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192; /* дефолтных 4 КиБ не хватает обработчику /api/status */
-    config.max_uri_handlers = 16; /* дефолтных 8 уже впритык */
+    config.max_uri_handlers = 20; /* дефолтных 8 уже впритык */
+    /* Recycle the least-recently-used connection instead of holding all
+     * max_open_sockets slots, so the browser's keep-alive polling can't
+     * starve the shared LWIP socket pool of outbound TLS clients. */
+    config.lru_purge_enable = true;
     httpd_handle_t server = NULL;
     ESP_ERROR_CHECK(httpd_start(&server, &config));
     s_server = server;
@@ -594,6 +705,30 @@ void webserver_start(void)
         .handler = handle_request,
         .user_ctx = network_delete_post_handler,
     };
+    const httpd_uri_t locations_get_uri = {
+        .uri = "/api/locations",
+        .method = HTTP_GET,
+        .handler = handle_request,
+        .user_ctx = locations_get_handler,
+    };
+    const httpd_uri_t location_add_uri = {
+        .uri = "/api/locations",
+        .method = HTTP_POST,
+        .handler = handle_request,
+        .user_ctx = location_add_post_handler,
+    };
+    const httpd_uri_t location_delete_uri = {
+        .uri = "/api/locations",
+        .method = HTTP_DELETE,
+        .handler = handle_request,
+        .user_ctx = location_delete_handler,
+    };
+    const httpd_uri_t location_active_uri = {
+        .uri = "/api/locations/active",
+        .method = HTTP_PUT,
+        .handler = handle_request,
+        .user_ctx = location_active_put_handler,
+    };
     const httpd_uri_t connect_uri = {
         .uri = "/api/connect",
         .method = HTTP_POST,
@@ -627,6 +762,10 @@ void webserver_start(void)
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &networks_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &network_add_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &network_delete_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &locations_get_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &location_add_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &location_delete_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &location_active_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &connect_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &settings_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &scd40_cal_uri));

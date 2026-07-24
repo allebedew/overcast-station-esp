@@ -23,8 +23,14 @@ sensors are not connected yet.
   manually with the BOOT button (GPIO9, single click: AP ↔ reconnect STA).
 - **Web UI** — single page embedded into the firmware, `http://weather.local`
   (mDNS). Dark dashboard: three sensor cards (temperature / humidity / CO₂)
-  with current value, trend arrow, min/max and a sparkline chart, plus a
-  system card (Wi-Fi details, chip temp, heap, CPU load, NVS, uptime, reset
+  with current value, trend arrow, min/max and a sparkline chart, an
+  outside-weather card (Open-Meteo, refreshed hourly: a decoded conditions
+  line, one tile per parameter — temperature, feels-like, daily min/max,
+  humidity, surface & sea-level pressure, UV index, wind speed, gusts,
+  direction, cloud cover and total precipitation — and a meta line with the
+  grid-cell elevation, the coordinates and the location's UTC offset; a chip row switches the
+  displayed location and adds/removes them, resolving a typed city name to
+  coordinates via in-browser Open-Meteo geocoding), plus a system card (Wi-Fi details, chip temp, heap, CPU load, NVS, uptime, reset
   reason, firmware/build version), a Wi-Fi card (one list — saved networks by
   default, augmented with scanned APs on Scan; saved and the connected AP are
   badged; tap an AP → password modal with an optional "pin BSSID" toggle →
@@ -81,6 +87,34 @@ sensors are not connected yet.
   (±25 ppm hysteresis), temperature drift ≥2 °C, humidity drift ≥10 %.
   Bot token / chat id are compile-time constants in `telegram.c`
   (like `OTA_KEY`); when left empty the module disables itself.
+- **Outside weather (Open-Meteo)** — outdoor conditions fetched over HTTPS
+  once an hour. From the `current` block: temperature and apparent
+  ("feels like") temperature, humidity, surface and sea-level pressure,
+  UV index, cloud cover, wind speed / gusts / direction, total `precipitation`
+  (rain + showers + snow water-equivalent) and the WMO `weather_code`; from
+  the `daily` block (`forecast_days=1`) today's
+  min/max temperature. `timezone=auto` aligns the daily min/max to the local
+  day and yields `utc_offset_seconds`; the reply's `elevation` is kept too.
+  No API key needed; the default `best_match` model picks the most accurate
+  regional model for the coordinates (ICON / ECMWF over Europe). Only the
+  active location is fetched; the full request URL is logged on every fetch.
+  A failed fetch drops the cached reading (`weather_ok` goes false, the card
+  empties — no stale values are shown) and is retried in 5 min.
+  Exposed as `weather_*` fields in
+  `/api/status` (incl. `weather_name` / `weather_active`) and shown in a
+  dedicated "outside weather" card on the web page;
+  `weather_api_code_str()` decodes the WMO code to English text (the web UI
+  decodes it bilingually).
+- **Weather locations** — up to 10 named locations `{name, lat, lon}` plus the
+  active one are stored in NVS (`weather_store.c`). The list is empty on first
+  boot — until a location is added the weather card stays empty and no fetch is
+  made. The web UI switches between
+  them (chips in the weather card) and adds/removes them; switching the active
+  location wakes the fetch task via `weather_api_refresh()` to reload right
+  away. Coordinates are resolved from a place name by the browser (Open-Meteo
+  geocoding) — the device stores only the numeric result — so adding a location
+  needs internet on the client (not in AP-provisioning mode). Managed through
+  `GET/POST/DELETE /api/locations` and `PUT /api/locations/active`.
 - **SNTP** — UTC time from `pool.ntp.org`. Sync state is exposed as
   `timesync_is_synced()` and as `time_synced` in `/api/status`; until the
   first sync `time` contains dashes instead of digits.
@@ -103,6 +137,8 @@ tasks/callbacks. Modules under `main/`, each with a small public header:
 | `history.c` | three RAM rings (5 min @ 1 s, 1 h @ 5 s, 24 h @ 1 min); fed by `sensors.c`, driven by a 1 s esp_timer; the two longer rings persist to `/data/hist_1h.bin` / `/data/history.bin` (5/10-min snapshots + shutdown handler) |
 | `storage.c` | mounts the LittleFS `storage` partition at `/data` |
 | `telegram.c` | message queue + sender task (Telegram Bot API over HTTPS); `telegram_notify(fmt, ...)` |
+| `weather_api.c` | Open-Meteo client; own task fetches the active location's outdoor conditions (temp/feels-like, daily min/max, humidity, surface & MSL pressure, UVI, wind, clouds, precipitation, WMO code, elevation, UTC offset) over HTTPS once an hour, exposed via `weather_api_get()` / `weather_api_code_str()`; `weather_api_refresh()` forces an immediate reload on a location change |
+| `weather_store.c` | saved weather locations `{name, lat, lon}` + active index in NVS (namespace `weather_loc`), mutex-protected; empty until the user adds a location |
 | `alerts.c` | notification rules & thresholds; own task polls sensors/network every 10 s |
 | `settings.c` | thin u8 get/set over NVS namespace `settings` |
 
@@ -111,12 +147,16 @@ tasks/callbacks. Modules under `main/`, each with a small public header:
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (index.html) |
-| `/api/status` | GET | full status JSON: Wi-Fi (STA details or AP client list), system info, heap, settings |
+| `/api/status` | GET | full status JSON: Wi-Fi (STA details or AP client list), system info, heap, settings, outdoor weather (`weather_*`) |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`) selects the ring; returns `{period: <s>, co2: [...], temp: [...], rh: [...]}`, `null` = gap |
 | `/api/scan` | GET | scan for Wi-Fi networks, returns `[{ssid, bssid, ch, rssi, auth}]` (one entry per BSSID — same SSID may repeat across APs) |
 | `/api/networks` | GET | list of saved networks `[{ssid, bssid?}]` (bssid present only when the network is pinned to an AP) |
 | `/api/networks/add` | POST | save a network; body `{"ssid": "...", "password": "...", "bssid": "aa:bb:.."}` (bssid optional — pins the connection to that AP; omit/all-zero = connect to strongest), updates existing SSID |
 | `/api/networks/delete` | POST | remove a saved network; body `{"ssid": "..."}` |
+| `/api/locations` | GET | saved weather locations `{"active": <idx>, "locations": [{"name", "lat", "lon"}]}` |
+| `/api/locations` | POST | add a location; body `{"name": "...", "lat": <n>, "lon": <n>}` (coordinates resolved in-browser via Open-Meteo geocoding), updates an existing name |
+| `/api/locations` | DELETE | remove a location; body `{"index": <n>}` |
+| `/api/locations/active` | PUT | switch the displayed location; body `{"index": <n>}` (triggers an immediate refetch) |
 | `/api/connect` | POST | leave AP mode / restart the STA connection cycle |
 | `/api/settings` | POST | apply settings; body `{"led_brightness": 1–255}`, persisted in NVS |
 | `/api/scd40/calibrate` | POST | SCD40 forced recalibration; body `{"ppm": 400–2000}`, returns applied correction |
@@ -129,8 +169,9 @@ idf.py build flash monitor   # first time (partition table changed) — by cable
 ./flash-ota.sh               # afterwards — over the network
 ```
 
-Deliberate config deviations live in `sdkconfig.defaults` (custom partition
-table, rollback, run-time stats for CPU load, -Os); `sdkconfig` is generated
-and not tracked. `partitions.csv`: nvs 24K, otadata 8K, phy 4K, ota_0/ota_1
+Deliberate config deviations live in `sdkconfig.defaults` (16 MB flash size,
+custom partition table, rollback, run-time stats for CPU load, -Os, and
+`LWIP_MAX_SOCKETS=16` so httpd + mDNS + SNTP don't starve the outbound TLS
+clients of sockets); `sdkconfig` is generated and not tracked. `partitions.csv`: nvs 24K, otadata 8K, phy 4K, ota_0/ota_1
 4M each, storage (LittleFS) 6M pinned to the end of flash at 0xA00000 so
 future app-slot growth does not move the data.

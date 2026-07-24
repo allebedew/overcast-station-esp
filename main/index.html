@@ -108,6 +108,7 @@
                 animation: none;
             }
             body.stale .grid-sensors,
+            body.stale .card.weather,
             body.stale .grid-bottom {
                 opacity: 0.45;
             }
@@ -235,6 +236,129 @@
             .badge.off {
                 background: rgba(91, 102, 117, 0.18);
                 color: var(--text-faint);
+            }
+
+            /* --- Outside weather card --- */
+            .card.weather {
+                margin-top: 12px;
+            }
+            .weather-age {
+                margin-left: auto;
+                font-size: 10.5px;
+                font-weight: 500;
+                color: var(--text-faint);
+                text-transform: none;
+                letter-spacing: 0;
+            }
+            .weather-cond {
+                margin: -2px 0 12px;
+                font-size: 13px;
+                font-weight: 500;
+                color: var(--text-dim);
+                /* reserve one line so the grid doesn't jump when the
+                 * conditions text appears/clears */
+                min-height: 1.3em;
+            }
+            .weather-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+                gap: 12px;
+            }
+            .weather-metric {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+                padding: 10px 12px;
+                border-radius: 10px;
+                background: var(--panel-2);
+                border: 1px solid var(--border);
+            }
+            .weather-metric .ov {
+                font-size: 24px;
+                font-weight: 700;
+                letter-spacing: -0.02em;
+                font-variant-numeric: tabular-nums;
+            }
+            .weather-metric .ou {
+                font-size: 12px;
+                color: var(--text-dim);
+                font-weight: 500;
+                margin-left: 3px;
+            }
+            .weather-metric .ol {
+                font-size: 11px;
+                color: var(--text-faint);
+            }
+            .weather-meta {
+                margin-top: 12px;
+                font-size: 11px;
+                color: var(--text-faint);
+                font-variant-numeric: tabular-nums;
+                /* reserve one line so nothing below jumps when data loads */
+                min-height: 1.3em;
+            }
+            /* --- Location switcher (chips in the weather card) --- */
+            .loc-bar {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                margin: 2px 0 14px;
+            }
+            .loc-chip {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 4px 11px;
+                border-radius: 999px;
+                border: 1px solid var(--border);
+                background: var(--panel-2);
+                font-size: 12px;
+                cursor: pointer;
+                transition:
+                    border-color 0.15s,
+                    color 0.15s;
+            }
+            .loc-chip:hover {
+                border-color: var(--accent);
+            }
+            .loc-chip.active {
+                border-color: var(--accent);
+                color: var(--accent);
+                font-weight: 600;
+            }
+            .loc-chip .del {
+                color: var(--co2-bad);
+                font-size: 12px;
+            }
+            .loc-chip.add {
+                color: var(--text-faint);
+                font-weight: 600;
+            }
+            /* --- Location search modal --- */
+            .loc-results {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                max-height: 260px;
+                overflow-y: auto;
+                margin: 6px 0 14px;
+            }
+            .loc-result {
+                padding: 9px 10px;
+                border-radius: 9px;
+                border: 1px solid var(--border);
+                background: var(--panel-2);
+                cursor: pointer;
+                font-size: 13px;
+                transition: border-color 0.15s;
+            }
+            .loc-result:hover {
+                border-color: var(--accent);
+            }
+            .loc-result .sub {
+                font-size: 11px;
+                color: var(--text-faint);
+                margin-top: 1px;
             }
 
             /* --- Period switch --- */
@@ -850,6 +974,118 @@
                 </div>
             </div>
 
+            <!-- OUTSIDE WEATHER (Open-Meteo, hourly) -->
+            <div class="card weather">
+                <h2>
+                    <span class="ic">🌤</span>
+                    <span data-i18n="weatherTitle">Погода на улице</span>
+                    <span class="weather-age" id="weatherAge"></span>
+                </h2>
+                <div class="loc-bar" id="locBar"></div>
+                <div class="weather-cond" id="weatherCond"></div>
+                <div class="weather-grid">
+                    <div class="weather-metric">
+                        <div>
+                            <span class="ov" id="weatherTempVal">--</span
+                            ><span class="ou">°C</span>
+                        </div>
+                        <span class="ol" data-i18n="weatherTemp">Температура</span>
+                    </div>
+                    <div class="weather-metric">
+                        <div>
+                            <span class="ov" id="weatherFeelsVal">--</span
+                            ><span class="ou">°C</span>
+                        </div>
+                        <span class="ol" data-i18n="weatherFeels"
+                            >По ощущениям</span
+                        >
+                    </div>
+                    <div class="weather-metric">
+                        <div>
+                            <span class="ov" id="weatherTminVal">--</span
+                            ><span class="ou">°C</span>
+                        </div>
+                        <span class="ol" data-i18n="weatherTmin"
+                            >Мин. за день</span
+                        >
+                    </div>
+                    <div class="weather-metric">
+                        <div>
+                            <span class="ov" id="weatherTmaxVal">--</span
+                            ><span class="ou">°C</span>
+                        </div>
+                        <span class="ol" data-i18n="weatherTmax"
+                            >Макс. за день</span
+                        >
+                    </div>
+                    <div class="weather-metric">
+                        <div>
+                            <span class="ov" id="weatherHumVal">--</span
+                            ><span class="ou">%</span>
+                        </div>
+                        <span class="ol" data-i18n="weatherHum">Влажность</span>
+                    </div>
+                    <div class="weather-metric">
+                        <div>
+                            <span class="ov" id="weatherPressVal">--</span
+                            ><span class="ou">hPa</span>
+                        </div>
+                        <span class="ol" data-i18n="weatherPress">Давление</span>
+                    </div>
+                    <div class="weather-metric">
+                        <div>
+                            <span class="ov" id="weatherPressMslVal">--</span
+                            ><span class="ou">hPa</span>
+                        </div>
+                        <span class="ol" data-i18n="weatherMsl"
+                            >На ур. моря</span
+                        >
+                    </div>
+                    <div class="weather-metric">
+                        <div><span class="ov" id="weatherUviVal">--</span></div>
+                        <span class="ol" data-i18n="weatherUvi">УФ-индекс</span>
+                    </div>
+                    <div class="weather-metric">
+                        <div>
+                            <span class="ov" id="weatherWindVal">--</span
+                            ><span class="ou" data-i18n="uKmh">км/ч</span>
+                        </div>
+                        <span class="ol" data-i18n="weatherWind">Ветер</span>
+                    </div>
+                    <div class="weather-metric">
+                        <div>
+                            <span class="ov" id="weatherGustVal">--</span
+                            ><span class="ou" data-i18n="uKmh">км/ч</span>
+                        </div>
+                        <span class="ol" data-i18n="weatherGust">Порывы</span>
+                    </div>
+                    <div class="weather-metric">
+                        <div>
+                            <span class="ov" id="weatherDirVal">--</span
+                            ><span class="ou" id="weatherDirDeg"></span>
+                        </div>
+                        <span class="ol" data-i18n="weatherDir"
+                            >Направление</span
+                        >
+                    </div>
+                    <div class="weather-metric">
+                        <div>
+                            <span class="ov" id="weatherCloudsVal">--</span
+                            ><span class="ou">%</span>
+                        </div>
+                        <span class="ol" data-i18n="weatherClouds">Облачность</span>
+                    </div>
+                    <div class="weather-metric">
+                        <div>
+                            <span class="ov" id="weatherPrecipVal">--</span
+                            ><span class="ou" data-i18n="uMm">мм</span>
+                        </div>
+                        <span class="ol" data-i18n="weatherPrecip">Осадки</span>
+                    </div>
+                </div>
+                <div class="weather-meta" id="weatherMeta"></div>
+            </div>
+
             <!-- BOTTOM ROW -->
             <div class="grid-bottom">
                 <!-- SYSTEM -->
@@ -984,6 +1220,32 @@
             </div>
         </div>
 
+        <div class="overlay" id="locModal">
+            <div class="modal">
+                <h3 data-i18n="locAddTitle">Добавить локацию</h3>
+                <div class="m-sub" data-i18n="locAddHint">
+                    Поиск города через Open-Meteo
+                </div>
+                <input
+                    type="text"
+                    id="locSearch"
+                    placeholder="Город…"
+                    data-i18n-ph="locSearchPh"
+                    autocomplete="off"
+                    autocapitalize="off"
+                    autocorrect="off"
+                    spellcheck="false"
+                    maxlength="60"
+                />
+                <div class="loc-results" id="locResults"></div>
+                <div class="row">
+                    <button class="btn" id="locCancel" data-i18n="cancel">
+                        Отмена
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <div id="toast"></div>
         <div id="tip"></div>
 
@@ -996,6 +1258,10 @@
      GET  /api/networks         - saved networks [{ssid, bssid?}] (bssid = pinned AP)
      POST /api/networks/add     - {ssid, password, bssid?} (bssid pins the AP)
      POST /api/networks/delete  - {ssid}
+     GET  /api/locations        - {active, locations:[{name, lat, lon}]}
+     POST /api/locations        - add {name, lat, lon} (coords resolved in-browser)
+     DELETE /api/locations      - {index}
+     PUT  /api/locations/active - {index} (switch the displayed location)
      POST /api/connect          - restart the STA connection cycle
      POST /api/settings         - {led_brightness}
      POST /api/scd40/calibrate  - {ppm}
@@ -1022,6 +1288,69 @@
                     min: "мин",
                     max: "макс",
                     noData: "Нет данных",
+                    weatherTitle: "Погода на улице",
+                    weatherTemp: "Температура",
+                    weatherFeels: "По ощущениям",
+                    weatherTmin: "Мин. за день",
+                    weatherTmax: "Макс. за день",
+                    weatherHum: "Влажность",
+                    weatherPress: "Давление",
+                    weatherMsl: "На ур. моря",
+                    weatherUvi: "УФ-индекс",
+                    weatherWind: "Ветер",
+                    weatherGust: "Порывы",
+                    weatherDir: "Направление",
+                    weatherClouds: "Облачность",
+                    weatherPrecip: "Осадки",
+                    weatherAlt: "выс.",
+                    uKmh: "км/ч",
+                    uMm: "мм",
+                    uMeters: "м",
+                    weatherAgo: "обновлено {n} назад",
+                    weatherWait: "ожидание данных…",
+                    locAdd: "Добавить локацию",
+                    locAddTitle: "Добавить локацию",
+                    locAddHint: "Поиск города через Open-Meteo",
+                    locSearchPh: "Город…",
+                    locSearching: "Поиск…",
+                    locSearchErr: "Ошибка поиска (нужен интернет у клиента)",
+                    locNoResults: "Ничего не найдено",
+                    locAdded: "Локация добавлена: {name}",
+                    locAddFail: "Не удалось добавить: ",
+                    locRemoved: "Локация удалена: {name}",
+                    locDelConfirm: "Удалить локацию «{name}»?",
+                    locLast: "Нельзя удалить последнюю локацию",
+                    compass: ["С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ"],
+                    wcode: {
+                        0: "Ясно",
+                        1: "Преимущественно ясно",
+                        2: "Переменная облачность",
+                        3: "Пасмурно",
+                        45: "Туман",
+                        48: "Изморозь",
+                        51: "Слабая морось",
+                        53: "Морось",
+                        55: "Сильная морось",
+                        56: "Слабая ледяная морось",
+                        57: "Ледяная морось",
+                        61: "Небольшой дождь",
+                        63: "Дождь",
+                        65: "Сильный дождь",
+                        66: "Слабый ледяной дождь",
+                        67: "Ледяной дождь",
+                        71: "Небольшой снег",
+                        73: "Снег",
+                        75: "Сильный снег",
+                        77: "Снежная крупа",
+                        80: "Небольшой ливень",
+                        81: "Ливень",
+                        82: "Сильный ливень",
+                        85: "Небольшой снегопад",
+                        86: "Сильный снегопад",
+                        95: "Гроза",
+                        96: "Гроза с градом",
+                        99: "Гроза с сильным градом",
+                    },
                     system: "Система",
                     loading: "Загрузка…",
                     wifiNetworks: "Wi-Fi сети",
@@ -1113,6 +1442,69 @@
                     min: "min",
                     max: "max",
                     noData: "No data",
+                    weatherTitle: "Outside weather",
+                    weatherTemp: "Temperature",
+                    weatherFeels: "Feels like",
+                    weatherTmin: "Daily min",
+                    weatherTmax: "Daily max",
+                    weatherHum: "Humidity",
+                    weatherPress: "Pressure",
+                    weatherMsl: "Sea level",
+                    weatherUvi: "UV index",
+                    weatherWind: "Wind",
+                    weatherGust: "Gusts",
+                    weatherDir: "Direction",
+                    weatherClouds: "Clouds",
+                    weatherPrecip: "Precipitation",
+                    weatherAlt: "alt.",
+                    uKmh: "km/h",
+                    uMm: "mm",
+                    uMeters: "m",
+                    weatherAgo: "updated {n} ago",
+                    weatherWait: "waiting for data…",
+                    locAdd: "Add location",
+                    locAddTitle: "Add location",
+                    locAddHint: "Search a city via Open-Meteo",
+                    locSearchPh: "City…",
+                    locSearching: "Searching…",
+                    locSearchErr: "Search failed (the client needs internet)",
+                    locNoResults: "Nothing found",
+                    locAdded: "Location added: {name}",
+                    locAddFail: "Could not add: ",
+                    locRemoved: "Location removed: {name}",
+                    locDelConfirm: "Remove location “{name}”?",
+                    locLast: "Can't remove the last location",
+                    compass: ["N", "NE", "E", "SE", "S", "SW", "W", "NW"],
+                    wcode: {
+                        0: "Clear sky",
+                        1: "Mainly clear",
+                        2: "Partly cloudy",
+                        3: "Overcast",
+                        45: "Fog",
+                        48: "Rime fog",
+                        51: "Light drizzle",
+                        53: "Drizzle",
+                        55: "Dense drizzle",
+                        56: "Light freezing drizzle",
+                        57: "Freezing drizzle",
+                        61: "Slight rain",
+                        63: "Rain",
+                        65: "Heavy rain",
+                        66: "Light freezing rain",
+                        67: "Freezing rain",
+                        71: "Slight snow",
+                        73: "Snow",
+                        75: "Heavy snow",
+                        77: "Snow grains",
+                        80: "Slight showers",
+                        81: "Rain showers",
+                        82: "Violent showers",
+                        85: "Light snow showers",
+                        86: "Heavy snow showers",
+                        95: "Thunderstorm",
+                        96: "Thunderstorm, hail",
+                        99: "Thunderstorm, heavy hail",
+                    },
                     system: "System",
                     loading: "Loading…",
                     wifiNetworks: "Wi-Fi networks",
@@ -1227,6 +1619,7 @@
                 localStorage.setItem("lang", lang);
                 applyLang();
                 loadNets(); /* re-render list hints and delete tooltips */
+                renderLocBar(); /* refresh chip tooltips for the new language */
             });
 
             /* ---------- collapsible system panels (hidden by default) ---------- */
@@ -1267,6 +1660,29 @@
             }
 
             const fmtKib = (b) => (b / 1024).toFixed(0) + " " + t("kb");
+
+            /* Compact "time ago" for the outside-weather freshness stamp. */
+            function fmtAgo(s) {
+                const m = Math.floor(s / 60),
+                    h = Math.floor(m / 60);
+                if (h) return `${h} ${t("uH")}`;
+                return `${Math.max(1, m)} ${t("uM")}`;
+            }
+
+            /* Meteorological degrees → localized 8-point compass label. */
+            function windDir(deg) {
+                return t("compass")[Math.round(deg / 45) % 8];
+            }
+
+            /* UTC offset in seconds → "UTC+2" / "UTC+5.5" / "UTC-3". */
+            function fmtUtc(sec) {
+                const h = Math.abs(sec) / 3600;
+                return (
+                    "UTC" +
+                    (sec < 0 ? "-" : "+") +
+                    (Number.isInteger(h) ? h : h.toFixed(1))
+                );
+            }
 
             function kvRows(rows) {
                 return rows
@@ -1314,8 +1730,8 @@
             let lastStatus = null;
             let brightLoaded = false;
             let polling = false;
-            const STALE_AFTER_MS = 3000; /* no successful poll this long → offline */
-            const POLL_TIMEOUT_MS = 2500; /* give up on a single stuck request */
+            const STALE_AFTER_MS = 1500; /* no successful poll this long → offline */
+            const POLL_TIMEOUT_MS = 1200; /* give up on a single stuck request */
 
             function setStale(stale) {
                 document.body.classList.toggle("stale", stale);
@@ -1368,6 +1784,86 @@
                     } else {
                         b.className = "badge off";
                         b.textContent = t("noData");
+                    }
+
+                    /* outside weather card (Open-Meteo, refreshed hourly);
+                     * one tile per parameter */
+                    if (s.weather_ok) {
+                        $("weatherTempVal").textContent =
+                            s.weather_temp.toFixed(1);
+                        $("weatherFeelsVal").textContent =
+                            s.weather_feels.toFixed(1);
+                        $("weatherTminVal").textContent =
+                            s.weather_tmin.toFixed(1);
+                        $("weatherTmaxVal").textContent =
+                            s.weather_tmax.toFixed(1);
+                        $("weatherHumVal").textContent = s.weather_hum.toFixed(0);
+                        $("weatherPressVal").textContent =
+                            s.weather_press.toFixed(0);
+                        $("weatherPressMslVal").textContent =
+                            s.weather_press_msl.toFixed(0);
+                        $("weatherUviVal").textContent = s.weather_uvi.toFixed(1);
+                        $("weatherWindVal").textContent =
+                            s.weather_wind.toFixed(0);
+                        $("weatherGustVal").textContent =
+                            s.weather_gust.toFixed(0);
+                        $("weatherDirVal").textContent = windDir(
+                            s.weather_wind_dir,
+                        );
+                        $("weatherDirDeg").textContent =
+                            s.weather_wind_dir + "°";
+                        $("weatherCloudsVal").textContent =
+                            s.weather_clouds.toFixed(0);
+                        $("weatherPrecipVal").textContent =
+                            s.weather_precip.toFixed(1);
+                        const wc = s.weather_code;
+                        const wtext = t("wcode")[wc] || "";
+                        $("weatherCond").textContent =
+                            wc >= 0
+                                ? wtext
+                                    ? `${wtext} (${wc})`
+                                    : String(wc)
+                                : wtext;
+                        $("weatherMeta").textContent =
+                            t("weatherAlt") +
+                            " " +
+                            Math.round(s.weather_elev) +
+                            " " +
+                            t("uMeters") +
+                            " · lat " +
+                            s.weather_lat.toFixed(2) +
+                            ", lon " +
+                            s.weather_lon.toFixed(2) +
+                            " · " +
+                            fmtUtc(s.weather_utc_offset);
+                        $("weatherAge").textContent =
+                            s.weather_age >= 0
+                                ? t("weatherAgo").replace(
+                                      "{n}",
+                                      fmtAgo(s.weather_age),
+                                  )
+                                : "";
+                    } else {
+                        [
+                            "weatherTempVal",
+                            "weatherFeelsVal",
+                            "weatherTminVal",
+                            "weatherTmaxVal",
+                            "weatherHumVal",
+                            "weatherPressVal",
+                            "weatherPressMslVal",
+                            "weatherUviVal",
+                            "weatherWindVal",
+                            "weatherGustVal",
+                            "weatherDirVal",
+                            "weatherCloudsVal",
+                            "weatherPrecipVal",
+                        ].forEach((id) => ($(id).textContent = "--"));
+                        $("weatherDirDeg").textContent = "";
+                        /* dash placeholders keep both lines occupied until data arrives */
+                        $("weatherCond").textContent = "—";
+                        $("weatherMeta").textContent = "—";
+                        $("weatherAge").textContent = t("weatherWait");
                     }
 
                     /* system card: Wi-Fi station and access point shown as
@@ -1455,7 +1951,7 @@
              * hang for a long time before fetch gives up). */
             setInterval(() => {
                 if (lastOk && Date.now() - lastOk > STALE_AFTER_MS) setStale(true);
-            }, 500);
+            }, 250);
 
             /* ---------- charts (canvas, no libraries) ---------- */
             /* Each period maps to a server-side ring buffer (/api/history?p=):
@@ -2033,6 +2529,174 @@
                 fetch("/api/connect", { method: "POST" }).catch(() => {});
             });
 
+            /* ---------- weather locations ---------- */
+            const MAX_LOCS = 10;
+            let locations = [];
+            let activeLoc = -1;
+
+            async function loadLocations() {
+                try {
+                    const r = await fetch("/api/locations");
+                    const d = await r.json();
+                    locations = d.locations || [];
+                    activeLoc = d.active;
+                } catch (e) {
+                    locations = [];
+                    activeLoc = -1;
+                }
+                renderLocBar();
+            }
+
+            function renderLocBar() {
+                const bar = $("locBar");
+                bar.innerHTML = "";
+                locations.forEach((loc, i) => {
+                    const chip = document.createElement("span");
+                    chip.className = "loc-chip" + (i === activeLoc ? " active" : "");
+                    chip.innerHTML =
+                        `<span class="nm">${esc(loc.name)}</span>` +
+                        (locations.length > 1
+                            ? `<span class="del" title="${t("delete")}">✕</span>`
+                            : "");
+                    chip.querySelector(".nm").addEventListener("click", () =>
+                        selectLoc(i),
+                    );
+                    const del = chip.querySelector(".del");
+                    if (del)
+                        del.addEventListener("click", (e) => {
+                            e.stopPropagation();
+                            delLoc(i);
+                        });
+                    bar.appendChild(chip);
+                });
+                if (locations.length < MAX_LOCS) {
+                    const add = document.createElement("span");
+                    add.className = "loc-chip add";
+                    add.textContent = "＋";
+                    add.title = t("locAdd");
+                    add.addEventListener("click", openLocModal);
+                    bar.appendChild(add);
+                }
+            }
+
+            async function selectLoc(i) {
+                if (i === activeLoc) return;
+                activeLoc = i;
+                renderLocBar();
+                try {
+                    await fetch("/api/locations/active", {
+                        method: "PUT",
+                        body: JSON.stringify({ index: i }),
+                    });
+                } catch (e) {}
+                refresh(); /* card shows "waiting" until the refetch lands */
+            }
+
+            async function delLoc(i) {
+                if (locations.length <= 1) {
+                    toast(t("locLast"));
+                    return;
+                }
+                if (!confirm(t("locDelConfirm").replace("{name}", locations[i].name)))
+                    return;
+                const name = locations[i].name;
+                try {
+                    await fetch("/api/locations", {
+                        method: "DELETE",
+                        body: JSON.stringify({ index: i }),
+                    });
+                } catch (e) {}
+                toast(t("locRemoved").replace("{name}", name));
+                await loadLocations();
+                refresh();
+            }
+
+            /* Geocoding (place name -> coordinates) runs in the browser, which
+             * has internet; the device only stores the resolved coordinates. */
+            let locSearchTimer = null;
+            function openLocModal() {
+                $("locSearch").value = "";
+                $("locResults").innerHTML = "";
+                $("locModal").classList.add("show");
+                setTimeout(() => $("locSearch").focus(), 60);
+            }
+            $("locCancel").addEventListener("click", () =>
+                $("locModal").classList.remove("show"),
+            );
+            $("locModal").addEventListener("click", (e) => {
+                if (e.target === $("locModal"))
+                    $("locModal").classList.remove("show");
+            });
+            $("locSearch").addEventListener("input", (e) => {
+                const q = e.target.value.trim();
+                clearTimeout(locSearchTimer);
+                if (q.length < 2) {
+                    $("locResults").innerHTML = "";
+                    return;
+                }
+                locSearchTimer = setTimeout(() => geocode(q), 350);
+            });
+
+            async function geocode(q) {
+                const res = $("locResults");
+                res.innerHTML =
+                    '<div class="scan-hint"><span class="spin"></span>' +
+                    t("locSearching") +
+                    "</div>";
+                let data;
+                try {
+                    const url =
+                        "https://geocoding-api.open-meteo.com/v1/search?count=8&format=json&language=" +
+                        lang +
+                        "&name=" +
+                        encodeURIComponent(q);
+                    const r = await fetch(url);
+                    if (!r.ok) throw new Error(r.status);
+                    data = await r.json();
+                } catch (e) {
+                    res.innerHTML = `<div class="scan-hint">${t("locSearchErr")}</div>`;
+                    return;
+                }
+                const list = (data && data.results) || [];
+                if (!list.length) {
+                    res.innerHTML = `<div class="scan-hint">${t("locNoResults")}</div>`;
+                    return;
+                }
+                res.innerHTML = "";
+                list.forEach((g) => {
+                    const place = [g.admin1, g.country].filter(Boolean).join(", ");
+                    const el = document.createElement("div");
+                    el.className = "loc-result";
+                    el.innerHTML =
+                        `<div>${esc(g.name)}</div>` +
+                        `<div class="sub">${esc(place)} · ${g.latitude.toFixed(
+                            2,
+                        )}, ${g.longitude.toFixed(2)}</div>`;
+                    el.addEventListener("click", () => addLoc(g));
+                    res.appendChild(el);
+                });
+            }
+
+            async function addLoc(g) {
+                try {
+                    const r = await fetch("/api/locations", {
+                        method: "POST",
+                        body: JSON.stringify({
+                            name: g.name,
+                            lat: g.latitude,
+                            lon: g.longitude,
+                        }),
+                    });
+                    if (!r.ok) throw new Error(await r.text());
+                } catch (e) {
+                    toast(t("locAddFail") + e.message);
+                    return;
+                }
+                $("locModal").classList.remove("show");
+                toast(t("locAdded").replace("{name}", g.name));
+                loadLocations();
+            }
+
             /* ---------- settings ---------- */
             $("briRange").addEventListener(
                 "input",
@@ -2071,6 +2735,7 @@
             setInterval(refresh, 1000);
             loadHistory(period);
             loadNets();
+            loadLocations();
             window.addEventListener("resize", renderCharts);
         </script>
     </body>

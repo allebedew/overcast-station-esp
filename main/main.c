@@ -11,6 +11,8 @@
 #include "storage.h"
 #include "telegram.h"
 #include "timesync.h"
+#include "weather_api.h"
+#include "weather_store.h"
 #include "webserver.h"
 #include "wifi.h"
 
@@ -45,6 +47,8 @@ void app_main(void)
     timesync_init();
     telegram_init();
     alerts_init();
+    weather_store_init();
+    weather_api_init();
 
     /* инициализация прошла — фиксируем прошивку, отменяя OTA-откат */
     ota_confirm_running_image();

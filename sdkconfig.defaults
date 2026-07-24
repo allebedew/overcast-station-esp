@@ -3,6 +3,10 @@
 
 CONFIG_IDF_TARGET="esp32c6"
 
+# 16 MB flash on the board; the custom partition table below needs the full
+# size (default is 2 MB, which the table does not fit into).
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
 # Кастомная таблица разделов: два OTA-раздела по 4 МБ (см. partitions.csv)
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
@@ -16,3 +20,8 @@ CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
 
 # Оптимизация по размеру
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# Enlarge the LWIP BSD-socket pool (default 10). httpd (7 clients + listener),
+# mDNS and SNTP already fill it, so outbound TLS clients (telegram, weather_api)
+# could fail with "Failed to create socket / sock < 0". 16 is the LWIP max.
+CONFIG_LWIP_MAX_SOCKETS=16
