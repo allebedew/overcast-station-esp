@@ -34,12 +34,11 @@
 
 static const char *TAG = "webserver";
 
-extern const char index_html_start[] asm("_binary_index_html_start");
-extern const char index_html_end[] asm("_binary_index_html_end");
-extern const char uplot_js_start[] asm("_binary_uplot_js_start");
-extern const char uplot_js_end[] asm("_binary_uplot_js_end");
-extern const char uplot_css_start[] asm("_binary_uplot_css_start");
-extern const char uplot_css_end[] asm("_binary_uplot_css_end");
+/* The page is embedded already gzipped (see main/CMakeLists.txt) and handed to
+ * the browser as-is. Embedded as BINARY, so no NUL is appended and the length
+ * is exactly end - start. */
+extern const char index_html_start[] asm("_binary_index_html_gz_start");
+extern const char index_html_end[] asm("_binary_index_html_gz_end");
 
 static httpd_handle_t s_server;
 
@@ -97,26 +96,12 @@ static esp_err_t handle_request(httpd_req_t *req)
     return ((esp_err_t (*)(httpd_req_t *))req->user_ctx)(req);
 }
 
+/* Not cached: the page changes with every firmware build. */
 static esp_err_t index_get_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     return httpd_resp_send(req, index_html_start, index_html_end - index_html_start);
-}
-
-/* Embedded uPlot assets. The -1 strips the NUL byte that EMBED_TXTFILES
- * appends — a stray NUL is a syntax error in JS. */
-static esp_err_t uplot_js_get_handler(httpd_req_t *req)
-{
-    httpd_resp_set_type(req, "application/javascript");
-    httpd_resp_set_hdr(req, "Cache-Control", "max-age=86400");
-    return httpd_resp_send(req, uplot_js_start, uplot_js_end - uplot_js_start - 1);
-}
-
-static esp_err_t uplot_css_get_handler(httpd_req_t *req)
-{
-    httpd_resp_set_type(req, "text/css");
-    httpd_resp_set_hdr(req, "Cache-Control", "max-age=86400");
-    return httpd_resp_send(req, uplot_css_start, uplot_css_end - uplot_css_start - 1);
 }
 
 static const char *authmode_str(wifi_auth_mode_t mode)
@@ -177,7 +162,8 @@ static int cpu_load_percent(void)
 
 static esp_err_t status_get_handler(httpd_req_t *req)
 {
-    bool ap_active = wifi_get_status() == WIFI_STATUS_AP_MODE;
+    wifi_info_t wifi;
+    wifi_get_info(&wifi);
 
     /* STA and AP are reported as independent objects: in APSTA both interfaces
      * can be up at once, so the station link is exposed even while the AP is on
@@ -218,13 +204,13 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         uint8_t mac[6] = {0};
         esp_wifi_get_mac(WIFI_IF_AP, mac);
         char ssid[67];
-        json_escape(wifi_get_ap_ssid(), ssid, sizeof(ssid));
+        json_escape(wifi.ap_ssid, ssid, sizeof(ssid));
         int off = snprintf(ap_json, sizeof(ap_json),
                            "\"ap\":{\"active\":%s,\"ssid\":\"%s\",\"ip\":\"" IPSTR "\","
                            "\"mac\":\"" MACSTR "\",\"channel\":%d,\"clients\":[",
-                           ap_active ? "true" : "false", ssid, IP2STR(&ip.ip),
-                           MAC2STR(mac), wifi_get_channel());
-        if (ap_active) {
+                           wifi.ap_active ? "true" : "false", ssid, IP2STR(&ip.ip),
+                           MAC2STR(mac), wifi.channel);
+        if (wifi.ap_active) {
             wifi_sta_list_t sta_list = {0};
             esp_wifi_ap_get_sta_list(&sta_list);
             for (int i = 0; i < sta_list.num && off < (int)sizeof(ap_json); i++) {
@@ -270,30 +256,30 @@ static esp_err_t status_get_handler(httpd_req_t *req)
 
     static char json[2304];
     int len = snprintf(json, sizeof(json),
-        "{\"ap_mode\":%s,%s,%s,"
-        "\"uptime\":%lld,\"temp\":%.1f,\"time\":\"%s\",\"time_synced\":%s,"
-        "\"scd40_ok\":%s,\"co2\":%u,\"air_temp\":%.1f,\"air_rh\":%.1f,"
-        "\"weather_ok\":%s,\"weather_temp\":%.1f,\"weather_feels\":%.1f,"
-        "\"weather_tmin\":%.1f,\"weather_tmax\":%.1f,"
-        "\"weather_hum\":%.0f,\"weather_press\":%.0f,\"weather_press_msl\":%.0f,"
-        "\"weather_uvi\":%.1f,\"weather_wind\":%.1f,\"weather_gust\":%.1f,"
-        "\"weather_wind_dir\":%d,\"weather_precip\":%.1f,"
-        "\"weather_clouds\":%d,\"weather_code\":%d,"
-        "\"weather_elev\":%.0f,\"weather_utc_offset\":%d,\"weather_age\":%d,"
-        "\"weather_name\":\"%s\",\"weather_active\":%d,"
-        "\"weather_lat\":%.4f,\"weather_lon\":%.4f,"
+        "{%s,%s,"
+        "\"sensors\":{\"scd40_ok\":%s,\"co2\":%u,\"air_temp\":%.1f,"
+        "\"air_rh\":%.1f,\"chip_temp\":%.1f},"
+        "\"weather\":{\"ok\":%s,\"temp\":%.1f,\"feels\":%.1f,"
+        "\"tmin\":%.1f,\"tmax\":%.1f,"
+        "\"hum\":%.0f,\"press\":%.0f,\"press_msl\":%.0f,"
+        "\"uvi\":%.1f,\"wind\":%.1f,\"gust\":%.1f,"
+        "\"wind_dir\":%d,\"precip\":%.1f,"
+        "\"clouds\":%d,\"code\":%d,"
+        "\"elev\":%.0f,\"utc_offset\":%d,\"age\":%d,"
+        "\"name\":\"%s\",\"active\":%d,"
+        "\"lat\":%.4f,\"lon\":%.4f},"
+        "\"system\":{"
+        "\"uptime\":%lld,\"time\":\"%s\",\"time_synced\":%s,"
         "\"app_version\":\"%s\",\"build\":\"%s %s\",\"idf_ver\":\"%s\","
         "\"chip_rev\":\"v%d.%d\",\"cpu_mhz\":%d,\"flash_mb\":%lu,"
         "\"reset_reason\":\"%s\",\"cpu_load\":%d,\"tasks\":%u,"
         "\"http_conns\":%d,"
         "\"heap_free\":%u,\"heap_min\":%u,\"heap_total\":%u,\"heap_largest\":%u,"
-        "\"nvs_used\":%u,\"nvs_total\":%u,\"led_brightness\":%u}",
-        ap_active ? "true" : "false",
+        "\"nvs_used\":%u,\"nvs_total\":%u},"
+        "\"settings\":{\"led_brightness\":%u}}",
         sta_json, ap_json,
-        esp_timer_get_time() / 1000000,
-        sensors_chip_temp(), time_str,
-        timesync_is_synced() ? "true" : "false",
         air_ok ? "true" : "false", air.co2_ppm, air.temp_c, air.rh_pct,
+        sensors_chip_temp(),
         weather_ok ? "true" : "false", weather.temp_c, weather.feels_c,
         weather.temp_min_c, weather.temp_max_c,
         weather.humidity_pct, weather.pressure_hpa, weather.pressure_msl_hpa,
@@ -303,6 +289,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         weather.elevation_m, weather.utc_offset_s, (int)weather.age_s,
         weather_name, weather_store_get_active(),
         wloc_ok ? wloc.lat : 0, wloc_ok ? wloc.lon : 0,
+        esp_timer_get_time() / 1000000,
+        time_str,
+        timesync_is_synced() ? "true" : "false",
         app->version, app->date, app->time, app->idf_ver,
         chip.revision / 100, chip.revision % 100,
         CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
@@ -663,18 +652,6 @@ void webserver_start(void)
         .handler = handle_request,
         .user_ctx = status_get_handler,
     };
-    const httpd_uri_t uplot_js_uri = {
-        .uri = "/uplot.js",
-        .method = HTTP_GET,
-        .handler = handle_request,
-        .user_ctx = uplot_js_get_handler,
-    };
-    const httpd_uri_t uplot_css_uri = {
-        .uri = "/uplot.css",
-        .method = HTTP_GET,
-        .handler = handle_request,
-        .user_ctx = uplot_css_get_handler,
-    };
     const httpd_uri_t history_uri = {
         .uri = "/api/history",
         .method = HTTP_GET,
@@ -754,8 +731,6 @@ void webserver_start(void)
         .user_ctx = ota_post_handler,
     };
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &index_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &uplot_js_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &uplot_css_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &status_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &history_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &scan_uri));

@@ -122,13 +122,3 @@ bool wifi_store_get(int idx, wifi_cred_t *out)
     xSemaphoreGive(s_lock);
     return true;
 }
-
-bool wifi_store_get_ssid(int idx, char ssid[33])
-{
-    wifi_cred_t net;
-    if (!wifi_store_get(idx, &net)) {
-        return false;
-    }
-    strlcpy(ssid, net.ssid, 33);
-    return true;
-}

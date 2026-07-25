@@ -203,7 +203,7 @@ static void weather_api_task(void *arg)
         weather_location_t loc;
         bool have = weather_store_get_active_location(&loc);
         uint32_t wait_ms;
-        if (!have || wifi_get_status() != WIFI_STATUS_CONNECTED) {
+        if (!have || !wifi_is_connected()) {
             /* no location selected yet, or waiting for the link */
             wait_ms = WEATHER_API_NO_NET_DELAY_MS;
         } else if (fetch(&loc)) {

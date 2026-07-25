@@ -21,7 +21,8 @@ sensors are not connected yet.
   point as two independent objects (`sta` and `ap`), so both are exposed
   regardless of mode, and the web UI shows them as separate sections. Toggled
   manually with the BOOT button (GPIO9, single click: AP ↔ reconnect STA).
-- **Web UI** — single page embedded into the firmware, `http://weather.local`
+- **Web UI** — single page embedded into the firmware (gzipped at build time,
+  served with `Content-Encoding: gzip`), `http://weather.local`
   (mDNS). Dark dashboard: three sensor cards (temperature / humidity / CO₂)
   with current value, trend arrow, min/max and a sparkline chart, an
   outside-weather card (Open-Meteo, refreshed hourly: a decoded conditions
@@ -62,7 +63,8 @@ sensors are not connected yet.
   periodic measurement mode (fresh reading every 5 s — the sensor's maximum).
   Hot-plug: an absent/failing sensor is re-probed every 5 s, the web UI shows
   a separate "Воздух" card (or "датчик не отвечает"), `/api/status` carries
-  `scd40_ok`, `co2`, `air_temp`, `air_rh`. Forced recalibration (FRC) via a
+  them in `sensors`: `scd40_ok`, `co2`, `air_temp`, `air_rh` (plus `chip_temp`,
+  the SoC's own sensor). Forced recalibration (FRC) via a
   button on the page — run the sensor ≥3 min in known-CO₂ air first.
   Pressure compensation is hardcoded (985 hPa at the site, 245 m) until a
   real pressure sensor provides live values.
@@ -78,8 +80,7 @@ sensors are not connected yet.
   window (5 min / hour / day, one switch for all charts) fetched from
   `/api/history?p=` and re-polled at 2/10/60 s respectively, time/value
   axis labels, hover crosshair with a value + time tooltip; offline periods
-  show as gaps. uPlot is no longer used by the page, but its assets are
-  still embedded and served at `/uplot.js` + `/uplot.css` (removal pending).
+  show as gaps. No charting library is bundled.
 - **Telegram notifications** — push-only bot (no incoming commands yet):
   welcome message on boot (chip temp + IP + BSSID + channel + RSSI),
   notification on IP change,
@@ -98,10 +99,10 @@ sensors are not connected yet.
   No API key needed; the default `best_match` model picks the most accurate
   regional model for the coordinates (ICON / ECMWF over Europe). Only the
   active location is fetched; the full request URL is logged on every fetch.
-  A failed fetch drops the cached reading (`weather_ok` goes false, the card
+  A failed fetch drops the cached reading (`weather.ok` goes false, the card
   empties — no stale values are shown) and is retried in 5 min.
-  Exposed as `weather_*` fields in
-  `/api/status` (incl. `weather_name` / `weather_active`) and shown in a
+  Exposed as the `weather` object in
+  `/api/status` (incl. `name` / `active`) and shown in a
   dedicated "outside weather" card on the web page;
   `weather_api_code_str()` decodes the WMO code to English text (the web UI
   decodes it bilingually).
@@ -116,8 +117,8 @@ sensors are not connected yet.
   needs internet on the client (not in AP-provisioning mode). Managed through
   `GET/POST/DELETE /api/locations` and `PUT /api/locations/active`.
 - **SNTP** — UTC time from `pool.ntp.org`. Sync state is exposed as
-  `timesync_is_synced()` and as `time_synced` in `/api/status`; until the
-  first sync `time` contains dashes instead of digits.
+  `timesync_is_synced()` and as `system.time_synced` in `/api/status`; until
+  the first sync `system.time` contains dashes instead of digits.
 
 ## Architecture
 
@@ -126,7 +127,7 @@ tasks/callbacks. Modules under `main/`, each with a small public header:
 
 | Module | Role |
 |---|---|
-| `wifi.c` | connection state machine; state exposed via `wifi_get_status()` (polled by the LED task) |
+| `wifi.c` | connection state machine; STA state and AP state are separate fields of one snapshot from `wifi_get_info()` (polled by the LED task), with `wifi_is_connected()` as the shorthand and `wifi_ap_enable()` to toggle the AP |
 | `wifi_store.c` | saved credentials in NVS (namespace `wifi_creds`), mutex-protected |
 | `webserver.c` | esp_http_server + mDNS; all handlers go through one wrapper that logs the request (except `/api/status` — polled every 1 s) and blinks the LED; static buffers are safe (single httpd task) |
 | `ota.c` | `POST /api/ota` handler + rollback confirmation |
@@ -146,8 +147,8 @@ tasks/callbacks. Modules under `main/`, each with a small public header:
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/` | GET | embedded single-page UI (index.html) |
-| `/api/status` | GET | full status JSON: Wi-Fi (STA details or AP client list), system info, heap, settings, outdoor weather (`weather_*`) |
+| `/` | GET | embedded single-page UI (index.html, gzipped) |
+| `/api/status` | GET | full status JSON, grouped into objects: `sta` / `ap` (Wi-Fi), `sensors` (SCD40 + chip temp), `weather` (Open-Meteo), `system` (firmware, chip, heap, NVS, uptime, clock), `settings` (`led_brightness`); nothing is left at the top level |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`) selects the ring; returns `{period: <s>, co2: [...], temp: [...], rh: [...]}`, `null` = gap |
 | `/api/scan` | GET | scan for Wi-Fi networks, returns `[{ssid, bssid, ch, rssi, auth}]` (one entry per BSSID — same SSID may repeat across APs) |
 | `/api/networks` | GET | list of saved networks `[{ssid, bssid?}]` (bssid present only when the network is pinned to an AP) |

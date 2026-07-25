@@ -76,7 +76,7 @@ static void telegram_task(void *arg)
         int attempts = 0;
         while (attempts < MAX_ATTEMPTS) {
             /* no network — just wait, does not count as an attempt */
-            if (wifi_get_status() != WIFI_STATUS_CONNECTED) {
+            if (!wifi_is_connected()) {
                 vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
                 continue;
             }

@@ -13,11 +13,9 @@ static void on_button_click(void *arg, void *usr_data)
 {
     ESP_LOGI(TAG, "BOOT button pressed");
 
-    if (wifi_get_status() == WIFI_STATUS_AP_MODE) {
-        wifi_reconnect();
-    } else {
-        wifi_start_ap();
-    }
+    wifi_info_t info;
+    wifi_get_info(&info);
+    wifi_ap_enable(!info.ap_active);
 }
 
 void button_init(void)

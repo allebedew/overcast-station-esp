@@ -151,19 +151,16 @@ static void led_task(void *arg)
         } else if ((code = error_code()) != 0) {
             set_color(in_pulse(tick, code) ? b : 0, 0, 0); /* red coded blink */
         } else {
-            switch (wifi_get_status()) {
-            case WIFI_STATUS_AP_MODE: {
+            wifi_info_t wifi;
+            wifi_get_info(&wifi);
+            if (wifi.ap_active) {
                 /* blue, dips off `clients` times each cycle */
-                bool off = in_pulse(tick, wifi_get_ap_client_count());
+                bool off = in_pulse(tick, wifi.ap_clients);
                 set_color(0, 0, off ? 0 : b);
-                break;
-            }
-            case WIFI_STATUS_CONNECTED:
+            } else if (wifi.sta_state == WIFI_STA_CONNECTED) {
                 show_co2(tick, activity);
-                break;
-            default: /* connecting / retry / disconnected / failed */
+            } else { /* connecting / retry / idle */
                 set_color(0, blink_on ? b : 0, 0); /* green blink */
-                break;
             }
         }
 

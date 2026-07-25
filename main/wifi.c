@@ -1,6 +1,5 @@
 #include "wifi.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -21,75 +20,48 @@
 
 static const char *TAG = "wifi";
 
-static volatile wifi_status_t s_status = WIFI_STATUS_DISCONNECTED;
-static wifi_status_cb_t s_status_cb;
+static volatile wifi_sta_state_t s_sta_state = WIFI_STA_IDLE;
+static volatile bool s_ap_active;
 static int s_attempt;
 static char s_current_ssid[33];
 static esp_timer_handle_t s_retry_timer;
 
-void wifi_set_status_callback(wifi_status_cb_t cb)
+bool wifi_is_connected(void)
 {
-    s_status_cb = cb;
+    return s_sta_state == WIFI_STA_CONNECTED;
 }
 
-wifi_status_t wifi_get_status(void)
+static int ap_client_count(void)
 {
-    return s_status;
-}
-
-int wifi_get_ap_client_count(void)
-{
-    if (s_status != WIFI_STATUS_AP_MODE) {
-        return 0;
-    }
     wifi_sta_list_t sta_list;
-    if (esp_wifi_ap_get_sta_list(&sta_list) != ESP_OK) {
+    if (!s_ap_active || esp_wifi_ap_get_sta_list(&sta_list) != ESP_OK) {
         return 0;
     }
     return sta_list.num;
 }
 
-const char *wifi_get_ssid(void)
+void wifi_get_info(wifi_info_t *out)
 {
-    return s_status == WIFI_STATUS_AP_MODE ? WIFI_AP_SSID : s_current_ssid;
-}
+    memset(out, 0, sizeof(*out));
+    out->sta_state = s_sta_state;
+    out->ap_active = s_ap_active;
+    strlcpy(out->sta_ssid, s_current_ssid, sizeof(out->sta_ssid));
+    strlcpy(out->ap_ssid, WIFI_AP_SSID, sizeof(out->ap_ssid));
 
-const char *wifi_get_ap_ssid(void)
-{
-    return WIFI_AP_SSID;
-}
-
-int wifi_get_rssi(void)
-{
-    wifi_ap_record_t ap_info;
-    if (s_status != WIFI_STATUS_CONNECTED ||
-        esp_wifi_sta_get_ap_info(&ap_info) != ESP_OK) {
-        return 0;
-    }
-    return ap_info.rssi;
-}
-
-int wifi_get_channel(void)
-{
     uint8_t primary = 0;
     wifi_second_chan_t second;
-    if (esp_wifi_get_channel(&primary, &second) != ESP_OK) {
-        return 0;
+    if (esp_wifi_get_channel(&primary, &second) == ESP_OK) {
+        out->channel = primary;
     }
-    return primary;
-}
 
-bool wifi_get_bssid(char *out, size_t len)
-{
     wifi_ap_record_t ap_info;
-    if (s_status != WIFI_STATUS_CONNECTED ||
-        esp_wifi_sta_get_ap_info(&ap_info) != ESP_OK) {
-        return false;
+    if (s_sta_state == WIFI_STA_CONNECTED &&
+        esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        out->rssi = ap_info.rssi;
+        memcpy(out->sta_bssid, ap_info.bssid, sizeof(out->sta_bssid));
     }
-    snprintf(out, len, "%02x:%02x:%02x:%02x:%02x:%02x",
-             ap_info.bssid[0], ap_info.bssid[1], ap_info.bssid[2],
-             ap_info.bssid[3], ap_info.bssid[4], ap_info.bssid[5]);
-    return true;
+
+    out->ap_clients = ap_client_count();
 }
 
 int wifi_scan(wifi_scan_ap_t *out, int max_count)
@@ -128,33 +100,22 @@ int wifi_scan(wifi_scan_ap_t *out, int max_count)
     return n;
 }
 
-/* --- подключение --- */
-
-static void set_status(wifi_status_t status)
-{
-    if (s_status == status) {
-        return;
-    }
-    s_status = status;
-    if (s_status_cb) {
-        s_status_cb(status);
-    }
-}
+/* --- station side --- */
 
 static void schedule_retry(void)
 {
-    set_status(WIFI_STATUS_WAITING_RETRY);
-    esp_timer_stop(s_retry_timer); /* мог быть уже взведён */
+    s_sta_state = WIFI_STA_WAITING_RETRY;
+    esp_timer_stop(s_retry_timer); /* may already be armed */
     if (esp_timer_start_once(s_retry_timer, WIFI_RETRY_DELAY_MS * 1000ULL) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to arm retry timer");
     }
 }
 
-/* Пытается подключиться; если драйвер занят (например, идёт скан) —
- * планирует новую попытку вместо зависания автомата. */
+/* Tries to associate; if the driver is busy (a scan is running, say) schedules
+ * another attempt instead of leaving the state machine stuck. */
 static void try_connect(void)
 {
-    set_status(WIFI_STATUS_CONNECTING);
+    s_sta_state = WIFI_STA_CONNECTING;
     esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "esp_wifi_connect: %s, will retry", esp_err_to_name(err));
@@ -162,13 +123,13 @@ static void try_connect(void)
     }
 }
 
-/* Записывает в драйвер конфигурацию сети для текущей попытки. */
+/* Writes the network config for the current attempt into the driver. */
 static void apply_current_network(void)
 {
     int count = wifi_store_count();
     wifi_cred_t net;
     if (count == 0 || !wifi_store_get(s_attempt % count, &net)) {
-        return; /* подключаться не к чему */
+        return; /* nothing to connect to */
     }
 
     wifi_config_t cfg = {0};
@@ -195,9 +156,9 @@ static void apply_current_network(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_STA, &cfg));
 }
 
-void wifi_start_ap(void)
+static void start_ap(void)
 {
-    esp_timer_stop(s_retry_timer); /* мог быть взведён — не страшно, если нет */
+    esp_timer_stop(s_retry_timer); /* may be armed; harmless if it is not */
 
     wifi_config_t ap_config = {
         .ap = {
@@ -207,37 +168,60 @@ void wifi_start_ap(void)
             .authmode = WIFI_AUTH_WPA2_PSK,
         },
     };
-    set_status(WIFI_STATUS_AP_MODE);
-    /* APSTA, а не AP: STA-интерфейс нужен для сканирования эфира */
+    /* Set the flags before switching the mode: dropping the station link fires
+     * STA_DISCONNECTED, and the handler must see that the AP is coming up so it
+     * does not schedule a reconnect. */
+    s_ap_active = true;
+    s_sta_state = WIFI_STA_IDLE;
+    /* APSTA rather than AP: the station interface is needed for air scans */
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
 
     ESP_LOGI(TAG, "AP mode: SSID \"%s\", http://192.168.4.1/", WIFI_AP_SSID);
 }
 
-void wifi_reconnect(void)
+/* Drops the AP (if up) and restarts the round-robin from the first network. */
+static void start_sta(void)
 {
     if (wifi_store_count() == 0) {
         ESP_LOGW(TAG, "No saved networks, staying in AP mode");
-        wifi_start_ap();
+        start_ap();
         return;
     }
+    bool was_connected = s_sta_state == WIFI_STA_CONNECTED;
     s_attempt = 0;
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
     apply_current_network();
     ESP_LOGI(TAG, "Reconnecting to \"%s\"...", s_current_ssid);
-    if (s_status == WIFI_STATUS_CONNECTED) {
+    /* Clear the flag only now: any STA_DISCONNECTED raised by leaving APSTA
+     * above must still be swallowed by the handler, not turned into a retry. */
+    s_ap_active = false;
+    if (was_connected) {
         /* Already associated (e.g. the user saved a new BSSID for the same
          * SSID): esp_wifi_connect() would be a no-op and the state machine
          * would hang in CONNECTING forever. Drop the link instead — the
          * STA_DISCONNECTED event then drives the reconnect with the new
          * config. */
-        set_status(WIFI_STATUS_CONNECTING);
+        s_sta_state = WIFI_STA_CONNECTING;
         esp_wifi_disconnect();
     } else {
-        /* при выходе из APSTA событие STA_START не приходит — подключаемся сами */
+        /* leaving APSTA does not raise STA_START, so connect by hand */
         try_connect();
     }
+}
+
+void wifi_ap_enable(bool on)
+{
+    if (on) {
+        start_ap();
+    } else {
+        start_sta();
+    }
+}
+
+void wifi_reconnect(void)
+{
+    start_sta();
 }
 
 static void retry_timer_cb(void *arg)
@@ -263,15 +247,15 @@ static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        if (s_status != WIFI_STATUS_AP_MODE) {
+        if (!s_ap_active) {
             try_connect();
         }
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *event = event_data;
         ESP_LOGW(TAG, "Disconnected from \"%s\", reason %d (%s)",
                  s_current_ssid, event->reason, disconnect_reason_str(event->reason));
-        if (s_status == WIFI_STATUS_AP_MODE) {
-            return; /* отключение из-за смены режима на AP — не переподключаемся */
+        if (s_ap_active) {
+            return; /* dropped because we switched to AP mode — do not reconnect */
         }
         int nets = wifi_store_count();
         if (nets == 0) {
@@ -284,21 +268,18 @@ static void event_handler(void *arg, esp_event_base_t event_base,
             schedule_retry();
         } else {
             ESP_LOGE(TAG, "All networks failed, starting AP");
-            wifi_start_ap();
+            start_ap();
         }
     } else if (event_base == WIFI_EVENT && (event_id == WIFI_EVENT_AP_STACONNECTED ||
                                             event_id == WIFI_EVENT_AP_STADISCONNECTED)) {
         ESP_LOGI(TAG, "AP: client %s (%d total)",
                  event_id == WIFI_EVENT_AP_STACONNECTED ? "connected" : "disconnected",
-                 wifi_get_ap_client_count());
-        if (s_status_cb) {
-            s_status_cb(s_status); /* статус тот же, но подписчик перечитает счётчик */
-        }
+                 ap_client_count());
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
         s_attempt = 0;
-        set_status(WIFI_STATUS_CONNECTED);
+        s_sta_state = WIFI_STA_CONNECTED;
     }
 }
 
@@ -334,7 +315,7 @@ esp_err_t wifi_connect(void)
 
     if (wifi_store_count() == 0) {
         ESP_LOGW(TAG, "No saved networks, starting AP for provisioning");
-        wifi_start_ap();
+        start_ap();
         ESP_ERROR_CHECK(esp_wifi_start());
         return ESP_OK;
     }
@@ -342,7 +323,7 @@ esp_err_t wifi_connect(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     apply_current_network();
 
-    set_status(WIFI_STATUS_CONNECTING);
+    s_sta_state = WIFI_STA_CONNECTING;
     ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_LOGI(TAG, "Connecting to \"%s\"...", s_current_ssid);

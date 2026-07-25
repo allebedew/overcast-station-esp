@@ -42,13 +42,16 @@ void app_main(void)
     storage_init();
     history_init();
     sensors_init();
-    webserver_start();
 
     timesync_init();
     telegram_init();
     alerts_init();
     weather_store_init();
     weather_api_init();
+
+    /* Last: the request handlers read from every module above, so the server
+     * must not accept a request before those are initialised. */
+    webserver_start();
 
     /* инициализация прошла — фиксируем прошивку, отменяя OTA-откат */
     ota_confirm_running_image();

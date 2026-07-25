@@ -5,6 +5,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_mac.h"
 #include "esp_netif.h"
 #include "sensors.h"
 #include "telegram.h"
@@ -29,7 +30,7 @@ static const int CO2_THRESHOLDS[] = { 500, 800, 1200 };
 
 static bool get_sta_ip(esp_ip4_addr_t *ip)
 {
-    if (wifi_get_status() != WIFI_STATUS_CONNECTED) {
+    if (!wifi_is_connected()) {
         return false;
     }
     esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
@@ -54,12 +55,12 @@ static void check_ip(void)
     }
     if (!online) {
         online = true;
-        char bssid[18];
-        const char *b = wifi_get_bssid(bssid, sizeof(bssid)) ? bssid : "n/a";
+        wifi_info_t wifi;
+        wifi_get_info(&wifi);
         telegram_notify("Станция запущена: чип %.1f °C, IP " IPSTR
-                        ", BSSID %s, канал %d, RSSI %d дБм",
-                        sensors_chip_temp(), IP2STR(&ip), b,
-                        wifi_get_channel(), wifi_get_rssi());
+                        ", BSSID " MACSTR ", канал %d, RSSI %d дБм",
+                        sensors_chip_temp(), IP2STR(&ip), MAC2STR(wifi.sta_bssid),
+                        wifi.channel, wifi.rssi);
     } else if (ip.addr != last_ip.addr) {
         telegram_notify("IP изменился: " IPSTR " → " IPSTR,
                         IP2STR(&last_ip), IP2STR(&ip));

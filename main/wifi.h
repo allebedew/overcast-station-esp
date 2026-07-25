@@ -5,14 +5,14 @@
 #include <stdint.h>
 #include "esp_err.h"
 
+/* State of the station (client) side only. The access point is tracked
+ * separately in wifi_info_t: the two are independent axes. */
 typedef enum {
-    WIFI_STATUS_DISCONNECTED,  /* не подключено */
-    WIFI_STATUS_CONNECTING,    /* активная попытка подключения */
-    WIFI_STATUS_WAITING_RETRY, /* пауза перед следующей попыткой */
-    WIFI_STATUS_CONNECTED,     /* подключено, IP получен */
-    WIFI_STATUS_FAILED,        /* попытки исчерпаны */
-    WIFI_STATUS_AP_MODE,       /* работаем как точка доступа */
-} wifi_status_t;
+    WIFI_STA_IDLE,          /* not trying to connect (e.g. AP is up) */
+    WIFI_STA_CONNECTING,    /* association attempt in progress */
+    WIFI_STA_WAITING_RETRY, /* pause before the next attempt */
+    WIFI_STA_CONNECTED,     /* associated, IP obtained */
+} wifi_sta_state_t;
 
 typedef struct {
     char ssid[33];
@@ -22,46 +22,36 @@ typedef struct {
     int authmode; /* wifi_auth_mode_t */
 } wifi_scan_ap_t;
 
-typedef void (*wifi_status_cb_t)(wifi_status_t status);
+/* Snapshot of both interfaces, taken as a whole. */
+typedef struct {
+    wifi_sta_state_t sta_state;
+    char    sta_ssid[33];  /* network of the current attempt or link */
+    uint8_t sta_bssid[6];  /* all-zero unless connected */
+    int     rssi;          /* dBm; 0 unless connected */
+    int     channel;       /* radio channel in any mode; 0 if radio is down */
+    bool    ap_active;
+    char    ap_ssid[33];   /* own SoftAP SSID (constant) */
+    int     ap_clients;    /* clients on our SoftAP; 0 when it is down */
+} wifi_info_t;
 
-/* Регистрирует колбэк на смену статуса. Вызывать до wifi_connect().
- * Колбэк приходит из системных задач (sys_evt, esp_timer) —
- * внутри нельзя блокироваться. */
-void wifi_set_status_callback(wifi_status_cb_t cb);
-
-/* Запускает подключение (STA) и сразу возвращает управление.
- * Сохранённые сети перебираются по кругу; после исчерпания
- * попыток устройство само переходит в режим точки доступа. */
+/* Brings up the radio and starts connecting (STA), returning immediately.
+ * Saved networks are tried round-robin; once the attempts are exhausted the
+ * device brings up its own access point. */
 esp_err_t wifi_connect(void);
 
-/* Переключает в режим точки доступа. */
-void wifi_start_ap(void);
+/* Turns the access point on or off. Turning it on stops the station attempts;
+ * turning it off returns to station mode and restarts the round-robin. */
+void wifi_ap_enable(bool on);
 
-/* Возвращает в режим станции и заново запускает перебор сетей. */
+/* Re-reads the saved networks and restarts the round-robin from the first one.
+ * Also drops the access point if it was up. */
 void wifi_reconnect(void);
 
-wifi_status_t wifi_get_status(void);
+/* Fills out with a consistent snapshot of both interfaces. */
+void wifi_get_info(wifi_info_t *out);
 
-/* Число клиентов, подключённых к нашей точке доступа (0 вне режима AP).
- * При изменении числа клиентов вызывается статусный колбэк. */
-int wifi_get_ap_client_count(void);
-
-/* SSID сети: в режиме станции — текущей, в режиме AP — собственный. */
-const char *wifi_get_ssid(void);
-
-/* Own SoftAP SSID (constant, regardless of current mode). */
-const char *wifi_get_ap_ssid(void);
-
-/* Уровень сигнала точки доступа в дБм; 0, если не подключены как станция. */
-int wifi_get_rssi(void);
-
-/* Текущий Wi-Fi канал (в любом режиме); 0, если радио не запущено. */
-int wifi_get_channel(void);
-
-/* BSSID (MAC of the connected AP) formatted as "xx:xx:xx:xx:xx:xx" into out
- * (needs >= 18 bytes). Returns false and leaves out untouched if not
- * connected as a station. */
-bool wifi_get_bssid(char *out, size_t len);
+/* Shorthand for the common case: station associated and holding an IP. */
+bool wifi_is_connected(void);
 
 /* Blocking air scan (~2-3 s). Returns the number of APs found (one entry
  * per BSSID, so the same SSID may repeat across access points) or -1 on

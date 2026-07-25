@@ -1253,6 +1253,7 @@
             /* =====================================================================
    Data sources (all existing endpoints, unchanged):
      GET  /api/status           - polled every second, feeds cards + 5-min live window
+                                  objects: sta, ap, sensors, weather, system, settings
      GET  /api/history          - 24 h of 1-min points {period, co2[], temp[], rh[]}
      GET  /api/scan             - [{ssid, bssid, ch, rssi, auth}] (one per BSSID)
      GET  /api/networks         - saved networks [{ssid, bssid?}] (bssid = pinned AP)
@@ -1761,6 +1762,10 @@
                     lastStatus = s;
                     lastOk = Date.now();
                     setStale(false);
+                    const sn = s.sensors || {};
+                    const w = s.weather || {};
+                    const sy = s.system || {};
+                    const st = s.settings || {};
 
                     {
                         const sta = s.sta || {};
@@ -1772,13 +1777,13 @@
                     }
 
                     /* sensor cards */
-                    const ok = s.scd40_ok;
-                    $("tVal").textContent = ok ? s.air_temp.toFixed(1) : "--";
-                    $("hVal").textContent = ok ? s.air_rh.toFixed(0) : "--";
-                    $("cVal").textContent = ok ? s.co2 : "--";
+                    const ok = sn.scd40_ok;
+                    $("tVal").textContent = ok ? sn.air_temp.toFixed(1) : "--";
+                    $("hVal").textContent = ok ? sn.air_rh.toFixed(0) : "--";
+                    $("cVal").textContent = ok ? sn.co2 : "--";
                     const b = $("cBadge");
                     if (ok) {
-                        const l = co2Level(s.co2);
+                        const l = co2Level(sn.co2);
                         b.className = "badge " + l.cls;
                         b.textContent = l.text;
                     } else {
@@ -1788,35 +1793,35 @@
 
                     /* outside weather card (Open-Meteo, refreshed hourly);
                      * one tile per parameter */
-                    if (s.weather_ok) {
+                    if (w.ok) {
                         $("weatherTempVal").textContent =
-                            s.weather_temp.toFixed(1);
+                            w.temp.toFixed(1);
                         $("weatherFeelsVal").textContent =
-                            s.weather_feels.toFixed(1);
+                            w.feels.toFixed(1);
                         $("weatherTminVal").textContent =
-                            s.weather_tmin.toFixed(1);
+                            w.tmin.toFixed(1);
                         $("weatherTmaxVal").textContent =
-                            s.weather_tmax.toFixed(1);
-                        $("weatherHumVal").textContent = s.weather_hum.toFixed(0);
+                            w.tmax.toFixed(1);
+                        $("weatherHumVal").textContent = w.hum.toFixed(0);
                         $("weatherPressVal").textContent =
-                            s.weather_press.toFixed(0);
+                            w.press.toFixed(0);
                         $("weatherPressMslVal").textContent =
-                            s.weather_press_msl.toFixed(0);
-                        $("weatherUviVal").textContent = s.weather_uvi.toFixed(1);
+                            w.press_msl.toFixed(0);
+                        $("weatherUviVal").textContent = w.uvi.toFixed(1);
                         $("weatherWindVal").textContent =
-                            s.weather_wind.toFixed(0);
+                            w.wind.toFixed(0);
                         $("weatherGustVal").textContent =
-                            s.weather_gust.toFixed(0);
+                            w.gust.toFixed(0);
                         $("weatherDirVal").textContent = windDir(
-                            s.weather_wind_dir,
+                            w.wind_dir,
                         );
                         $("weatherDirDeg").textContent =
-                            s.weather_wind_dir + "°";
+                            w.wind_dir + "°";
                         $("weatherCloudsVal").textContent =
-                            s.weather_clouds.toFixed(0);
+                            w.clouds.toFixed(0);
                         $("weatherPrecipVal").textContent =
-                            s.weather_precip.toFixed(1);
-                        const wc = s.weather_code;
+                            w.precip.toFixed(1);
+                        const wc = w.code;
                         const wtext = t("wcode")[wc] || "";
                         $("weatherCond").textContent =
                             wc >= 0
@@ -1827,20 +1832,20 @@
                         $("weatherMeta").textContent =
                             t("weatherAlt") +
                             " " +
-                            Math.round(s.weather_elev) +
+                            Math.round(w.elev) +
                             " " +
                             t("uMeters") +
                             " · lat " +
-                            s.weather_lat.toFixed(2) +
+                            w.lat.toFixed(2) +
                             ", lon " +
-                            s.weather_lon.toFixed(2) +
+                            w.lon.toFixed(2) +
                             " · " +
-                            fmtUtc(s.weather_utc_offset);
+                            fmtUtc(w.utc_offset);
                         $("weatherAge").textContent =
-                            s.weather_age >= 0
+                            w.age >= 0
                                 ? t("weatherAgo").replace(
                                       "{n}",
-                                      fmtAgo(s.weather_age),
+                                      fmtAgo(w.age),
                                   )
                                 : "";
                     } else {
@@ -1902,32 +1907,32 @@
                     }
                     rows.push({ h: t("device") });
                     const heapPct = (
-                        (100 * s.heap_free) /
-                        s.heap_total
+                        (100 * sy.heap_free) /
+                        sy.heap_total
                     ).toFixed(0);
                     rows.push(
                         [
                             t("chip"),
-                            `ESP32-C6 ${s.chip_rev} ${s.cpu_mhz} ${t("mhz")}`,
+                            `ESP32-C6 ${sy.chip_rev} ${sy.cpu_mhz} ${t("mhz")}`,
                         ],
-                        [t("cpuLoad"), s.cpu_load + "%"],
+                        [t("cpuLoad"), sy.cpu_load + "%"],
                         [
                             t("heapMem"),
-                            `${fmtKib(s.heap_free)} / ${fmtKib(s.heap_total)}`,
+                            `${fmtKib(sy.heap_free)} / ${fmtKib(sy.heap_total)}`,
                         ],
                         [
                             t("heapMin"),
-                            `${fmtKib(s.heap_min)} / ${fmtKib(s.heap_largest)}`,
+                            `${fmtKib(sy.heap_min)} / ${fmtKib(sy.heap_largest)}`,
                         ],
-                        [t("chipTemp"), s.temp.toFixed(1) + " °C"],
-                        [t("tasksConns"), `${s.tasks}/${s.http_conns}`],
-                        ["NVS", `${s.nvs_used}/${s.nvs_total}`],
-                        [t("uptime"), fmtUptime(s.uptime)],
-                        [t("resetReason"), s.reset_reason],
-                        [t("timeUtc"), s.time],
+                        [t("chipTemp"), sn.chip_temp.toFixed(1) + " °C"],
+                        [t("tasksConns"), `${sy.tasks}/${sy.http_conns}`],
+                        ["NVS", `${sy.nvs_used}/${sy.nvs_total}`],
+                        [t("uptime"), fmtUptime(sy.uptime)],
+                        [t("resetReason"), sy.reset_reason],
+                        [t("timeUtc"), sy.time],
                         [
                             t("firmware"),
-                            `${esc(s.app_version)}, ${esc(s.build)}, idf: ${esc(s.idf_ver)}`,
+                            `${esc(sy.app_version)}, ${esc(sy.build)}, idf: ${esc(sy.idf_ver)}`,
                         ],
                     );
                     $("sysRows").innerHTML = kvRows(rows);
@@ -1935,8 +1940,8 @@
                     if (!brightLoaded) {
                         /* once, to avoid fighting the user's hand */
                         brightLoaded = true;
-                        $("briRange").value = s.led_brightness;
-                        $("briVal").textContent = s.led_brightness;
+                        $("briRange").value = st.led_brightness;
+                        $("briVal").textContent = st.led_brightness;
                     }
                 } catch (e) {
                     setStale(true);

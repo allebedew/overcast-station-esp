@@ -26,8 +26,5 @@ esp_err_t wifi_store_remove(const char *ssid);
 
 int wifi_store_count(void);
 
-/* Копирует сеть по индексу; false, если индекс вне списка. */
+/* Copies the network at idx; false if idx is out of range. */
 bool wifi_store_get(int idx, wifi_cred_t *out);
-
-/* Копирует только SSID сети по индексу. */
-bool wifi_store_get_ssid(int idx, char ssid[33]);
