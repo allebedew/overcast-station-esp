@@ -58,3 +58,7 @@ int history_interval(history_tier_t tier);
 
 /* idx 0 = oldest stored point. Returns false if idx is out of range. */
 bool history_get(history_tier_t tier, int idx, history_point_t *out);
+
+/* Clears all tiers (RAM and flash snapshots). Sampling keeps running and
+ * starts filling the rings from empty again. */
+void history_reset(void);

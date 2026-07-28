@@ -1,33 +1,27 @@
 #include "webserver.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_app_desc.h"
-#include "esp_chip_info.h"
-#include "esp_flash.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
-#include "esp_timer.h"
-#include "esp_heap_caps.h"
 #include "lwip/sockets.h"
 #include "cJSON.h"
 #include "mdns.h"
-#include "nvs.h"
-#include "chip_temp.h"
 #include "climate.h"
 #include "history.h"
 #include "led.h"
 #include "ota.h"
 #include "screen_16x2.h"
 #include "sensors.h"
+#include "sysinfo.h"
 #include "timesync.h"
 #include "weather_api.h"
 #include "weather_store.h"
@@ -56,6 +50,72 @@ static int http_conn_count(void)
         return 0;
     }
     return (int)n;
+}
+
+/* Bounded assembly of a JSON reply.
+ *
+ * snprintf() returns the length it *wanted* to write, so the plain
+ * `off += snprintf(buf + off, sizeof(buf) - off, ...)` chain walks past the
+ * end of the buffer as soon as one reply does not fit: the next call gets a
+ * pointer beyond the array and a size that underflows to something enormous,
+ * and the length handed to httpd_resp_send() covers memory that was never
+ * part of the reply. Appending through jbuf instead clamps at the end and
+ * records the truncation, so an oversized reply comes out short rather than
+ * out of bounds. */
+typedef struct {
+    char *buf;
+    size_t cap;
+    size_t len;      /* always < cap; buf stays NUL-terminated */
+    bool truncated;
+} jbuf_t;
+
+static void jbuf_init(jbuf_t *j, char *buf, size_t cap)
+{
+    j->buf = buf;
+    j->cap = cap;
+    j->len = 0;
+    j->truncated = false;
+    buf[0] = '\0';
+}
+
+static void jbuf_printf(jbuf_t *j, const char *fmt, ...)
+    __attribute__((format(printf, 2, 3)));
+
+static void jbuf_printf(jbuf_t *j, const char *fmt, ...)
+{
+    size_t left = j->cap - j->len;
+    if (left <= 1) {
+        j->truncated = true;
+        return;
+    }
+
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(j->buf + j->len, left, fmt, ap);
+    va_end(ap);
+
+    if (n < 0) {
+        j->truncated = true;
+    } else if ((size_t)n >= left) {
+        j->len = j->cap - 1; /* vsnprintf wrote up to the NUL and stopped */
+        j->truncated = true;
+    } else {
+        j->len += n;
+    }
+}
+
+/* Sends what was assembled. A truncated reply is broken JSON and the page
+ * will say so, but only the log says which buffer ran out — the sizes here
+ * are dimensioned by hand, so the warning is the thing that catches a reply
+ * that outgrew its buffer. */
+static esp_err_t jbuf_send(httpd_req_t *req, const jbuf_t *j)
+{
+    if (j->truncated) {
+        ESP_LOGW(TAG, "%s: reply truncated at %u bytes", req->uri,
+                 (unsigned)j->cap);
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, j->buf, j->len);
 }
 
 /* Экранирует " и \ для подстановки строки в JSON; управляющие символы
@@ -93,10 +153,12 @@ static const char *json_num(char *dst, size_t dstlen, bool ok,
  * мигает светодиодом и логирует каждый HTTP-запрос. */
 static esp_err_t handle_request(httpd_req_t *req)
 {
-    /* /api/status and /api/history are polled every 1-2 s by the web
-     * UI — too noisy to log */
+    /* /api/status and GET /api/history are polled every 1-2 s by the web
+     * UI — too noisy to log. POST /api/history/reset is a rare, deliberate
+     * action and still gets logged. */
     if (strcmp(req->uri, "/api/status") != 0 &&
-        strncmp(req->uri, "/api/history", 12) != 0) {
+        !(req->method == HTTP_GET &&
+          strncmp(req->uri, "/api/history", 12) == 0)) {
         char ip[INET6_ADDRSTRLEN] = "?";
         struct sockaddr_in6 addr;
         socklen_t addr_len = sizeof(addr);
@@ -119,62 +181,6 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     return httpd_resp_send(req, index_html_start, index_html_end - index_html_start);
-}
-
-static const char *authmode_str(wifi_auth_mode_t mode)
-{
-    switch (mode) {
-    case WIFI_AUTH_OPEN:          return "open";
-    case WIFI_AUTH_WEP:           return "WEP";
-    case WIFI_AUTH_WPA_PSK:       return "WPA";
-    case WIFI_AUTH_WPA2_PSK:      return "WPA2";
-    case WIFI_AUTH_WPA_WPA2_PSK:  return "WPA/WPA2";
-    case WIFI_AUTH_WPA3_PSK:      return "WPA3";
-    case WIFI_AUTH_WPA2_WPA3_PSK: return "WPA2/WPA3";
-    default:                      return "?";
-    }
-}
-
-static const char *phy_str(const wifi_ap_record_t *ap)
-{
-    if (ap->phy_11ax) return "Wi-Fi 6 (802.11ax)";
-    if (ap->phy_11n)  return "Wi-Fi 4 (802.11n)";
-    if (ap->phy_11g)  return "802.11g";
-    return "802.11b";
-}
-
-static const char *reset_reason_str(void)
-{
-    switch (esp_reset_reason()) {
-    case ESP_RST_POWERON:   return "power-on";
-    case ESP_RST_SW:        return "software";
-    case ESP_RST_PANIC:     return "panic";
-    case ESP_RST_INT_WDT:
-    case ESP_RST_TASK_WDT:
-    case ESP_RST_WDT:       return "watchdog";
-    case ESP_RST_BROWNOUT:  return "brownout";
-    case ESP_RST_DEEPSLEEP: return "deep sleep";
-    default:                return "other";
-    }
-}
-
-/* Загрузка CPU между вызовами: доля времени вне задачи IDLE.
- * Счётчики 32-битные (мкс), переполнение (~71 мин) корректно
- * съедается вычитанием в uint32_t. */
-static int cpu_load_percent(void)
-{
-    static uint32_t prev_idle, prev_total;
-    uint32_t idle = ulTaskGetIdleRunTimeCounter();
-    uint32_t total = (uint32_t)esp_timer_get_time();
-    uint32_t d_idle = idle - prev_idle;
-    uint32_t d_total = total - prev_total;
-    prev_idle = idle;
-    prev_total = total;
-
-    if (d_total == 0 || d_idle > d_total) {
-        return 0;
-    }
-    return 100 - (int)((uint64_t)100 * d_idle / d_total);
 }
 
 static esp_err_t status_get_handler(httpd_req_t *req)
@@ -208,7 +214,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
                  "\"auth\":\"%s\"}",
                  connected ? "true" : "false", ssid, IP2STR(&ip.ip), IP2STR(&ip.gw),
                  IP2STR(&dns.ip.u_addr.ip4), MAC2STR(mac), ap.primary, ap.rssi,
-                 MAC2STR(ap.bssid), phy_str(&ap), authmode_str(ap.authmode));
+                 MAC2STR(ap.bssid), wifi_sta_phy_str(),
+                 wifi_authmode_str(ap.authmode));
     }
 
     static char ap_json[440];
@@ -222,34 +229,27 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         esp_wifi_get_mac(WIFI_IF_AP, mac);
         char ssid[67];
         json_escape(wifi.ap_ssid, ssid, sizeof(ssid));
-        int off = snprintf(ap_json, sizeof(ap_json),
-                           "\"ap\":{\"active\":%s,\"ssid\":\"%s\",\"ip\":\"" IPSTR "\","
-                           "\"mac\":\"" MACSTR "\",\"channel\":%d,\"clients\":[",
-                           wifi.ap_active ? "true" : "false", ssid, IP2STR(&ip.ip),
-                           MAC2STR(mac), wifi.channel);
+        jbuf_t j;
+        jbuf_init(&j, ap_json, sizeof(ap_json));
+        jbuf_printf(&j, "\"ap\":{\"active\":%s,\"ssid\":\"%s\",\"ip\":\"" IPSTR "\","
+                        "\"mac\":\"" MACSTR "\",\"channel\":%d,\"clients\":[",
+                    wifi.ap_active ? "true" : "false", ssid, IP2STR(&ip.ip),
+                    MAC2STR(mac), wifi.channel);
         if (wifi.ap_active) {
             wifi_sta_list_t sta_list = {0};
             esp_wifi_ap_get_sta_list(&sta_list);
-            for (int i = 0; i < sta_list.num && off < (int)sizeof(ap_json); i++) {
-                off += snprintf(ap_json + off, sizeof(ap_json) - off,
-                                "%s{\"mac\":\"" MACSTR "\",\"rssi\":%d}", i ? "," : "",
-                                MAC2STR(sta_list.sta[i].mac), sta_list.sta[i].rssi);
+            for (int i = 0; i < sta_list.num; i++) {
+                jbuf_printf(&j, "%s{\"mac\":\"" MACSTR "\",\"rssi\":%d}",
+                            i ? "," : "",
+                            MAC2STR(sta_list.sta[i].mac), sta_list.sta[i].rssi);
             }
         }
-        if (off < (int)sizeof(ap_json)) {
-            snprintf(ap_json + off, sizeof(ap_json) - off, "]}");
-        }
+        jbuf_printf(&j, "]}");
     }
 
-    const esp_app_desc_t *app = esp_app_get_description();
-
-    esp_chip_info_t chip;
-    esp_chip_info(&chip);
-    uint32_t flash_size = 0;
-    esp_flash_get_size(NULL, &flash_size);
-
-    nvs_stats_t nvs = {0};
-    nvs_get_stats(NULL, &nvs);
+    const sysinfo_static_t *sys = sysinfo_static();
+    sysinfo_runtime_t run;
+    sysinfo_get_runtime(&run);
 
     scd40_data_t air = {0};
     bool air_ok = sensors_scd40_get(&air);
@@ -273,14 +273,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     char weather_name[67];
     json_escape(wloc_ok ? wloc.name : "", weather_name, sizeof(weather_name));
 
-    char time_str[32] = "--.--.---- --:--:--";
-    if (timesync_is_synced()) {
-        time_t now;
-        time(&now);
-        struct tm tm;
-        localtime_r(&now, &tm);
-        strftime(time_str, sizeof(time_str), "%d.%m.%Y %H:%M:%S", &tm);
-    }
+    char time_str[TIMESYNC_STR_LEN];
+    timesync_format(time_str, sizeof(time_str));
 
     /* The room, as opposed to the chips below: one source per quantity, no
      * substitutions. This is what the main cards and the charts show, so the
@@ -297,7 +291,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     json_num(cl_lux, sizeof(cl_lux), cl.lux_ok, "%.1f", cl.lux);
 
     static char json[3072];
-    int len = snprintf(json, sizeof(json),
+    jbuf_t j;
+    jbuf_init(&j, json, sizeof(json));
+    jbuf_printf(&j,
         "{%s,%s,"
         "\"climate\":{"
         "\"temp\":%s,\"rh\":%s,\"co2\":%s,"
@@ -330,7 +326,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"backlight_rgb\":\"%06X\",\"altitude\":%d}}",
         sta_json, ap_json,
         cl_temp, cl_rh, cl_co2, cl_press, cl_msl, cl_lux,
-        chip_temp_celsius(),
+        sysinfo_chip_temp_c(),
         air_ok ? "true" : "false", air.co2_ppm, air.temp_c, air.rh_pct,
         tmp117_ok ? "true" : "false", tmp117.temp_c,
         bmp581_ok ? "true" : "false",
@@ -347,27 +343,23 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         weather.elevation_m, weather.utc_offset_s, (int)weather.age_s,
         weather_name, weather_store_get_active(),
         wloc_ok ? wloc.lat : 0, wloc_ok ? wloc.lon : 0,
-        esp_timer_get_time() / 1000000,
+        run.uptime_s,
         time_str,
         timesync_is_synced() ? "true" : "false",
-        app->version, app->date, app->time, app->idf_ver,
-        chip.revision / 100, chip.revision % 100,
-        CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
-        (unsigned long)(flash_size / (1024 * 1024)),
-        reset_reason_str(), cpu_load_percent(),
-        (unsigned)uxTaskGetNumberOfTasks(),
+        sys->app_version, sys->build_date, sys->build_time, sys->idf_ver,
+        sys->chip_rev_major, sys->chip_rev_minor,
+        sys->cpu_mhz,
+        (unsigned long)sys->flash_mb,
+        sysinfo_reset_reason_str(), run.cpu_load_pct,
+        run.tasks,
         http_conn_count(),
-        (unsigned)esp_get_free_heap_size(),
-        (unsigned)esp_get_minimum_free_heap_size(),
-        (unsigned)heap_caps_get_total_size(MALLOC_CAP_DEFAULT),
-        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT),
-        (unsigned)nvs.used_entries, (unsigned)nvs.total_entries,
+        run.heap_free, run.heap_min, run.heap_total, run.heap_largest,
+        (unsigned)sys->nvs_used_entries, (unsigned)sys->nvs_total_entries,
         (unsigned)led_get_brightness(),
         (unsigned)screen_16x2_backlight_rgb(),
         climate_altitude_m());
 
-    httpd_resp_set_type(req, "application/json");
-    return httpd_resp_send(req, json, len);
+    return jbuf_send(req, &j);
 }
 
 /* History as arrays per metric (null = gap); ?p=5m|1h|1d selects the
@@ -406,11 +398,11 @@ static esp_err_t history_get_handler(httpd_req_t *req)
         { "lux",   HISTORY_HAS_LUX },
     };
 
-    int len = snprintf(buf, sizeof(buf), "{\"period\":%d",
-                       history_interval(tier));
+    jbuf_t j;
+    jbuf_init(&j, buf, sizeof(buf));
+    jbuf_printf(&j, "{\"period\":%d", history_interval(tier));
     for (int m = 0; m < (int)(sizeof(series) / sizeof(series[0])); m++) {
-        len += snprintf(buf + len, sizeof(buf) - len, ",\"%s\":[",
-                        series[m].name);
+        jbuf_printf(&j, ",\"%s\":[", series[m].name);
         int count = history_count(tier);
         for (int i = 0; i < count; i++) {
             history_point_t p;
@@ -434,20 +426,28 @@ static esp_err_t history_get_handler(httpd_req_t *req)
                     break;
                 }
             }
-            len += snprintf(buf + len, sizeof(buf) - len, "%s%s",
-                            i ? "," : "", val);
-            if (len > (int)sizeof(buf) - 32) {
-                if (httpd_resp_send_chunk(req, buf, len) != ESP_OK) {
+            jbuf_printf(&j, "%s%s", i ? "," : "", val);
+
+            /* Flushed with room to spare for the next value, so the buffer is
+             * emptied before an append could be cut in half. */
+            if (j.len > sizeof(buf) - 32) {
+                if (httpd_resp_send_chunk(req, j.buf, j.len) != ESP_OK) {
                     return ESP_FAIL;
                 }
-                len = 0;
+                jbuf_init(&j, buf, sizeof(buf));
             }
         }
-        len += snprintf(buf + len, sizeof(buf) - len, "]");
+        jbuf_printf(&j, "]");
     }
-    len += snprintf(buf + len, sizeof(buf) - len, "}");
-    httpd_resp_send_chunk(req, buf, len);
+    jbuf_printf(&j, "}");
+    httpd_resp_send_chunk(req, j.buf, j.len);
     return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+static esp_err_t history_reset_post_handler(httpd_req_t *req)
+{
+    history_reset();
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
 static esp_err_t scan_get_handler(httpd_req_t *req)
@@ -459,24 +459,25 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
                                    "scan failed");
     }
 
-    static char json[2048];
+    /* Fifteen APs with fully escaped SSIDs come to ~2 KB. */
+    static char json[2560];
     char essid[67];
-    int off = snprintf(json, sizeof(json), "[");
-    for (int i = 0; i < n && off < (int)sizeof(json) - 2; i++) {
-        off += snprintf(json + off, sizeof(json) - off,
-                        "%s{\"ssid\":\"%s\",\"bssid\":\"" MACSTR "\","
+    jbuf_t j;
+    jbuf_init(&j, json, sizeof(json));
+    jbuf_printf(&j, "[");
+    for (int i = 0; i < n; i++) {
+        jbuf_printf(&j, "%s{\"ssid\":\"%s\",\"bssid\":\"" MACSTR "\","
                         "\"ch\":%d,\"rssi\":%d,\"auth\":\"%s\"}",
-                        i ? "," : "",
-                        json_escape(aps[i].ssid, essid, sizeof(essid)),
-                        MAC2STR(aps[i].bssid),
-                        aps[i].channel,
-                        aps[i].rssi,
-                        authmode_str((wifi_auth_mode_t)aps[i].authmode));
+                    i ? "," : "",
+                    json_escape(aps[i].ssid, essid, sizeof(essid)),
+                    MAC2STR(aps[i].bssid),
+                    aps[i].channel,
+                    aps[i].rssi,
+                    wifi_authmode_str(aps[i].authmode));
     }
-    off += snprintf(json + off, sizeof(json) - off, "]");
+    jbuf_printf(&j, "]");
 
-    httpd_resp_set_type(req, "application/json");
-    return httpd_resp_send(req, json, off);
+    return jbuf_send(req, &j);
 }
 
 static esp_err_t networks_get_handler(httpd_req_t *req)
@@ -484,7 +485,9 @@ static esp_err_t networks_get_handler(httpd_req_t *req)
     static char json[1024];
     char essid[67];
     wifi_cred_t net;
-    int off = snprintf(json, sizeof(json), "[");
+    jbuf_t j;
+    jbuf_init(&j, json, sizeof(json));
+    jbuf_printf(&j, "[");
     for (int i = 0; wifi_store_get(i, &net); i++) {
         bool pinned = false;
         for (int k = 0; k < 6; k++) {
@@ -493,18 +496,16 @@ static esp_err_t networks_get_handler(httpd_req_t *req)
                 break;
             }
         }
-        off += snprintf(json + off, sizeof(json) - off, "%s{\"ssid\":\"%s\"",
-                        i ? "," : "", json_escape(net.ssid, essid, sizeof(essid)));
+        jbuf_printf(&j, "%s{\"ssid\":\"%s\"",
+                    i ? "," : "", json_escape(net.ssid, essid, sizeof(essid)));
         if (pinned) {
-            off += snprintf(json + off, sizeof(json) - off,
-                            ",\"bssid\":\"" MACSTR "\"", MAC2STR(net.bssid));
+            jbuf_printf(&j, ",\"bssid\":\"" MACSTR "\"", MAC2STR(net.bssid));
         }
-        off += snprintf(json + off, sizeof(json) - off, "}");
+        jbuf_printf(&j, "}");
     }
-    off += snprintf(json + off, sizeof(json) - off, "]");
+    jbuf_printf(&j, "]");
 
-    httpd_resp_set_type(req, "application/json");
-    return httpd_resp_send(req, json, off);
+    return jbuf_send(req, &j);
 }
 
 /* Читает тело запроса и парсит JSON; NULL при ошибке. */
@@ -574,21 +575,23 @@ static esp_err_t network_delete_post_handler(httpd_req_t *req)
 
 static esp_err_t locations_get_handler(httpd_req_t *req)
 {
-    static char json[1024];
+    /* Ten locations whose names escape to twice their stored length reach
+     * ~1.1 KB, so the buffer is sized for the full list rather than for the
+     * handful a station usually has. */
+    static char json[1536];
     char name[100];
-    int off = snprintf(json, sizeof(json), "{\"active\":%d,\"locations\":[",
-                       weather_store_get_active());
+    jbuf_t j;
+    jbuf_init(&j, json, sizeof(json));
+    jbuf_printf(&j, "{\"active\":%d,\"locations\":[", weather_store_get_active());
     weather_location_t loc;
     for (int i = 0; weather_store_get(i, &loc); i++) {
-        off += snprintf(json + off, sizeof(json) - off,
-                        "%s{\"name\":\"%s\",\"lat\":%.4f,\"lon\":%.4f}",
-                        i ? "," : "", json_escape(loc.name, name, sizeof(name)),
-                        loc.lat, loc.lon);
+        jbuf_printf(&j, "%s{\"name\":\"%s\",\"lat\":%.4f,\"lon\":%.4f}",
+                    i ? "," : "", json_escape(loc.name, name, sizeof(name)),
+                    loc.lat, loc.lon);
     }
-    off += snprintf(json + off, sizeof(json) - off, "]}");
+    jbuf_printf(&j, "]}");
 
-    httpd_resp_set_type(req, "application/json");
-    return httpd_resp_send(req, json, off);
+    return jbuf_send(req, &j);
 }
 
 /* Coordinates are resolved from a place name by the browser (Open-Meteo
@@ -723,6 +726,33 @@ static esp_err_t connect_post_handler(httpd_req_t *req)
     return ret;
 }
 
+/* Every route in one place. The registered handler is always the logging
+ * wrapper and the real one rides in user_ctx, so a new endpoint is a line
+ * here and nothing else — including the handler count, which the config
+ * below takes from the table instead of a number kept in step by hand. */
+static const struct {
+    const char *uri;
+    httpd_method_t method;
+    esp_err_t (*handler)(httpd_req_t *);
+} s_routes[] = {
+    { "/",                     HTTP_GET,    index_get_handler },
+    { "/api/status",           HTTP_GET,    status_get_handler },
+    { "/api/history",          HTTP_GET,    history_get_handler },
+    { "/api/history/reset",    HTTP_POST,   history_reset_post_handler },
+    { "/api/scan",             HTTP_GET,    scan_get_handler },
+    { "/api/networks",         HTTP_GET,    networks_get_handler },
+    { "/api/networks/add",     HTTP_POST,   network_add_post_handler },
+    { "/api/networks/delete",  HTTP_POST,   network_delete_post_handler },
+    { "/api/locations",        HTTP_GET,    locations_get_handler },
+    { "/api/locations",        HTTP_POST,   location_add_post_handler },
+    { "/api/locations",        HTTP_DELETE, location_delete_handler },
+    { "/api/locations/active", HTTP_PUT,    location_active_put_handler },
+    { "/api/connect",          HTTP_POST,   connect_post_handler },
+    { "/api/settings",         HTTP_POST,   settings_post_handler },
+    { "/api/scd40/calibrate",  HTTP_POST,   scd40_calibrate_post_handler },
+    { "/api/ota",              HTTP_POST,   ota_post_handler },
+};
+
 static void mdns_start(void)
 {
     ESP_ERROR_CHECK(mdns_init());
@@ -737,7 +767,7 @@ void webserver_start(void)
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192; /* дефолтных 4 КиБ не хватает обработчику /api/status */
-    config.max_uri_handlers = 20; /* дефолтных 8 уже впритык */
+    config.max_uri_handlers = sizeof(s_routes) / sizeof(s_routes[0]);
     /* Recycle the least-recently-used connection instead of holding all
      * max_open_sockets slots, so the browser's keep-alive polling can't
      * starve the shared LWIP socket pool of outbound TLS clients. */
@@ -746,111 +776,15 @@ void webserver_start(void)
     ESP_ERROR_CHECK(httpd_start(&server, &config));
     s_server = server;
 
-    const httpd_uri_t index_uri = {
-        .uri = "/",
-        .method = HTTP_GET,
-        .handler = handle_request,
-        .user_ctx = index_get_handler,
-    };
-    const httpd_uri_t status_uri = {
-        .uri = "/api/status",
-        .method = HTTP_GET,
-        .handler = handle_request,
-        .user_ctx = status_get_handler,
-    };
-    const httpd_uri_t history_uri = {
-        .uri = "/api/history",
-        .method = HTTP_GET,
-        .handler = handle_request,
-        .user_ctx = history_get_handler,
-    };
-    const httpd_uri_t scan_uri = {
-        .uri = "/api/scan",
-        .method = HTTP_GET,
-        .handler = handle_request,
-        .user_ctx = scan_get_handler,
-    };
-    const httpd_uri_t networks_uri = {
-        .uri = "/api/networks",
-        .method = HTTP_GET,
-        .handler = handle_request,
-        .user_ctx = networks_get_handler,
-    };
-    const httpd_uri_t network_add_uri = {
-        .uri = "/api/networks/add",
-        .method = HTTP_POST,
-        .handler = handle_request,
-        .user_ctx = network_add_post_handler,
-    };
-    const httpd_uri_t network_delete_uri = {
-        .uri = "/api/networks/delete",
-        .method = HTTP_POST,
-        .handler = handle_request,
-        .user_ctx = network_delete_post_handler,
-    };
-    const httpd_uri_t locations_get_uri = {
-        .uri = "/api/locations",
-        .method = HTTP_GET,
-        .handler = handle_request,
-        .user_ctx = locations_get_handler,
-    };
-    const httpd_uri_t location_add_uri = {
-        .uri = "/api/locations",
-        .method = HTTP_POST,
-        .handler = handle_request,
-        .user_ctx = location_add_post_handler,
-    };
-    const httpd_uri_t location_delete_uri = {
-        .uri = "/api/locations",
-        .method = HTTP_DELETE,
-        .handler = handle_request,
-        .user_ctx = location_delete_handler,
-    };
-    const httpd_uri_t location_active_uri = {
-        .uri = "/api/locations/active",
-        .method = HTTP_PUT,
-        .handler = handle_request,
-        .user_ctx = location_active_put_handler,
-    };
-    const httpd_uri_t connect_uri = {
-        .uri = "/api/connect",
-        .method = HTTP_POST,
-        .handler = handle_request,
-        .user_ctx = connect_post_handler,
-    };
-    const httpd_uri_t settings_uri = {
-        .uri = "/api/settings",
-        .method = HTTP_POST,
-        .handler = handle_request,
-        .user_ctx = settings_post_handler,
-    };
-    const httpd_uri_t scd40_cal_uri = {
-        .uri = "/api/scd40/calibrate",
-        .method = HTTP_POST,
-        .handler = handle_request,
-        .user_ctx = scd40_calibrate_post_handler,
-    };
-    const httpd_uri_t ota_uri = {
-        .uri = "/api/ota",
-        .method = HTTP_POST,
-        .handler = handle_request,
-        .user_ctx = ota_post_handler,
-    };
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &index_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &status_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &history_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &scan_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &networks_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &network_add_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &network_delete_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &locations_get_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &location_add_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &location_delete_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &location_active_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &connect_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &settings_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &scd40_cal_uri));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &ota_uri));
+    for (int i = 0; i < (int)(sizeof(s_routes) / sizeof(s_routes[0])); i++) {
+        const httpd_uri_t uri = {
+            .uri = s_routes[i].uri,
+            .method = s_routes[i].method,
+            .handler = handle_request,
+            .user_ctx = (void *)s_routes[i].handler,
+        };
+        ESP_ERROR_CHECK(httpd_register_uri_handler(server, &uri));
+    }
 
     ESP_LOGI(TAG, "Web server started: http://%s.local/", MDNS_HOSTNAME);
 }

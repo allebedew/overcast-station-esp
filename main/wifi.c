@@ -329,3 +329,31 @@ esp_err_t wifi_connect(void)
     ESP_LOGI(TAG, "Connecting to \"%s\"...", s_current_ssid);
     return ESP_OK;
 }
+
+/* The link as words rather than enums — the values only ever leave the
+ * firmware through the UI, and the mapping belongs next to the rest of what
+ * this module knows about a connection. */
+const char *wifi_authmode_str(int authmode)
+{
+    switch ((wifi_auth_mode_t)authmode) {
+    case WIFI_AUTH_OPEN:          return "open";
+    case WIFI_AUTH_WEP:           return "WEP";
+    case WIFI_AUTH_WPA_PSK:       return "WPA";
+    case WIFI_AUTH_WPA2_PSK:      return "WPA2";
+    case WIFI_AUTH_WPA_WPA2_PSK:  return "WPA/WPA2";
+    case WIFI_AUTH_WPA3_PSK:      return "WPA3";
+    case WIFI_AUTH_WPA2_WPA3_PSK: return "WPA2/WPA3";
+    default:                      return "?";
+    }
+}
+
+const char *wifi_sta_phy_str(void)
+{
+    wifi_ap_record_t ap = {0};
+    esp_wifi_sta_get_ap_info(&ap); /* leaves ap zeroed when not associated */
+
+    if (ap.phy_11ax) return "Wi-Fi 6 (802.11ax)";
+    if (ap.phy_11n)  return "Wi-Fi 4 (802.11n)";
+    if (ap.phy_11g)  return "802.11g";
+    return "802.11b";
+}

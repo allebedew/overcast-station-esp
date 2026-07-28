@@ -1,5 +1,6 @@
 #include "timesync.h"
 
+#include <stdio.h>
 #include <time.h>
 
 #include "esp_log.h"
@@ -33,4 +34,17 @@ void timesync_init(void)
 bool timesync_is_synced(void)
 {
     return s_synced;
+}
+
+void timesync_format(char *buf, size_t len)
+{
+    if (!s_synced) {
+        snprintf(buf, len, "--.--.---- --:--:--");
+        return;
+    }
+    time_t now;
+    time(&now);
+    struct tm tm;
+    localtime_r(&now, &tm);
+    strftime(buf, len, "%d.%m.%Y %H:%M:%S", &tm);
 }

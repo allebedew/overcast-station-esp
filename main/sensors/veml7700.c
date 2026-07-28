@@ -67,6 +67,9 @@ static const veml7700_range_t RANGES[] = {
 #define RANGE_LOW_COUNTS  100
 #define RANGE_HIGH_COUNTS 10000
 
+/* At the 16-bit ceiling the count is a lower bound, not a measurement. */
+#define RANGE_SATURATED 65535
+
 /* How long after a configuration change the data register holds a sample
  * taken with the new settings. One integration is under way when the write
  * lands and is discarded, so two are budgeted, plus the datasheet's 2.5 ms
@@ -106,8 +109,9 @@ static esp_err_t apply_range(int idx)
  * most sensitive one first — that is the step with the finest resolution the
  * level still fits in. Working from the measured level means a reading far
  * outside the current range moves straight to the right step instead of
- * walking the table one poll at a time; a saturated count understates the
- * level, so that case simply takes one more pass to converge. */
+ * walking the table one poll at a time. Saturation is handled by the caller:
+ * a clipped count understates the level badly enough that the estimate here
+ * would land several steps short. */
 static int pick_range(uint16_t als)
 {
     float lx = als * RANGES[s_range].lx_per_count;
@@ -194,7 +198,11 @@ esp_err_t veml7700_read(veml7700_data_t *out)
      * old settings, and integration restarts. The caller retries on the next
      * poll, by which time the settle deadline above has passed. */
     if (als > RANGE_HIGH_COUNTS || als < RANGE_LOW_COUNTS) {
-        int want = pick_range(als);
+        /* A clipped count says only "at least this bright". Estimating from it
+         * lands short and clips again, and from the sensitive end of the table
+         * a torch used to cost three range changes to converge; dropping to the
+         * coarsest step gets there in one, at 25 ms of settling. */
+        int want = als >= RANGE_SATURATED ? 0 : pick_range(als);
         if (want != s_range) {
             err = apply_range(want);
             return err == ESP_OK ? ESP_ERR_NOT_FINISHED : err;

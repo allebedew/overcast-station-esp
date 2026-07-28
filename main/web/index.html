@@ -51,15 +51,26 @@
             .wrap {
                 max-width: 1080px;
                 margin: 0 auto;
-                padding: 12px;
+                padding: 12px 12px 20px;
             }
 
             /* ============ HEADER ============ */
             header {
                 display: flex;
                 align-items: center;
-                gap: 10px;
+                flex-wrap: wrap;
+                gap: 8px;
                 padding: 6px 2px 14px;
+            }
+            /* every control in the header row is the same height, so the
+             * period switch, the language switch, the gear and the online
+             * pill read as one strip */
+            header .seg,
+            header .icon-btn,
+            header .conn {
+                height: 34px;
+                box-sizing: border-box;
+                flex: none;
             }
             .logo {
                 width: 34px;
@@ -74,10 +85,6 @@
             header h1 {
                 font-size: 16px;
                 font-weight: 600;
-            }
-            header .sub {
-                font-size: 12px;
-                color: var(--text-dim);
             }
             .spacer {
                 flex: 1;
@@ -219,7 +226,7 @@
             }
             /* A second, derived reading under the measured one — currently
                only the sea-level pressure. Sized between the big number and
-               the min/max row: it is a reading, not a footnote. */
+               the chart: it is a reading, not a footnote. */
             .sensor .subval {
                 margin-top: 3px;
                 font-size: 12.5px;
@@ -230,17 +237,30 @@
                 color: var(--text);
                 font-weight: 600;
             }
+            /* Min/max ride along the right edge of the big reading instead of
+               taking a row of their own — that row was stolen from the chart. */
             .sensor .minmax {
                 display: flex;
-                gap: 14px;
-                margin: 6px 0 8px;
+                flex-direction: column;
+                align-items: flex-end;
+                align-self: center;
+                margin-left: auto;
+                gap: 1px;
                 font-size: 11.5px;
+                line-height: 1.25;
                 color: var(--text-faint);
                 font-variant-numeric: tabular-nums;
+                white-space: nowrap;
+            }
+            .sensor .minmax b {
+                color: var(--text-dim);
+                font-weight: 600;
+                margin-left: 4px;
             }
             .sensor canvas {
                 width: 100%;
                 height: 112px;
+                margin-top: 8px;
                 display: block;
                 touch-action: pan-y;
                 cursor: crosshair;
@@ -357,6 +377,14 @@
                 align-items: center;
                 gap: 8px;
                 margin-bottom: 9px;
+            }
+            /* part number over description, two lines, so the description
+             * gets the full card width instead of the leftovers */
+            .sens-id {
+                display: flex;
+                flex-direction: column;
+                gap: 1px;
+                min-width: 0;
             }
             .sens-name {
                 font-size: 12px;
@@ -477,19 +505,10 @@
                 margin-top: 1px;
             }
 
-            /* --- Period switch --- */
-            .period-bar {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                margin: 14px 0 8px;
-            }
-            .period-bar .label {
-                font-size: 12px;
-                color: var(--text-dim);
-            }
+            /* --- Segmented switches (period, language) --- */
             .seg {
                 display: inline-flex;
+                align-items: center;
                 background: var(--panel);
                 border: 1px solid var(--border);
                 border-radius: 9px;
@@ -503,13 +522,13 @@
                 font: inherit;
                 font-size: 12px;
                 font-weight: 500;
-                padding: 5px 14px;
+                padding: 4px 13px;
                 border-radius: 7px;
                 cursor: pointer;
                 transition:
                     background 0.15s,
                     color 0.15s;
-                min-height: 30px;
+                min-height: 26px;
             }
             .seg button.active {
                 background: var(--accent);
@@ -837,38 +856,12 @@
                 cursor: pointer;
                 border: 3px solid var(--bg);
             }
-            /* hue slider with its two step buttons on either side */
-            .hue-row {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                margin-top: 10px;
-            }
-            .hue-row input[type="range"] {
-                flex: 1;
-                min-width: 0;
-                margin-top: 0;
-                background: linear-gradient(
-                    to right,
-                    #f00 0%,
-                    #ff0 17%,
-                    #0f0 33%,
-                    #0ff 50%,
-                    #00f 67%,
-                    #f0f 83%,
-                    #f00 100%
-                );
-            }
-            .hue-row .btn {
-                padding: 4px 13px;
-                line-height: 1.4;
-            }
             #blHexInput {
                 font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
                 text-transform: uppercase;
                 letter-spacing: 0.06em;
             }
-            /* live preview of the resulting backlight color */
+            /* preview of the color the device is set to */
             .bl-dot {
                 display: inline-block;
                 width: 11px;
@@ -1000,12 +993,6 @@
                 font-size: 11px;
             }
 
-            footer {
-                text-align: center;
-                font-size: 11px;
-                color: var(--text-faint);
-                padding: 18px 0 8px;
-            }
         </style>
     </head>
     <body>
@@ -1013,11 +1000,15 @@
             <!-- HEADER -->
             <header>
                 <div class="logo">🌡</div>
-                <div>
-                    <h1 data-i18n="appName">Метеостанция</h1>
-                    <div class="sub" id="hdrSub">weather.local · ESP32-C6</div>
-                </div>
+                <h1 data-i18n="appName">Метеостанция</h1>
                 <div class="spacer"></div>
+                <div class="seg" id="periodSeg">
+                    <button data-p="5m" class="active" data-i18n="p5m">
+                        5 мин
+                    </button>
+                    <button data-p="1h" data-i18n="p1h">1 час</button>
+                    <button data-p="1d" data-i18n="p1d">Сутки</button>
+                </div>
                 <div class="seg lang" id="langSeg">
                     <button data-l="ru">RU</button>
                     <button data-l="en">EN</button>
@@ -1050,20 +1041,6 @@
                 </div>
             </header>
 
-            <!-- PERIOD SWITCH -->
-            <div class="period-bar">
-                <span class="label" data-i18n="sensorReadings"
-                    >Показания датчиков</span
-                >
-                <div class="seg" id="periodSeg">
-                    <button data-p="5m" class="active" data-i18n="p5m">
-                        5 мин
-                    </button>
-                    <button data-p="1h" data-i18n="p1h">1 час</button>
-                    <button data-p="1d" data-i18n="p1d">Сутки</button>
-                </div>
-            </div>
-
             <!-- SENSORS -->
             <div class="grid-sensors">
                 <div class="card sensor">
@@ -1075,15 +1052,15 @@
                     <div class="reading">
                         <span class="value" id="tVal">--</span
                         ><span class="unit">°C</span>
-                    </div>
-                    <div class="minmax">
-                        <span
-                            ><span data-i18n="min">мин</span>
-                            <b id="tMin">--</b></span
-                        ><span
-                            ><span data-i18n="max">макс</span>
-                            <b id="tMax">--</b></span
-                        >
+                        <div class="minmax">
+                            <span
+                                ><span data-i18n="max">макс</span>
+                                <b id="tMax">--</b></span
+                            ><span
+                                ><span data-i18n="min">мин</span>
+                                <b id="tMin">--</b></span
+                            >
+                        </div>
                     </div>
                     <canvas id="tChart"></canvas>
                 </div>
@@ -1096,15 +1073,15 @@
                     <div class="reading">
                         <span class="value" id="hVal">--</span
                         ><span class="unit">%</span>
-                    </div>
-                    <div class="minmax">
-                        <span
-                            ><span data-i18n="min">мин</span>
-                            <b id="hMin">--</b></span
-                        ><span
-                            ><span data-i18n="max">макс</span>
-                            <b id="hMax">--</b></span
-                        >
+                        <div class="minmax">
+                            <span
+                                ><span data-i18n="max">макс</span>
+                                <b id="hMax">--</b></span
+                            ><span
+                                ><span data-i18n="min">мин</span>
+                                <b id="hMin">--</b></span
+                            >
+                        </div>
                     </div>
                     <canvas id="hChart"></canvas>
                 </div>
@@ -1118,15 +1095,15 @@
                     <div class="reading">
                         <span class="value" id="cVal">--</span
                         ><span class="unit">ppm</span>
-                    </div>
-                    <div class="minmax">
-                        <span
-                            ><span data-i18n="min">мин</span>
-                            <b id="cMin">--</b></span
-                        ><span
-                            ><span data-i18n="max">макс</span>
-                            <b id="cMax">--</b></span
-                        >
+                        <div class="minmax">
+                            <span
+                                ><span data-i18n="max">макс</span>
+                                <b id="cMax">--</b></span
+                            ><span
+                                ><span data-i18n="min">мин</span>
+                                <b id="cMin">--</b></span
+                            >
+                        </div>
                     </div>
                     <canvas id="cChart"></canvas>
                 </div>
@@ -1139,19 +1116,19 @@
                     <div class="reading">
                         <span class="value" id="pVal">--</span
                         ><span class="unit">hPa</span>
+                        <div class="minmax">
+                            <span
+                                ><span data-i18n="max">макс</span>
+                                <b id="pMax">--</b></span
+                            ><span
+                                ><span data-i18n="min">мин</span>
+                                <b id="pMin">--</b></span
+                            >
+                        </div>
                     </div>
                     <div class="subval">
                         <span data-i18n="atSeaLevel">на уровне моря</span>
                         <b id="pMslVal">--</b> hPa
-                    </div>
-                    <div class="minmax">
-                        <span
-                            ><span data-i18n="min">мин</span>
-                            <b id="pMin">--</b></span
-                        ><span
-                            ><span data-i18n="max">макс</span>
-                            <b id="pMax">--</b></span
-                        >
                     </div>
                     <canvas id="pChart"></canvas>
                 </div>
@@ -1164,15 +1141,15 @@
                     <div class="reading">
                         <span class="value" id="lVal">--</span
                         ><span class="unit">lx</span>
-                    </div>
-                    <div class="minmax">
-                        <span
-                            ><span data-i18n="min">мин</span>
-                            <b id="lMin">--</b></span
-                        ><span
-                            ><span data-i18n="max">макс</span>
-                            <b id="lMax">--</b></span
-                        >
+                        <div class="minmax">
+                            <span
+                                ><span data-i18n="max">макс</span>
+                                <b id="lMax">--</b></span
+                            ><span
+                                ><span data-i18n="min">мин</span>
+                                <b id="lMin">--</b></span
+                            >
+                        </div>
                     </div>
                     <canvas id="lChart"></canvas>
                 </div>
@@ -1319,34 +1296,6 @@
                     </table>
                 </div>
 
-                <!-- WIFI -->
-                <div class="card">
-                    <h2>
-                        <span class="ic">📶</span>
-                        <span data-i18n="wifiNetworks">Wi-Fi сети</span>
-                    </h2>
-                    <button
-                        class="btn block"
-                        id="scanBtn"
-                        data-i18n="scanNetworks"
-                    >
-                        Сканировать сети
-                    </button>
-                    <div class="wifi-list" id="wifiList">
-                        <div class="scan-hint" data-i18n="loading">
-                            Загрузка…
-                        </div>
-                    </div>
-                    <button
-                        class="btn block"
-                        id="reconnBtn"
-                        style="margin-top: 10px"
-                        data-i18n="reconnect"
-                    >
-                        Переподключиться к сохранённым сетям
-                    </button>
-                </div>
-
                 <!-- SETTINGS -->
                 <div class="card">
                     <h2>
@@ -1371,47 +1320,13 @@
 
                     <div class="set-row">
                         <div class="head">
-                            <span class="name" data-i18n="blHue"
-                                >Оттенок подсветки</span
-                            ><span class="val"
-                                ><span class="bl-dot" id="blDot"></span
-                                ><span id="blHueVal">—</span></span
-                            >
-                        </div>
-                        <div class="hue-row">
-                            <button class="btn" id="blHueDown">−</button>
-                            <input
-                                type="range"
-                                id="blHue"
-                                min="0"
-                                max="359"
-                                value="200"
-                            />
-                            <button class="btn" id="blHueUp">+</button>
-                        </div>
-                    </div>
-
-                    <div class="set-row">
-                        <div class="head">
-                            <span class="name" data-i18n="blBrightness"
-                                >Яркость подсветки</span
-                            ><span class="val" id="blBrightVal">—</span>
-                        </div>
-                        <input
-                            type="range"
-                            id="blBright"
-                            min="0"
-                            max="100"
-                            value="100"
-                        />
-                    </div>
-
-                    <div class="set-row">
-                        <div class="head">
                             <span class="name" data-i18n="blHex"
                                 >Цвет подсветки (HEX)</span
-                            ><span class="val" data-i18n="blHexHint"
-                                >Enter — применить</span
+                            ><span class="val"
+                                ><span class="bl-dot" id="blDot"></span
+                                ><span data-i18n="blHexHint"
+                                    >Enter — применить</span
+                                ></span
                             >
                         </div>
                         <div class="frc-row">
@@ -1468,12 +1383,46 @@
                             </button>
                         </div>
                     </div>
+
+                    <div class="set-row">
+                        <button
+                            class="btn block"
+                            id="histResetBtn"
+                            data-i18n="histReset"
+                        >
+                            Обнулить историю
+                        </button>
+                    </div>
+                </div>
+
+                <!-- WIFI -->
+                <div class="card">
+                    <h2>
+                        <span class="ic">📶</span>
+                        <span data-i18n="wifiNetworks">Wi-Fi сети</span>
+                    </h2>
+                    <button
+                        class="btn block"
+                        id="scanBtn"
+                        data-i18n="scanNetworks"
+                    >
+                        Сканировать сети
+                    </button>
+                    <div class="wifi-list" id="wifiList">
+                        <div class="scan-hint" data-i18n="loading">
+                            Загрузка…
+                        </div>
+                    </div>
+                    <button
+                        class="btn block"
+                        id="reconnBtn"
+                        style="margin-top: 10px"
+                        data-i18n="reconnect"
+                    >
+                        Переподключиться к сохранённым сетям
+                    </button>
                 </div>
             </div>
-
-            <footer data-i18n="footer">
-                Метеостанция · ESP32-C6 · http://weather.local
-            </footer>
         </div>
 
         <!-- WIFI CONNECT MODAL -->
@@ -1551,6 +1500,7 @@
                                   chips on the bus
      GET  /api/history          - {period, co2[], temp[], rh[], press[], lux[]},
                                   ?p=5m|1h|1d, null = gap in that series alone
+     POST /api/history/reset    - wipes all tiers (RAM + flash snapshots)
      GET  /api/scan             - [{ssid, bssid, ch, rssi, auth}] (one per BSSID)
      GET  /api/networks         - saved networks [{ssid, bssid?}] (bssid = pinned AP)
      POST /api/networks/add     - {ssid, password, bssid?} (bssid pins the AP)
@@ -1576,7 +1526,6 @@
                     appName: "Метеостанция",
                     online: "Онлайн",
                     noLink: "Нет связи",
-                    sensorReadings: "Показания датчиков",
                     p5m: "5м",
                     p1h: "1ч",
                     p1d: "24ч",
@@ -1678,15 +1627,12 @@
                     reconnect: "Переподключиться к сохранённым сетям",
                     settings: "Настройки",
                     ledBrightness: "Яркость светодиода",
-                    blHue: "Оттенок подсветки",
-                    blBrightness: "Яркость подсветки",
                     blHex: "Цвет подсветки (HEX)",
                     blHexHint: "Enter — применить",
                     blBadHex: "Нужны 6 шестнадцатеричных цифр, например 00AAFF",
                     blSaved: "Подсветка сохранена",
                     frcTitle: "Калибровка CO₂ (FRC)",
                     calibrate: "Калибровать",
-                    footer: "Метеостанция · ESP32-C6 · http://weather.local",
                     cancel: "Отмена",
                     connect: "Подключить",
                     netPassword: "Пароль сети",
@@ -1750,13 +1696,18 @@
                         "(на улице ~420 ppm). Калибровать на {ppm} ppm?",
                     frcDone: "Готово. Применённая поправка: ",
                     frcError: "Ошибка калибровки: ",
+                    histReset: "Обнулить историю",
+                    histResetConfirm:
+                        "Удалить всю накопленную историю (5 минут, час и сутки)? " +
+                        "Действие необратимо.",
+                    histResetDone: "История обнулена",
+                    histResetError: "Не удалось обнулить историю: ",
                     panelsToggle: "Показать/скрыть систему, Wi-Fi и настройки",
                 },
                 en: {
                     appName: "Weather Station",
                     online: "Online",
                     noLink: "No link",
-                    sensorReadings: "Sensor readings",
                     p5m: "5m",
                     p1h: "1h",
                     p1d: "24h",
@@ -1818,6 +1769,10 @@
                     locDelConfirm: "Remove location “{name}”?",
                     locLast: "Can't remove the last location",
                     compass: ["N", "NE", "E", "SE", "S", "SW", "W", "NW"],
+                    /* Kept word for word in sync with weather_api_code_str()
+                       in the firmware, which is what the 16x2 panel shows —
+                       the two used to word the same code differently. Editing
+                       one means editing the other. */
                     wcode: {
                         0: "Clear sky",
                         1: "Mainly clear",
@@ -1857,15 +1812,12 @@
                     reconnect: "Reconnect to saved networks",
                     settings: "Settings",
                     ledBrightness: "LED brightness",
-                    blHue: "Backlight hue",
-                    blBrightness: "Backlight brightness",
                     blHex: "Backlight color (hex)",
                     blHexHint: "Enter to apply",
                     blBadHex: "Six hex digits expected, e.g. 00AAFF",
                     blSaved: "Backlight saved",
                     frcTitle: "CO₂ calibration (FRC)",
                     calibrate: "Calibrate",
-                    footer: "Weather Station · ESP32-C6 · http://weather.local",
                     cancel: "Cancel",
                     connect: "Connect",
                     netPassword: "Network password",
@@ -1929,6 +1881,12 @@
                         "concentration (~420 ppm outdoors). Calibrate to {ppm} ppm?",
                     frcDone: "Done. Applied correction: ",
                     frcError: "Calibration error: ",
+                    histReset: "Reset history",
+                    histResetConfirm:
+                        "Erase all recorded history (5 min, 1 h and 24 h)? " +
+                        "This cannot be undone.",
+                    histResetDone: "History reset",
+                    histResetError: "Failed to reset history: ",
                     panelsToggle: "Show/hide system, Wi-Fi and settings",
                 },
             };
@@ -2188,9 +2146,9 @@
 
                     return (
                         `<div class="sens-dev${ok ? "" : " off"}">` +
-                        '<div class="sens-head">' +
+                        '<div class="sens-head"><div class="sens-id">' +
                         `<span class="sens-name">${dev.name}</span>` +
-                        `<span class="sens-sub">${t(dev.sub)}</span>` +
+                        `<span class="sens-sub">${t(dev.sub)}</span></div>` +
                         `<span class="badge ${ok ? "good" : "off"}">` +
                         `${ok ? t("sensOk") : t("sensOff")}</span></div>` +
                         `<div class="sens-metrics">${tiles}</div>` +
@@ -2278,15 +2236,6 @@
                     const w = s.weather || {};
                     const sy = s.system || {};
                     const st = s.settings || {};
-
-                    {
-                        const sta = s.sta || {};
-                        const ap = s.ap || {};
-                        const bits = [];
-                        if (sta.connected) bits.push(sta.ssid + " · " + sta.ip);
-                        if (ap.active) bits.push(t("apMode") + " · " + ap.ip);
-                        $("hdrSub").textContent = bits.join("  ·  ") || t("notConn");
-                    }
 
                     /* Main cards read the climate object, not the individual
                      * devices: one source per quantity, the same one the
@@ -2474,13 +2423,7 @@
                     }
                     if (!blLoaded && st.backlight_rgb !== undefined) {
                         blLoaded = true;
-                        const hex = st.backlight_rgb.toUpperCase();
-                        const [hue, bright] = hexToHueBright(hex);
-                        $("blHue").value = hue;
-                        $("blBright").value = bright;
-                        /* show the stored color, not what the sliders would
-                           produce — the two differ for e.g. FFFFFF */
-                        paintBacklight(hex);
+                        paintBacklight(st.backlight_rgb.toUpperCase());
                     }
                 } catch (e) {
                     setStale(true);
@@ -2883,8 +2826,9 @@
                     el.className = "trend flat";
                     return;
                 }
-                const d =
-                    vals[vals.length - 1] - vals[Math.max(0, vals.length - 6)];
+                /* change across the whole displayed period: first sample of
+                 * the window vs the latest one */
+                const d = vals[vals.length - 1] - vals[0];
                 const eps = (Math.max(...vals) - Math.min(...vals)) * 0.05;
                 const f = fmt || ((v) => v.toFixed(1));
                 el.textContent =
@@ -2923,9 +2867,9 @@
                 span("p", pv, (v) => v.toFixed(3));
                 span("l", lv, fmtLux);
 
-                trendArrow($("tTrend"), tv);
-                trendArrow($("hTrend"), hv);
-                trendArrow($("pTrend"), pv);
+                trendArrow($("tTrend"), tv, (v) => v.toFixed(2) + "°");
+                trendArrow($("hTrend"), hv, (v) => v.toFixed(1) + "%");
+                trendArrow($("pTrend"), pv, (v) => v.toFixed(2));
                 trendArrow($("lTrend"), lv, fmtLux);
 
                 charts.t.data = s.t;
@@ -3358,62 +3302,11 @@
                 toast(t("altSaved"));
             });
 
-            /* Backlight: the device stores plain RGB, so hue and brightness
-               live here — these two controls are one way to pick a color, and
-               the conversion never leaves the browser. */
-            const HUE_STEP = 5;
-
-            function backlightHex(hue, bright) {
-                /* HSV at full saturation: inside each 60° sector one channel
-                   is at the top, one at zero, the third ramps between them */
-                const v = Math.floor((bright * 255) / 100);
-                const rising = Math.floor((v * (hue % 60)) / 60);
-                const falling = v - rising;
-                const rgb = [
-                    [v, rising, 0],
-                    [falling, v, 0],
-                    [0, v, rising],
-                    [0, falling, v],
-                    [rising, 0, v],
-                    [v, 0, falling],
-                ][Math.floor(hue / 60)];
-                return rgb
-                    .map((c) => c.toString(16).padStart(2, "0"))
-                    .join("")
-                    .toUpperCase();
-            }
-
-            /* One place that reflects a color everywhere: dot, hex field and
-               the slider read-outs. */
+            /* Backlight: the device stores plain RGB and the page sets it as
+               a hex color, verbatim — no conversion in between. */
             function paintBacklight(hex) {
-                $("blHueVal").textContent = `${+$("blHue").value}°`;
-                $("blBrightVal").textContent = `${+$("blBright").value}%`;
                 $("blDot").style.background = "#" + hex;
                 $("blHexInput").value = hex;
-            }
-
-            function showBacklight() {
-                const hex = backlightHex(+$("blHue").value, +$("blBright").value);
-                paintBacklight(hex);
-                return hex;
-            }
-
-            /* Back from a stored color to slider positions, so a reload (or
-               another browser) picks up where the device actually is. With
-               saturation assumed full this is unambiguous. */
-            function hexToHueBright(hex) {
-                const n = parseInt(hex, 16) || 0;
-                const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-                const max = Math.max(...c),
-                    min = Math.min(...c),
-                    d = max - min;
-                let hue = 0;
-                if (d) {
-                    if (max === c[0]) hue = 60 * (((c[1] - c[2]) / d + 6) % 6);
-                    else if (max === c[1]) hue = 60 * ((c[2] - c[0]) / d + 2);
-                    else hue = 60 * ((c[0] - c[1]) / d + 4);
-                }
-                return [Math.round(hue) % 360, Math.round((max * 100) / 255)];
             }
 
             async function sendBacklight(hex) {
@@ -3424,39 +3317,20 @@
                 toast(t("blSaved"));
             }
 
-            async function saveBacklight() {
-                await sendBacklight(showBacklight());
-            }
-
-            function stepHue(delta) {
-                /* hue is a circle: stepping past either end wraps around */
-                $("blHue").value = (+$("blHue").value + delta + 360) % 360;
-                saveBacklight();
-            }
-
-            /* Typed color wins as-is: the sliders cannot express every RGB
-               (their saturation is fixed), so it is sent verbatim and they
-               are only moved to the closest match. */
+            /* A rejected value leaves the device alone: the field is put back
+               to the color the device is actually showing. */
             $("blHexInput").addEventListener("change", async (e) => {
                 const hex = e.target.value.trim().replace(/^#/, "").toUpperCase();
                 if (!/^[0-9A-F]{6}$/.test(hex)) {
                     toast(t("blBadHex"));
-                    showBacklight(); /* put the current color back */
+                    paintBacklight(
+                        (lastStatus?.settings?.backlight_rgb || "").toUpperCase(),
+                    );
                     return;
                 }
-                const [hue, bright] = hexToHueBright(hex);
-                $("blHue").value = hue;
-                $("blBright").value = bright;
                 paintBacklight(hex);
                 await sendBacklight(hex);
             });
-
-            $("blHue").addEventListener("input", showBacklight);
-            $("blBright").addEventListener("input", showBacklight);
-            $("blHue").addEventListener("change", saveBacklight);
-            $("blBright").addEventListener("change", saveBacklight);
-            $("blHueDown").addEventListener("click", () => stepHue(-HUE_STEP));
-            $("blHueUp").addEventListener("click", () => stepHue(HUE_STEP));
 
             $("frcBtn").addEventListener("click", async () => {
                 const ppm = +$("frcPpm").value;
@@ -3472,6 +3346,24 @@
                     toast(t("frcDone") + (await r.json()).correction + " ppm");
                 } catch (e) {
                     toast(t("frcError") + e.message);
+                } finally {
+                    btn.disabled = false;
+                }
+            });
+
+            $("histResetBtn").addEventListener("click", async () => {
+                if (!confirm(t("histResetConfirm"))) return;
+                const btn = $("histResetBtn");
+                btn.disabled = true;
+                try {
+                    const r = await fetch("/api/history/reset", {
+                        method: "POST",
+                    });
+                    if (!r.ok) throw new Error(await r.text());
+                    toast(t("histResetDone"));
+                    loadHistory(period);
+                } catch (e) {
+                    toast(t("histResetError") + e.message);
                 } finally {
                     btn.disabled = false;
                 }

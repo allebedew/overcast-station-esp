@@ -1,10 +1,7 @@
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_log.h"
+#include "esp_err.h"
 #include "nvs_flash.h"
 #include "alerts.h"
 #include "button.h"
-#include "chip_temp.h"
 #include "climate.h"
 #include "history.h"
 #include "i2c_bus.h"
@@ -13,21 +10,13 @@
 #include "screen_16x2.h"
 #include "sensors.h"
 #include "storage.h"
+#include "sysinfo.h"
 #include "telegram.h"
 #include "timesync.h"
 #include "weather_api.h"
 #include "weather_store.h"
 #include "webserver.h"
 #include "wifi.h"
-
-static const char *TAG = "main";
-
-static void log_task_list(void)
-{
-    static char task_list_buf[1024];
-    vTaskList(task_list_buf);
-    ESP_LOGI(TAG, "Task list:\nName          State  Prio  Stack  Num\n%s", task_list_buf);
-}
 
 void app_main(void)
 {
@@ -46,7 +35,7 @@ void app_main(void)
     storage_init();
     climate_init(); /* before history: it samples climate every second */
     history_init();
-    chip_temp_init();
+    sysinfo_init();
 
     /* The bus comes up before anything that talks on it — the sensors here,
      * the display further down — and logs a scan while the log is still
@@ -71,6 +60,6 @@ void app_main(void)
     /* инициализация прошла — фиксируем прошивку, отменяя OTA-откат */
     ota_confirm_running_image();
 
-    log_task_list();
+    sysinfo_log_tasks();
     /* app_main завершается — работают задачи led и wifi */
 }

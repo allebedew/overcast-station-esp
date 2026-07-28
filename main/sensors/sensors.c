@@ -172,13 +172,15 @@ static void set_offline(sensor_t *s, int64_t now)
     s->probe_at_us = now + (int64_t)PROBE_PERIOD_MS * 1000;
 }
 
-static void sensor_step(sensor_t *s)
+/* Returns true when the sensor asked to be come back to promptly rather than
+ * at its own period: a sequence in progress, not a reading. */
+static bool sensor_step(sensor_t *s)
 {
     int64_t now = esp_timer_get_time();
 
     if (!s->running) {
         if (now < s->probe_at_us) {
-            return;
+            return false;
         }
         i2c_bus_lock();
         esp_err_t err = s->start();
@@ -186,19 +188,19 @@ static void sensor_step(sensor_t *s)
 
         if (err == ESP_ERR_NOT_FINISHED) {
             /* the sequence has a wait in it that the sensor, not the bus,
-             * needs — it resumes at the next slot with the bus free meanwhile */
-            return;
+             * needs — it resumes at the next tick with the bus free meanwhile */
+            return true;
         }
         if (err != ESP_OK) {
             set_offline(s, now);
-            return;
+            return false;
         }
         s->running = true;
         s->errors = 0;
         if (s->on_start) {
             s->on_start();
         }
-        return; /* the first conversion under the new settings is not in yet */
+        return true; /* the first conversion under the new settings is not in yet */
     }
 
     sensor_reading_t r;
@@ -207,7 +209,12 @@ static void sensor_step(sensor_t *s)
     i2c_bus_unlock();
 
     if (err == ESP_ERR_NOT_FINISHED) {
-        return; /* nothing new to publish yet, and not a failure either */
+        /* Nothing new to publish yet, and not a failure either. Coming back at
+         * the sensor's own period would charge a full period for every step of
+         * a sequence — the VEML7700 walks several range changes to follow a
+         * torch, and at 1 Hz that alone put seconds between the light and the
+         * display. */
+        return true;
     }
     if (err != ESP_OK) {
         if (++s->errors >= MAX_ERRORS) {
@@ -215,7 +222,7 @@ static void sensor_step(sensor_t *s)
                      esp_err_to_name(err));
             set_offline(s, now);
         }
-        return;
+        return false;
     }
     s->errors = 0;
 
@@ -227,6 +234,7 @@ static void sensor_step(sensor_t *s)
     if (s->on_reading) {
         s->on_reading(&r);
     }
+    return false;
 }
 
 static void sensors_task(void *arg)
@@ -241,7 +249,9 @@ static void sensors_task(void *arg)
             /* next slot measured from now, so a poll held up by the bus lock
              * shifts the schedule instead of firing a catch-up burst */
             s->next_us = now + (int64_t)s->period_ms * 1000;
-            sensor_step(s);
+            if (sensor_step(s)) {
+                s->next_us = 0; /* mid-sequence: next tick, not next period */
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(SENSOR_TICK_MS));
     }

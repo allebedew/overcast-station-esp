@@ -27,7 +27,10 @@ the alerts are still the only consumer left tied to the SCD40 alone.
   served with `Content-Encoding: gzip`), `http://weather.local`
   (mDNS). Dark dashboard: five sensor cards (temperature / humidity / CO₂ on
   the first row, pressure / illuminance on the second) fed from the `climate`
-  object, each with current value, trend arrow, min/max and a sparkline chart
+  object, each with current value, trend arrow, min/max and a sparkline chart.
+  The trend arrow shows the change across the whole displayed period (first
+  sample of the window vs the latest one); min/max sit to the right of the big
+  reading rather than on a row of their own, so the chart keeps that height
   — CO₂ carries a level badge instead of a trend arrow, and pressure carries a
   second line under the reading with the same value reduced to sea level.
   Then a
@@ -44,25 +47,26 @@ the alerts are still the only consumer left tied to the SCD40 alone.
   grid-cell elevation, the coordinates and the location's UTC offset; a chip row switches the
   displayed location and adds/removes them, resolving a typed city name to
   coordinates via in-browser Open-Meteo geocoding), plus a
-  system card (Wi-Fi details, chip temp, heap, CPU load, NVS, uptime, reset
-  reason, firmware/build version), a Wi-Fi card (one list — saved networks by
+  system card (Wi-Fi details, chip temp, heap, CPU load, NVS as of boot, uptime, reset
+  reason, firmware/build version), a settings card (LED
+  brightness, LCD backlight color, site
+  altitude in metres, SCD40 FRC calibration, and a history reset button that
+  wipes all three rings — RAM and flash — after a confirm dialog) and a Wi-Fi
+  card (one list — saved networks by
   default, augmented with scanned APs on Scan; saved and the connected AP are
   badged; tap an AP → password modal with an optional "pin BSSID" toggle →
-  save; per-network delete; reconnect button) and a settings card (LED
-  brightness, LCD backlight hue — a rainbow slider with −/+ buttons stepping
-  5° at a time, wrapping around the circle — LCD backlight brightness, site
-  altitude in metres, and SCD40 FRC calibration). The altitude field saves on
-  change and is written back from the device only once per page load, so a
-  1 s status poll cannot overwrite what is being typed.
-  Hue/brightness are a browser-side way to pick a
-  color: the page converts them to RGB (HSV at full saturation), previews the
-  result as a color dot, and sends the device only the finished value; on load
-  the sliders are derived back from the stored color. A hex field next to them
-  shows the current value and accepts a typed one (`00AAFF`, a leading `#` is
-  fine) — that path covers colors the two sliders cannot express, such as
-  white, and a typed value is sent verbatim.
-  The system/Wi-Fi/settings cards are hidden by default behind a gear toggle
-  in the header (state persists in localStorage), so the page opens as a
+  save; per-network delete; reconnect button). The
+  altitude field saves on change and is written back from the device only
+  once per page load, so a 1 s status poll cannot overwrite what is being
+  typed.
+  The backlight color is a single hex field (`00AAFF`, a leading `#` is fine)
+  with a color dot next to it previewing the current value; what is typed is
+  sent to the device verbatim, and a malformed value is rejected with the
+  field put back to the color the device is showing.
+  The header is a single row of equal-height controls — title, then the chart
+  period switch, the language switch, the gear and the connection pill.
+  The system/settings/Wi-Fi cards are hidden by default behind that gear toggle
+  (state persists in localStorage), so the page opens as a
   compact sensor dashboard.
   Auto-refreshes every 1 s; the header connection pill turns red and the page
   dims when the device is unreachable. Bilingual (RU/EN): all strings live in
@@ -100,7 +104,10 @@ the alerts are still the only consumer left tied to the SCD40 alone.
   helper and a caller bracketing a longer sequence compose. Waits that the
   *device* needs are deliberately left outside it — a start sequence with a
   half-second settling step in it returns `ESP_ERR_NOT_FINISHED` and resumes at
-  the next poll, with the bus free meanwhile.
+  the next 100 ms tick, with the bus free meanwhile. That retry is deliberately
+  the tick and not the sensor's own period: a sequence of several steps would
+  otherwise cost a full period each, which is what used to put seconds between
+  a torch on the VEML7700 and the reading on the display.
   Sub-millisecond-to-few-ms waits inside the drivers are busy-waits
   (`esp_rom_delay_us`): the FreeRTOS tick is 10 ms, so
   `vTaskDelay(pdMS_TO_TICKS(n))` for a few ms rounds down to zero ticks and
@@ -155,7 +162,10 @@ the alerts are still the only consumer left tied to the SCD40 alone.
     gain / integration-time table (x1/8 @ 25 ms … x2 @ 800 ms). The needed step
     is computed from the measured level, so a reading far outside the current
     range moves straight there instead of walking the table one poll at a time;
-    the sample that triggered the change is dropped. After any configuration
+    the sample that triggered the change is dropped. A count at the 16-bit
+    ceiling is exempt from that arithmetic — it is a lower bound, not a
+    measurement, so the driver drops straight to the coarsest step (25 ms) and
+    lets the table settle from there in one move. After any configuration
     change — including the one at startup — the driver waits out two
     integration periods before trusting the data register: reading it earlier
     returns the leftovers of the previous settings, which looked like darkness
@@ -274,7 +284,8 @@ the alerts are still the only consumer left tied to the SCD40 alone.
   firmware is dropped rather than reinterpreted.
   The web UI draws a sparkline inside each of the five sensor cards with a
   small dependency-free canvas renderer: switchable window (5 min / hour /
-  day, one switch for all charts) fetched from `/api/history?p=` and re-polled
+  day, one switch for all charts, in the page header) fetched from
+  `/api/history?p=` and re-polled
   at 2/10/60 s respectively, time/value axis labels, hover crosshair with a
   value + time tooltip; offline periods show as gaps. Value labels take their
   decimals from the gridline step, and the left margin follows the widest of
@@ -305,8 +316,11 @@ the alerts are still the only consumer left tied to the SCD40 alone.
   Exposed as the `weather` object in
   `/api/status` (incl. `name` / `active`) and shown in a
   dedicated "outside weather" card on the web page;
-  `weather_api_code_str()` decodes the WMO code to English text (the web UI
-  decodes it bilingually).
+  `weather_api_code_str()` decodes the WMO code to English text for the panel
+  and the log. The API carries the code, not the text, so the web UI decodes it
+  itself (`wcode` in `index.html`, one table per language) — its English table
+  and `weather_api_code_str()` are the same wording word for word, and an edit
+  to one belongs in the other.
 - **Weather locations** — up to 10 named locations `{name, lat, lon}` plus the
   active one are stored in NVS (`weather_store.c`). The list is empty on first
   boot — until a location is added the weather card stays empty and no fetch is
@@ -324,17 +338,25 @@ the alerts are still the only consumer left tied to the SCD40 alone.
 ## Architecture
 
 `app_main` (main.c) only initializes modules and exits; everything runs in
-tasks/callbacks. Modules under `main/`, each with a small public header;
-everything that talks to a device on the I2C bus sits in `main/sensors/`
-(added to the component's `INCLUDE_DIRS`, so the includes stay flat):
+tasks/callbacks. Modules under `main/`, each with a small public header, and
+grouped by what they face:
+
+- `main/sensors/` — everything that talks to a device on the I2C bus
+- `main/ui/` — what the station shows on its own hardware: the status LED and
+  the display
+- `main/web/` — what it serves over HTTP, including the page itself
+  (`web/index.html`)
+
+Every subdirectory is in the component's `INCLUDE_DIRS`, so the includes stay
+flat (`#include "screen_16x2.h"`, not `"ui/screen_16x2.h"`).
 
 | Module | Role |
 |---|---|
-| `wifi.c` | connection state machine; STA state and AP state are separate fields of one snapshot from `wifi_get_info()` (polled by the LED task), with `wifi_is_connected()` as the shorthand and `wifi_ap_enable()` to toggle the AP |
+| `wifi.c` | connection state machine; STA state and AP state are separate fields of one snapshot from `wifi_get_info()` (polled by the LED task), with `wifi_is_connected()` as the shorthand and `wifi_ap_enable()` to toggle the AP; also names the link for the UI — `wifi_authmode_str()`, `wifi_sta_phy_str()` |
 | `wifi_store.c` | saved credentials in NVS (namespace `wifi_creds`), mutex-protected |
-| `webserver.c` | esp_http_server + mDNS; all handlers go through one wrapper that logs the request (except `/api/status` — polled every 1 s) and blinks the LED; static buffers are safe (single httpd task) |
+| `web/webserver.c` | esp_http_server + mDNS; routes live in one table and all handlers go through a wrapper that logs the request (except `/api/status` — polled every 1 s) and blinks the LED; static buffers are safe (single httpd task) and replies are assembled through a bounded appender that truncates and logs instead of running past the buffer |
 | `ota.c` | `POST /api/ota` handler + rollback confirmation |
-| `led.c` | LED task; polls wifi/sensors/ota each tick and picks the pattern, brightness (persisted) |
+| `ui/led.c` | LED task; polls wifi/sensors/ota each tick and picks the pattern, brightness (persisted) |
 | `button.c` | BOOT button via espressif/button: click → next display page, 1.5 s hold → AP toggle |
 | `sensors/sensors.c` | one task polling all four sensors, each at its own period, through a shared hot-plug state machine; owns the published snapshots and the cross-sensor wiring (SCD40 readings into `history.c`, BMP581 pressure into the SCD40's compensation) |
 | `sensors/i2c_bus.c` | the I2C master bus and the recursive lock that arbitrates it, for sensors and display alike; `i2c_bus_scan()` logs every responding address, run once at startup |
@@ -343,10 +365,10 @@ everything that talks to a device on the I2C bus sits in `main/sensors/`
 | `sensors/tmp117.c` | TMP117 transport: address auto-detection (`0x48`–`0x4B`), device-ID check, config (continuous, 8 averaged samples, 125 ms cycle), temperature register |
 | `sensors/bmp581.c` | BMP581/BMP580 transport: address auto-detection (`0x47`/`0x46`), chip-ID check, soft reset, DSP/IIR + OSR/ODR setup, 6-byte burst read |
 | `sensors/veml7700.c` | VEML7700 transport: little-endian command registers, the auto-ranging gain / integration-time table with its settle deadline, lux conversion with the >1000 lx correction |
-| `chip_temp.c` | the SoC's own temperature sensor — not on the bus and measuring the die rather than the room, so it is reported with the health readings, not the sensors |
-| `screen_16x2.c` | what the display shows: three pages advanced by the button (selection persisted), 60 fps frame timer, backlight as a stored RGB value. Sized for 16x2 — a bigger display gets its own layout module |
-| `lcd1602_rgb.c` | transport for the DFR0464 panel: character output, backlight registers, revision detection, hot-plug recovery. Takes the bus and its lock from `i2c_bus.c` like the sensors do. The only file tied to this particular display |
-| `timesync.c` | SNTP client; `timesync_is_synced()` flag |
+| `sysinfo.c` | how the station itself is doing, in two shapes: a snapshot of what cannot change until the next boot (firmware and IDF version, build stamp, chip revision, CPU clock, flash size, NVS fill) read once at start-up, and the live counters (uptime, CPU load, task count, four heap figures) sampled per call. Owns the SoC's own temperature sensor — not on the bus and measuring the die rather than the room, so it is reported with the health readings — the reset reason, and the start-up task-list dump. The CPU load is measured in one 1 s window shared by every caller, so the display and `/api/status` read the same figure and neither one's polling rate distorts the other's |
+| `ui/screen_16x2.c` | what the display shows: three pages advanced by the button (selection persisted), 60 fps frame timer, backlight as a stored RGB value. Sized for 16x2 — a bigger display gets its own layout module |
+| `ui/lcd1602_rgb.c` | transport for the DFR0464 panel: character output, backlight registers, revision detection, hot-plug recovery. Takes the bus and its lock from `i2c_bus.c` like the sensors do. The only file tied to this particular display |
+| `timesync.c` | SNTP client; `timesync_is_synced()` flag and `timesync_format()` for the clock shown in the UI (dashes of the same shape until the clock is set) |
 | `sensors/climate.c` | the room-level view over the devices: one source per quantity, no fallbacks, absent where there is no sensor. Composition of the snapshots from `sensors.c`, plus the reduction of the measured pressure to sea level; owns the site-altitude setting (cached from NVS — the reduction runs on every read). Its header also carries the firmware-wide reading resolutions |
 | `history.c` | three RAM rings (5 min @ 1 s, 1 h @ 5 s, 24 h @ 1 min) of five quantities with per-quantity validity; samples `climate_get()` from a 1 s esp_timer — nothing pushes into it; the two longer rings persist to `/data/hist_1h.bin` / `/data/history.bin` (5/10-min snapshots + shutdown handler, versioned header) |
 | `storage.c` | mounts the LittleFS `storage` partition at `/data` |
@@ -361,8 +383,9 @@ everything that talks to a device on the I2C bus sits in `main/sensors/`
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (index.html, gzipped) |
-| `/api/status` | GET | full status JSON, grouped into objects: `sta` / `ap` (Wi-Fi), `climate`, `sensors`, `weather` (Open-Meteo), `system` (firmware, chip, heap, NVS, uptime, clock), `settings` (`led_brightness`, `backlight_rgb`, `altitude`); nothing is left at the top level. `climate` is the room — `temp`, `rh`, `co2`, `press`, `press_msl` (the same reading reduced to sea level from the configured altitude), `lux`, each a number or `null` when no sensor stands behind it. `sensors` is the hardware view: one object per I2C device, each with its own `ok` — `scd40` (`co2`, `temp`, `rh`), `tmp117` (`temp`), `bmp581` (`press` hPa, `press_pa`, `temp`), `veml7700` (`lux`, `white`, `als_raw`, `white_raw`, `gain`, `it`) — plus `chip_temp` (the SoC sensor, not on the bus) at the top of the group |
+| `/api/status` | GET | full status JSON, grouped into objects: `sta` / `ap` (Wi-Fi), `climate`, `sensors`, `weather` (Open-Meteo), `system` (firmware, chip, heap, uptime, clock, plus `nvs_used`/`nvs_total` as counted once at boot — the count only moves when a setting is written, and walking the NVS pages on every poll is not worth it), `settings` (`led_brightness`, `backlight_rgb`, `altitude`); nothing is left at the top level. `climate` is the room — `temp`, `rh`, `co2`, `press`, `press_msl` (the same reading reduced to sea level from the configured altitude), `lux`, each a number or `null` when no sensor stands behind it. `sensors` is the hardware view: one object per I2C device, each with its own `ok` — `scd40` (`co2`, `temp`, `rh`), `tmp117` (`temp`), `bmp581` (`press` hPa, `press_pa`, `temp`), `veml7700` (`lux`, `white`, `als_raw`, `white_raw`, `gain`, `it`) — plus `chip_temp` (the SoC sensor, not on the bus) at the top of the group |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`) selects the ring; returns `{period: <s>, co2: [...], temp: [...], rh: [...], press: [...], lux: [...]}`. Each series is gated on its own quantity, so `null` is a gap in that series alone |
+| `/api/history/reset` | POST | wipe all history tiers (RAM rings and the `/data/hist_1h.bin` / `/data/history.bin` flash snapshots); sampling keeps running and refills from empty |
 | `/api/scan` | GET | scan for Wi-Fi networks, returns `[{ssid, bssid, ch, rssi, auth}]` (one entry per BSSID — same SSID may repeat across APs) |
 | `/api/networks` | GET | list of saved networks `[{ssid, bssid?}]` (bssid present only when the network is pinned to an AP) |
 | `/api/networks/add` | POST | save a network; body `{"ssid": "...", "password": "...", "bssid": "aa:bb:.."}` (bssid optional — pins the connection to that AP; omit/all-zero = connect to strongest), updates existing SSID |

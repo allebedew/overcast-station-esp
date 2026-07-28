@@ -386,3 +386,29 @@ bool history_get(history_tier_t tier, int idx, history_point_t *out)
     taskEXIT_CRITICAL(&s_lock);
     return ok;
 }
+
+void history_reset(void)
+{
+    /* Stored points become unreachable once count drops to 0 (history_get
+     * bounds-checks on it), so there is no need to clear the ring arrays
+     * themselves under the lock. */
+    taskENTER_CRITICAL(&s_lock);
+    for (int i = 0; i < HISTORY_TIER_COUNT; i++) {
+        tier_t *t = &s_tiers[i];
+        t->head = 0;
+        t->count = 0;
+        t->co2 = (acc_t){0};
+        t->temp = (acc_t){0};
+        t->rh = (acc_t){0};
+        t->press = (acc_t){0};
+        t->lux = (acc_t){0};
+    }
+    taskEXIT_CRITICAL(&s_lock);
+
+    for (int i = 0; i < HISTORY_TIER_COUNT; i++) {
+        if (s_tiers[i].file) {
+            remove(s_tiers[i].file);
+        }
+    }
+    ESP_LOGI(TAG, "history reset by user");
+}

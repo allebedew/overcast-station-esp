@@ -14,6 +14,7 @@
 #include "lcd1602_rgb.h"
 #include "climate.h"
 #include "settings.h"
+#include "sysinfo.h"
 #include "timesync.h"
 #include "weather_api.h"
 #include "wifi.h"
@@ -59,6 +60,21 @@ static TaskHandle_t s_task;
 /* Written from the web handler, read by the screen task. */
 static volatile uint32_t s_rgb = DEFAULT_RGB;
 
+/* A reading, or the dashes standing in for the sensor that did not produce
+ * it. Both spellings of a field sit on one line this way, so a row's layout
+ * can be read off the rendering function instead of a run of ifs above it.
+ * Integer quantities pass through as doubles ("%4.0f" prints what "%4u"
+ * would) — the display has no field where that costs anything. */
+static void fmt_or(char *dst, size_t len, bool ok, const char *absent,
+                   const char *fmt, double value)
+{
+    if (ok) {
+        snprintf(dst, len, fmt, value);
+    } else {
+        snprintf(dst, len, "%s", absent);
+    }
+}
+
 /* Air inside on the top row, outside on the bottom:
  *   23.46° 45.3 1250
  *   12.3° Overcast          (description cut to the space left)
@@ -71,18 +87,10 @@ static void render_indoor(char *l0, char *l1)
     climate_t c;
     climate_get(&c);
 
-    char temp[12] = "--.--" DEG;
-    char rh[12] = " --%";
-    char co2[12] = "----";
-    if (c.temp_ok) {
-        snprintf(temp, sizeof(temp), "%.2f" DEG, c.temp_c);
-    }
-    if (c.rh_ok) {
-        snprintf(rh, sizeof(rh), "%3.0f%%", c.rh_pct);
-    }
-    if (c.co2_ok) {
-        snprintf(co2, sizeof(co2), "%4u", c.co2_ppm);
-    }
+    char temp[12], rh[12], co2[12];
+    fmt_or(temp, sizeof(temp), c.temp_ok, "--.--" DEG, "%.2f" DEG, c.temp_c);
+    fmt_or(rh, sizeof(rh), c.rh_ok, " --%", "%3.0f%%", c.rh_pct);
+    fmt_or(co2, sizeof(co2), c.co2_ok, "----", "%4.0f", c.co2_ppm);
     snprintf(l0, RENDER_BUF, "%s %s %s", temp, rh, co2);
 
     weather_api_data_t w;
@@ -108,23 +116,15 @@ static void render_precise(char *l0, char *l1)
     climate_t c;
     climate_get(&c);
 
-    char temp[12] = "--.--" DEG;
-    char press[12] = "----.---";
-    char co2[12] = "----";
-    char rh[12] = "--.-";
+    char temp[12], press[12], co2[12], rh[12];
+    fmt_or(temp, sizeof(temp), c.temp_ok, "--.--" DEG, "%5.2f" DEG, c.temp_c);
+    fmt_or(press, sizeof(press), c.press_ok, "----.---", "%-8.3f", c.press_hpa);
+    fmt_or(co2, sizeof(co2), c.co2_ok, "----", "%4.0f", c.co2_ppm);
+    fmt_or(rh, sizeof(rh), c.rh_ok, "--.-", "%4.1f", c.rh_pct);
+
+    /* The illuminance keeps its own ladder: five columns cannot hold both a
+     * tenth of a lux and a five-digit reading. */
     char lux[10] = "-----x";
-    if (c.temp_ok) {
-        snprintf(temp, sizeof(temp), "%5.2f" DEG, c.temp_c);
-    }
-    if (c.press_ok) {
-        snprintf(press, sizeof(press), "%-8.3f", c.press_hpa);
-    }
-    if (c.co2_ok) {
-        snprintf(co2, sizeof(co2), "%4u", c.co2_ppm);
-    }
-    if (c.rh_ok) {
-        snprintf(rh, sizeof(rh), "%4.1f", c.rh_pct);
-    }
     if (c.lux_ok) {
         if (c.lux < 999.95f) {
             snprintf(lux, sizeof(lux), "%5.1fx", c.lux);
@@ -168,39 +168,6 @@ static void render_outdoor(char *l0, char *l1)
              w.wind_kmh, w.weather_code);
 }
 
-/* Share of the last second spent outside the idle task. The counters are
- * 32-bit microseconds; the ~71-minute wrap comes out right in the uint32_t
- * subtraction. The web handler keeps its own pair of them — the counters are
- * global, only the measurement window belongs to the caller. */
-#define CPU_WINDOW_US 1000000
-
-static int cpu_load_percent(void)
-{
-    static uint32_t prev_idle, prev_total;
-    static int64_t next_us;
-    static int load;
-
-    /* Rendering runs at 60 fps and a 16 ms window is pure noise, so the
-     * measurement keeps its own pace and the frames reuse the last figure. */
-    int64_t now = esp_timer_get_time();
-    if (now < next_us) {
-        return load;
-    }
-    next_us = now + CPU_WINDOW_US;
-
-    uint32_t idle = ulTaskGetIdleRunTimeCounter();
-    uint32_t total = (uint32_t)now;
-    uint32_t d_idle = idle - prev_idle;
-    uint32_t d_total = total - prev_total;
-    prev_idle = idle;
-    prev_total = total;
-
-    if (d_total != 0 && d_idle <= d_total) {
-        load = 100 - (int)((uint64_t)100 * d_idle / d_total);
-    }
-    return load;
-}
-
 /* The station itself rather than the air around it:
  *   17:27:40 28.07     (the colons blink, once a second)
  *   12% 184k -58dBm    (CPU load, free heap, Wi-Fi signal) */
@@ -210,10 +177,9 @@ static void render_system(char *l0, char *l1)
         /* The clock runs in UTC; the active location's offset (from
          * Open-Meteo) turns it into wall-clock time, and without one it stays
          * on UTC. */
-        weather_api_data_t w;
         struct timeval tv;
         gettimeofday(&tv, NULL);
-        time_t now = tv.tv_sec + (weather_api_get(&w) ? w.utc_offset_s : 0);
+        time_t now = tv.tv_sec + weather_api_utc_offset_s();
         struct tm tm;
         gmtime_r(&now, &tm);
 
@@ -238,7 +204,7 @@ static void render_system(char *l0, char *l1)
         snprintf(link, sizeof(link), "%s", wifi.ap_active ? "AP" : "--");
     }
 
-    snprintf(l1, RENDER_BUF, "%2.d%% %uk %s", cpu_load_percent(),
+    snprintf(l1, RENDER_BUF, "%2.d%% %uk %s", sysinfo_cpu_load_percent(),
              (unsigned)(esp_get_free_heap_size() / 1024), link);
 }
 
@@ -262,7 +228,7 @@ static void screen_task(void *arg)
         default:           render_system(l0, l1); break;
         }
 
-        uint32_t rgb = screen_16x2_backlight_rgb();
+        uint32_t rgb = s_rgb;
         lcd1602_rgb_set_line(0, l0);
         lcd1602_rgb_set_line(1, l1);
         lcd1602_rgb_set_color(rgb >> 16, (rgb >> 8) & 0xFF, rgb & 0xFF);

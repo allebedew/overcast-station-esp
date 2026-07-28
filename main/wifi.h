@@ -57,3 +57,13 @@ bool wifi_is_connected(void);
  * per BSSID, so the same SSID may repeat across access points) or -1 on
  * error. */
 int wifi_scan(wifi_scan_ap_t *out, int max_count);
+
+/* Name of an authentication mode ("WPA2", "WPA2/WPA3", ...) for the value
+ * carried in wifi_scan_ap_t::authmode. Never NULL; "?" for anything
+ * unrecognised. */
+const char *wifi_authmode_str(int authmode);
+
+/* The 802.11 generation of the current station link, as a label for the UI
+ * ("Wi-Fi 6 (802.11ax)"). Reports the lowest generation while there is no
+ * link. Never NULL. */
+const char *wifi_sta_phy_str(void);
