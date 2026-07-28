@@ -4,7 +4,9 @@
 #include "nvs_flash.h"
 #include "alerts.h"
 #include "button.h"
+#include "chip_temp.h"
 #include "history.h"
+#include "i2c_bus.h"
 #include "led.h"
 #include "ota.h"
 #include "screen_16x2.h"
@@ -42,6 +44,12 @@ void app_main(void)
     ESP_ERROR_CHECK(wifi_connect());
     storage_init();
     history_init();
+    chip_temp_init();
+
+    /* The bus comes up before anything that talks on it — the sensors here,
+     * the display further down — and logs a scan while the log is still
+     * quiet. */
+    i2c_bus_init();
     sensors_init();
 
     timesync_init();
@@ -50,8 +58,8 @@ void app_main(void)
     weather_store_init();
     weather_api_init();
 
-    /* Needs the I2C bus from sensors_init(); kept after the data modules so
-     * the display can go back to showing their readings. */
+    /* Kept after the data modules so the display can go straight to showing
+     * their readings. */
     screen_16x2_init();
 
     /* Last: the request handlers read from every module above, so the server

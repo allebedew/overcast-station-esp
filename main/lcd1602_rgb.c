@@ -7,6 +7,8 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+#include "i2c_bus.h"
+
 #define LCD_ADDR       0x3E /* AIP31068L, fixed */
 #define I2C_SPEED_HZ   100000
 #define I2C_TIMEOUT_MS 100
@@ -57,7 +59,6 @@ static const backlight_t s_backlights[] = {
 
 static const char *TAG = "lcd1602";
 
-static i2c_master_bus_handle_t s_bus;
 static i2c_master_dev_handle_t s_lcd;
 static i2c_master_dev_handle_t s_bl;
 static const backlight_t *s_bl_type;
@@ -71,12 +72,20 @@ static char s_shadow[LCD1602_ROWS][LCD1602_COLS];
 static uint8_t s_color[3] = { 255, 255, 255 };
 static bool s_color_valid;
 
+/* Every transfer takes the bus lock; the sequences that must not be broken up
+ * take it again around the whole group, which the recursive lock allows. The
+ * waits below are deliberately left outside it — they are the controller's
+ * settling time, not the bus's. */
 static esp_err_t lcd_write(uint8_t ctrl, const uint8_t *payload, int len)
 {
     uint8_t buf[1 + LCD1602_COLS];
     buf[0] = ctrl;
     memcpy(&buf[1], payload, len);
-    return i2c_master_transmit(s_lcd, buf, 1 + len, I2C_TIMEOUT_MS);
+
+    i2c_bus_lock();
+    esp_err_t err = i2c_master_transmit(s_lcd, buf, 1 + len, I2C_TIMEOUT_MS);
+    i2c_bus_unlock();
+    return err;
 }
 
 static esp_err_t lcd_cmd(uint8_t cmd)
@@ -87,7 +96,19 @@ static esp_err_t lcd_cmd(uint8_t cmd)
 static esp_err_t bl_reg(uint8_t reg, uint8_t value)
 {
     uint8_t buf[2] = { reg, value };
-    return i2c_master_transmit(s_bl, buf, sizeof(buf), I2C_TIMEOUT_MS);
+
+    i2c_bus_lock();
+    esp_err_t err = i2c_master_transmit(s_bl, buf, sizeof(buf), I2C_TIMEOUT_MS);
+    i2c_bus_unlock();
+    return err;
+}
+
+static bool probe(uint8_t addr)
+{
+    i2c_bus_lock();
+    bool present = i2c_master_probe(i2c_bus_handle(), addr, I2C_TIMEOUT_MS) == ESP_OK;
+    i2c_bus_unlock();
+    return present;
 }
 
 /* Marks the module offline and schedules the next detection attempt. */
@@ -136,7 +157,7 @@ static void backlight_attach(void)
     if (s_bl == NULL) {
         for (int i = 0; i < sizeof(s_backlights) / sizeof(s_backlights[0]); i++) {
             const backlight_t *bl = &s_backlights[i];
-            if (i2c_master_probe(s_bus, bl->addr, I2C_TIMEOUT_MS) != ESP_OK) {
+            if (!probe(bl->addr)) {
                 continue;
             }
             i2c_device_config_t cfg = {
@@ -144,7 +165,7 @@ static void backlight_attach(void)
                 .device_address = bl->addr,
                 .scl_speed_hz = I2C_SPEED_HZ,
             };
-            if (i2c_master_bus_add_device(s_bus, &cfg, &s_bl) != ESP_OK) {
+            if (i2c_master_bus_add_device(i2c_bus_handle(), &cfg, &s_bl) != ESP_OK) {
                 continue;
             }
             s_bl_type = bl;
@@ -165,7 +186,7 @@ static void backlight_attach(void)
 /* Probes the module and brings it into a known state. */
 static bool attach(void)
 {
-    if (i2c_master_probe(s_bus, LCD_ADDR, I2C_TIMEOUT_MS) != ESP_OK) {
+    if (!probe(LCD_ADDR)) {
         return false;
     }
     if (lcd_reset() != ESP_OK) {
@@ -200,19 +221,18 @@ static bool online(void)
     return true;
 }
 
-esp_err_t lcd1602_rgb_init(i2c_master_bus_handle_t bus)
+esp_err_t lcd1602_rgb_init(void)
 {
-    if (bus == NULL) {
-        return ESP_ERR_INVALID_ARG;
+    if (i2c_bus_handle() == NULL) {
+        return ESP_ERR_INVALID_STATE;
     }
-    s_bus = bus;
 
     i2c_device_config_t cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = LCD_ADDR,
         .scl_speed_hz = I2C_SPEED_HZ,
     };
-    esp_err_t err = i2c_master_bus_add_device(s_bus, &cfg, &s_lcd);
+    esp_err_t err = i2c_master_bus_add_device(i2c_bus_handle(), &cfg, &s_lcd);
     if (err != ESP_OK) {
         return err;
     }
@@ -255,10 +275,15 @@ esp_err_t lcd1602_rgb_set_line(int row, const char *text)
         return ESP_OK;
     }
 
+    /* The cursor address and the characters that follow it are one operation:
+     * anything else on the bus in between would land the row somewhere else. */
+    i2c_bus_lock();
     esp_err_t err = lcd_cmd(CMD_SET_DDRAM | (row == 0 ? 0 : DDRAM_ROW1));
     if (err == ESP_OK) {
         err = lcd_write(CTRL_DATA, (const uint8_t *)line, LCD1602_COLS);
     }
+    i2c_bus_unlock();
+
     if (err != ESP_OK) {
         fail(err);
         return err;

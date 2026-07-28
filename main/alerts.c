@@ -7,6 +7,7 @@
 #include "freertos/task.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
+#include "chip_temp.h"
 #include "sensors.h"
 #include "telegram.h"
 #include "wifi.h"
@@ -59,7 +60,7 @@ static void check_ip(void)
         wifi_get_info(&wifi);
         telegram_notify("Станция запущена: чип %.1f °C, IP " IPSTR
                         ", BSSID " MACSTR ", канал %d, RSSI %d дБм",
-                        sensors_chip_temp(), IP2STR(&ip), MAC2STR(wifi.sta_bssid),
+                        chip_temp_celsius(), IP2STR(&ip), MAC2STR(wifi.sta_bssid),
                         wifi.channel, wifi.rssi);
     } else if (ip.addr != last_ip.addr) {
         telegram_notify("IP изменился: " IPSTR " → " IPSTR,

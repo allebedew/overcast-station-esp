@@ -24,8 +24,9 @@
 
 /* Ignore a missing SCD40 reading right after boot: the sensor needs a few
  * seconds for its first measurement, and we must not flash the "sensor error"
- * code while it is simply warming up. */
-#define SENSOR_WARMUP_US (5 * 1000000LL)
+ * code while it is simply warming up. Budget: two or three polls to walk the
+ * start sequence, then the 5 s measurement cycle, plus room to spare. */
+#define SENSOR_WARMUP_US (12 * 1000000LL)
 
 /* Error codes: number of red blinks per cycle. */
 #define ERR_SENSOR 2 /* SCD40 not responding */

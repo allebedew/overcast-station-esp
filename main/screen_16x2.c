@@ -1,11 +1,13 @@
 #include "screen_16x2.h"
 
 #include <stdio.h>
+#include <sys/time.h>
 #include <time.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 
 #include "lcd1602_rgb.h"
@@ -13,6 +15,7 @@
 #include "settings.h"
 #include "timesync.h"
 #include "weather_api.h"
+#include "wifi.h"
 
 /* 60 fps, paced by esp_timer: the FreeRTOS tick is 10 ms, too coarse for a
  * 16.7 ms frame. The rate is what the panel is polled at, not what it is
@@ -40,8 +43,9 @@
 
 typedef enum {
     PAGE_INDOOR,  /* what the station measures, plus the outdoor headline */
+    PAGE_PRECISE, /* the same air, read off the dedicated sensors */
     PAGE_OUTDOOR, /* the rest of the Open-Meteo reading */
-    PAGE_CLOCK,   /* date, time and the backlight color in hex */
+    PAGE_SYSTEM,  /* clock and how the station itself is doing */
     PAGE_COUNT,
 } page_t;
 
@@ -76,6 +80,48 @@ static void render_indoor(char *l0, char *l1)
     }
 }
 
+/* The dedicated sensors at the resolution they actually deliver, which is what
+ * the SCD40 line on the first page cannot show:
+ *   23.456° 1013.250    (TMP117 °C, BMP581 hPa — exactly 16 characters)
+ *   1250 45% 78lx       (SCD40 CO₂ and humidity, VEML7700 illuminance)
+ * Each value is filled in on its own, so one absent sensor leaves the others
+ * readable instead of blanking the row. */
+static void render_precise(char *l0, char *l1)
+{
+    char temp[12] = "--" DEG;
+    char press[12] = "--";
+    tmp117_data_t t;
+    bmp581_data_t b;
+    if (sensors_tmp117_get(&t)) {
+        snprintf(temp, sizeof(temp), "%.2f" DEG, t.temp_c);
+    }
+    if (sensors_bmp581_get(&b)) {
+        snprintf(press, sizeof(press), "%.3f", b.press_hpa);
+    }
+    snprintf(l0, RENDER_BUF, "%s %s", temp, press);
+
+    char co2[12] = "--";
+    char rh[12] = "--";
+    scd40_data_t d;
+    if (sensors_scd40_get(&d)) {
+        snprintf(co2, sizeof(co2), "%uppm", d.co2_ppm);
+        snprintf(rh, sizeof(rh), "%.0f%%", d.rh_pct);
+    }
+
+    char lux[10] = "--";
+    veml7700_data_t v;
+    if (sensors_veml7700_get(&v)) {
+        /* Four characters at most: past 9999 lx the row switches to kilolux,
+         * and that far into daylight the trailing digits carry nothing. */
+        if (v.lux < 9999.5f) {
+            snprintf(lux, sizeof(lux), "%.0f", v.lux);
+        } else {
+            snprintf(lux, sizeof(lux), "%.0fk", v.lux / 1000.0f);
+        }
+    }
+    snprintf(l1, RENDER_BUF, "%s %s %sx", co2, rh, lux);
+}
+
 /* Meteorological degrees to an 8-point compass label — the direction the wind
  * blows from, which is what the API reports. Each point covers 45°, so the
  * boundaries sit at 22.5° and the +22 rounds the reading into its sector. */
@@ -105,33 +151,78 @@ static void render_outdoor(char *l0, char *l1)
              w.wind_kmh, w.weather_code);
 }
 
-/* The clock plus the backlight color, so the value being tuned from the web
- * page is readable on the device itself:
- *   Tue 28 Jun
- *   15:17:19 00AAFF */
-static void render_clock(char *l0, char *l1)
-{
-    char color[8];
-    snprintf(color, sizeof(color), "%06X", (unsigned)screen_16x2_backlight_rgb());
+/* Share of the last second spent outside the idle task. The counters are
+ * 32-bit microseconds; the ~71-minute wrap comes out right in the uint32_t
+ * subtraction. The web handler keeps its own pair of them — the counters are
+ * global, only the measurement window belongs to the caller. */
+#define CPU_WINDOW_US 1000000
 
-    if (!timesync_is_synced()) {
+static int cpu_load_percent(void)
+{
+    static uint32_t prev_idle, prev_total;
+    static int64_t next_us;
+    static int load;
+
+    /* Rendering runs at 60 fps and a 16 ms window is pure noise, so the
+     * measurement keeps its own pace and the frames reuse the last figure. */
+    int64_t now = esp_timer_get_time();
+    if (now < next_us) {
+        return load;
+    }
+    next_us = now + CPU_WINDOW_US;
+
+    uint32_t idle = ulTaskGetIdleRunTimeCounter();
+    uint32_t total = (uint32_t)now;
+    uint32_t d_idle = idle - prev_idle;
+    uint32_t d_total = total - prev_total;
+    prev_idle = idle;
+    prev_total = total;
+
+    if (d_total != 0 && d_idle <= d_total) {
+        load = 100 - (int)((uint64_t)100 * d_idle / d_total);
+    }
+    return load;
+}
+
+/* The station itself rather than the air around it:
+ *   17:27:40 28.07     (the colons blink, once a second)
+ *   12% 184k -58dBm    (CPU load, free heap, Wi-Fi signal) */
+static void render_system(char *l0, char *l1)
+{
+    if (timesync_is_synced()) {
+        /* The clock runs in UTC; the active location's offset (from
+         * Open-Meteo) turns it into wall-clock time, and without one it stays
+         * on UTC. */
+        weather_api_data_t w;
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        time_t now = tv.tv_sec + (weather_api_get(&w) ? w.utc_offset_s : 0);
+        struct tm tm;
+        gmtime_r(&now, &tm);
+
+        /* The blink is this row's seconds hand: colons for the first half of
+         * every second, blanks for the second. The year does not fit next to
+         * the seconds — sixteen characters go to the time and the day. */
+        strftime(l0, RENDER_BUF,
+                 tv.tv_usec < 500000 ? "%H:%M:%S %d.%m" : "%H %M %S %d.%m",
+                 &tm);
+    } else {
         snprintf(l0, RENDER_BUF, "clock not set");
-        snprintf(l1, RENDER_BUF, "%s", color);
-        return;
     }
 
-    /* The clock runs in UTC; the active location's offset (from Open-Meteo)
-     * turns it into wall-clock time, and without one it stays on UTC. */
-    weather_api_data_t w;
-    time_t now = time(NULL) + (weather_api_get(&w) ? w.utc_offset_s : 0);
-    struct tm tm;
-    gmtime_r(&now, &tm);
+    /* An idle station is on Wi-Fi, so the link is worth a permanent slot:
+     * signal when associated, "AP" while it serves its own network. */
+    wifi_info_t wifi;
+    wifi_get_info(&wifi);
+    char link[12];
+    if (wifi.sta_state == WIFI_STA_CONNECTED) {
+        snprintf(link, sizeof(link), "%ddBm", wifi.rssi);
+    } else {
+        snprintf(link, sizeof(link), "%s", wifi.ap_active ? "AP" : "--");
+    }
 
-    strftime(l0, RENDER_BUF, "%a %d %b", &tm);
-
-    char clock[16];
-    strftime(clock, sizeof(clock), "%H:%M:%S", &tm);
-    snprintf(l1, RENDER_BUF, "%s %s", clock, color);
+    snprintf(l1, RENDER_BUF, "%2.d%% %uk %s", cpu_load_percent(),
+             (unsigned)(esp_get_free_heap_size() / 1024), link);
 }
 
 static void frame_tick(void *arg)
@@ -149,8 +240,9 @@ static void screen_task(void *arg)
         char l0[RENDER_BUF] = "", l1[RENDER_BUF] = "";
         switch (s_page) {
         case PAGE_INDOOR:  render_indoor(l0, l1); break;
+        case PAGE_PRECISE: render_precise(l0, l1); break;
         case PAGE_OUTDOOR: render_outdoor(l0, l1); break;
-        default:           render_clock(l0, l1); break;
+        default:           render_system(l0, l1); break;
         }
 
         uint32_t rgb = screen_16x2_backlight_rgb();
@@ -192,7 +284,7 @@ void screen_16x2_init(void)
 
     s_rgb = settings_get_u32(SETTING_RGB, DEFAULT_RGB) & 0xFFFFFF;
 
-    lcd1602_rgb_init(sensors_i2c_bus()); /* absent display is not an error */
+    lcd1602_rgb_init(); /* absent display is not an error */
     xTaskCreate(screen_task, "screen", 3072, NULL, 2, &s_task);
 
     const esp_timer_create_args_t timer_args = {

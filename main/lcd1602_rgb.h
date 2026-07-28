@@ -3,7 +3,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "driver/i2c_master.h"
 #include "esp_err.h"
 
 /* Transport for the DFRobot Gravity I2C 16x2 LCD with RGB backlight (DFR0464).
@@ -16,16 +15,17 @@
  * 0x20..0x7E are replaced with '?'.
  *
  * Not thread-safe — call from a single task. Sharing the bus with the sensors
- * is safe on its own: the I2C driver serializes transfers per bus. */
+ * is: every sequence that must not be interrupted is bracketed by the bus lock
+ * from i2c_bus.h. */
 
 #define LCD1602_COLS 16
 #define LCD1602_ROWS 2
 
-/* Attaches to an already-created I2C bus (shared with the sensors) and
- * detects the module. ESP_ERR_NOT_FOUND when it does not answer — the other
- * calls stay safe in that case and keep retrying in the background, so a
- * display plugged in later starts working on its own. */
-esp_err_t lcd1602_rgb_init(i2c_master_bus_handle_t bus);
+/* Attaches to the shared I2C bus (i2c_bus_init() must have run) and detects
+ * the module. ESP_ERR_NOT_FOUND when it does not answer — the other calls stay
+ * safe in that case and keep retrying in the background, so a display plugged
+ * in later starts working on its own. */
+esp_err_t lcd1602_rgb_init(void);
 
 /* False while the module is absent or failing. */
 bool lcd1602_rgb_present(void);

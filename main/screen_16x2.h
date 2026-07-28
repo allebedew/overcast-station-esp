@@ -3,9 +3,10 @@
 #include <stdint.h>
 
 /* What the 16x2 display shows: page layouts and backlight. Owns the
- * lcd1602_rgb transport and is the only user of it. Two pages, refreshed at
- * 60 fps: indoor readings with the outdoor headline, and the full outdoor
- * reading.
+ * lcd1602_rgb transport and is the only user of it. Four pages, refreshed at
+ * 60 fps: indoor readings with the outdoor headline, the same air at the
+ * dedicated sensors' full resolution, the full outdoor reading, and the clock
+ * over the station's own vitals.
  *
  * Everything here is shaped by the two-rows-of-sixteen-characters budget —
  * hence the name. A larger display will want its own layout module rather

@@ -109,6 +109,7 @@
             }
             body.stale .grid-sensors,
             body.stale .card.weather,
+            body.stale .card.sensors,
             body.stale .grid-bottom {
                 opacity: 0.45;
             }
@@ -297,6 +298,91 @@
                 /* reserve one line so nothing below jumps when data loads */
                 min-height: 1.3em;
             }
+            /* --- I2C sensors card ---
+             * One nested card per device, holding metric tiles built like the
+             * outside-weather ones a size down. Diagnostic values (raw counts,
+             * gain, integration time) go to a footer line instead of a tile:
+             * they explain the readings rather than being readings. */
+            .card.sensors {
+                margin-top: 12px;
+            }
+            .sens-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+                /* every device card the same height, whatever it holds — the
+                 * row count varies from one metric (TMP117) to three */
+                grid-auto-rows: 1fr;
+                gap: 10px;
+            }
+            .sens-dev {
+                display: flex;
+                flex-direction: column;
+                padding: 10px 12px 11px;
+                border-radius: 10px;
+                background: var(--panel-2);
+                border: 1px solid var(--border);
+            }
+            .sens-head {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-bottom: 9px;
+            }
+            .sens-name {
+                font-size: 12px;
+                font-weight: 600;
+                letter-spacing: 0.03em;
+            }
+            .sens-sub {
+                font-size: 11px;
+                color: var(--text-faint);
+                /* the part number carries the identity, so the description is
+                 * what gives way when the card gets narrow */
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .sens-dev .badge {
+                flex: none;
+            }
+            .sens-metrics {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+                gap: 8px 12px;
+                /* take the slack from the equal-height row so the tiles stay
+                 * at the top and the footer line sits on the bottom edge */
+                flex: 1;
+                align-content: start;
+            }
+            .sens-metric .sv {
+                font-size: 20px;
+                font-weight: 700;
+                letter-spacing: -0.02em;
+                font-variant-numeric: tabular-nums;
+            }
+            .sens-metric .su {
+                font-size: 11px;
+                color: var(--text-dim);
+                font-weight: 500;
+                margin-left: 3px;
+            }
+            .sens-metric .sl {
+                display: block;
+                font-size: 10.5px;
+                color: var(--text-faint);
+            }
+            .sens-aux {
+                margin-top: 9px;
+                padding-top: 8px;
+                border-top: 1px solid var(--border);
+                font-size: 10.5px;
+                color: var(--text-faint);
+                font-variant-numeric: tabular-nums;
+            }
+            .sens-dev.off .sens-metric .sv {
+                color: var(--text-faint);
+            }
+
             /* --- Location switcher (chips in the weather card) --- */
             .loc-bar {
                 display: flex;
@@ -1016,6 +1102,17 @@
                 </div>
             </div>
 
+            <!-- I2C SENSORS (raw readings, one nested card per device) -->
+            <div class="card sensors">
+                <h2>
+                    <span class="ic">🔬</span>
+                    <span data-i18n="sensorsTitle">Датчики</span>
+                </h2>
+                <div class="sens-grid" id="sensorsGrid">
+                    <div class="sens-dev" data-i18n="loading">Загрузка…</div>
+                </div>
+            </div>
+
             <!-- OUTSIDE WEATHER (Open-Meteo, hourly) -->
             <div class="card weather">
                 <h2>
@@ -1409,6 +1506,23 @@
                     uMeters: "м",
                     weatherAgo: "обновлено {n} назад",
                     weatherWait: "ожидание данных…",
+                    sensorsTitle: "Датчики",
+                    sensOk: "Работает",
+                    sensOff: "Нет ответа",
+                    co2: "CO₂",
+                    sensScd40Sub: "CO₂, температура и влажность",
+                    sensTmp117Sub: "Температура",
+                    sensBmp581Sub: "Давление и температура",
+                    sensVemlSub: "Освещённость",
+                    sensPress: "Давление",
+                    sensLux: "Освещённость",
+                    sensWhite: "Белый канал",
+                    sensAlsRaw: "ALS",
+                    sensWhiteRaw: "White",
+                    sensGain: "Усиление",
+                    sensIt: "Интегрирование",
+                    uLux: "лк",
+                    uMs: "мс",
                     locAdd: "Добавить локацию",
                     locAddTitle: "Добавить локацию",
                     locAddHint: "Поиск города через Open-Meteo",
@@ -1569,6 +1683,23 @@
                     uMeters: "m",
                     weatherAgo: "updated {n} ago",
                     weatherWait: "waiting for data…",
+                    sensorsTitle: "Sensors",
+                    sensOk: "Online",
+                    sensOff: "No response",
+                    co2: "CO₂",
+                    sensScd40Sub: "CO₂, temperature and humidity",
+                    sensTmp117Sub: "Temperature",
+                    sensBmp581Sub: "Pressure and temperature",
+                    sensVemlSub: "Ambient light",
+                    sensPress: "Pressure",
+                    sensLux: "Illuminance",
+                    sensWhite: "White channel",
+                    sensAlsRaw: "ALS",
+                    sensWhiteRaw: "White",
+                    sensGain: "Gain",
+                    sensIt: "Integration",
+                    uLux: "lx",
+                    uMs: "ms",
                     locAdd: "Add location",
                     locAddTitle: "Add location",
                     locAddHint: "Search a city via Open-Meteo",
@@ -1733,6 +1864,7 @@
                 applyLang();
                 loadNets(); /* re-render list hints and delete tooltips */
                 renderLocBar(); /* refresh chip tooltips for the new language */
+                renderSensors((lastStatus && lastStatus.sensors) || {});
             });
 
             /* ---------- collapsible system panels (hidden by default) ---------- */
@@ -1797,6 +1929,114 @@
                 );
             }
 
+            /* ---------- I2C sensors card ----------
+             * One block per device, readings grouped under it exactly as
+             * /api/status delivers them. Adding a sensor is a table entry:
+             * `u` is a literal unit, `ui` an i18n key, `f` formats the value. */
+            const SENSOR_DEVS = [
+                {
+                    key: "scd40",
+                    name: "SCD40",
+                    sub: "sensScd40Sub",
+                    metrics: [
+                        {
+                            k: "co2",
+                            l: "co2",
+                            u: "ppm",
+                            f: (v) => String(v),
+                        },
+                        {
+                            k: "temp",
+                            l: "temperature",
+                            u: "°C",
+                            f: (v) => v.toFixed(1),
+                        },
+                        {
+                            k: "rh",
+                            l: "humidity",
+                            u: "%",
+                            f: (v) => v.toFixed(1),
+                        },
+                    ],
+                },
+                {
+                    key: "tmp117",
+                    name: "TMP117",
+                    sub: "sensTmp117Sub",
+                    metrics: [
+                        {
+                            k: "temp",
+                            l: "temperature",
+                            u: "°C",
+                            f: (v) => v.toFixed(2),
+                        },
+                    ],
+                },
+                {
+                    key: "bmp581",
+                    name: "BMP581",
+                    sub: "sensBmp581Sub",
+                    metrics: [
+                        {
+                            k: "press",
+                            l: "sensPress",
+                            u: "hPa",
+                            f: (v) => v.toFixed(2),
+                        },
+                        {
+                            k: "temp",
+                            l: "temperature",
+                            u: "°C",
+                            f: (v) => v.toFixed(2),
+                        },
+                    ],
+                },
+                {
+                    key: "veml7700",
+                    name: "VEML7700",
+                    sub: "sensVemlSub",
+                    metrics: [
+                        {
+                            k: "lux",
+                            l: "sensLux",
+                            ui: "uLux",
+                            f: (v) => v.toFixed(1),
+                        },
+                        {
+                            k: "white",
+                            l: "sensWhite",
+                            ui: "uLux",
+                            f: (v) => v.toFixed(1),
+                        },
+                        {
+                            k: "als_raw",
+                            l: "sensAlsRaw",
+                            f: (v) => String(v),
+                            aux: true,
+                        },
+                        {
+                            k: "white_raw",
+                            l: "sensWhiteRaw",
+                            f: (v) => String(v),
+                            aux: true,
+                        },
+                        {
+                            k: "gain",
+                            l: "sensGain",
+                            f: (v) => "×" + v,
+                            aux: true,
+                        },
+                        {
+                            k: "it",
+                            l: "sensIt",
+                            ui: "uMs",
+                            f: (v) => String(v),
+                            aux: true,
+                        },
+                    ],
+                },
+            ];
+
             function kvRows(rows) {
                 return rows
                     .map((r) =>
@@ -1805,6 +2045,54 @@
                             : `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`,
                     )
                     .join("");
+            }
+
+            /* One nested card per device: identity and liveness in the header,
+             * readings as tiles, `aux` metrics folded into a footer line. An
+             * offline device keeps its card, dimmed, with placeholder values. */
+            function renderSensors(sn) {
+                $("sensorsGrid").innerHTML = SENSOR_DEVS.map((dev) => {
+                    const d = sn[dev.key] || {};
+                    const ok = !!d.ok;
+                    const val = (m) =>
+                        ok && d[m.k] !== undefined && d[m.k] !== null
+                            ? esc(m.f(d[m.k]))
+                            : "--";
+                    const unit = (m) => esc(m.ui ? t(m.ui) : m.u || "");
+
+                    const tiles = dev.metrics
+                        .filter((m) => !m.aux)
+                        .map((m) => {
+                            const u = unit(m);
+                            return (
+                                '<div class="sens-metric"><div>' +
+                                `<span class="sv">${val(m)}</span>` +
+                                (u ? `<span class="su">${u}</span>` : "") +
+                                `</div><span class="sl">${t(m.l)}</span></div>`
+                            );
+                        })
+                        .join("");
+
+                    const aux = dev.metrics
+                        .filter((m) => m.aux)
+                        .map((m) => {
+                            const u = unit(m);
+                            return `${t(m.l)} ${val(m)}${u ? " " + u : ""}`;
+                        })
+                        .join(" · ");
+
+                    return (
+                        `<div class="sens-dev${ok ? "" : " off"}">` +
+                        '<div class="sens-head">' +
+                        `<span class="sens-name">${dev.name}</span>` +
+                        `<span class="sens-sub">${t(dev.sub)}</span>` +
+                        `<span class="badge ${ok ? "good" : "off"}">` +
+                        `${ok ? t("sensOk") : t("sensOff")}</span></div>` +
+                        `<div class="sens-metrics">${tiles}</div>` +
+                        (aux ? `<div class="sens-aux">${aux}</div>` : "") +
+                        "</div>"
+                    );
+                }).join("");
             }
 
             /* ---------- toast ---------- */
@@ -1890,13 +2178,14 @@
                     }
 
                     /* sensor cards */
-                    const ok = sn.scd40_ok;
-                    $("tVal").textContent = ok ? sn.air_temp.toFixed(1) : "--";
-                    $("hVal").textContent = ok ? sn.air_rh.toFixed(0) : "--";
-                    $("cVal").textContent = ok ? sn.co2 : "--";
+                    const air = sn.scd40 || {};
+                    const ok = air.ok;
+                    $("tVal").textContent = ok ? air.temp.toFixed(1) : "--";
+                    $("hVal").textContent = ok ? air.rh.toFixed(0) : "--";
+                    $("cVal").textContent = ok ? air.co2 : "--";
                     const b = $("cBadge");
                     if (ok) {
-                        const l = co2Level(sn.co2);
+                        const l = co2Level(air.co2);
                         b.className = "badge " + l.cls;
                         b.textContent = l.text;
                     } else {
@@ -1983,6 +2272,8 @@
                         $("weatherMeta").textContent = "—";
                         $("weatherAge").textContent = t("weatherWait");
                     }
+
+                    renderSensors(sn);
 
                     /* system card: Wi-Fi station and access point shown as
                      * separate sections (in APSTA both can be up at once) */

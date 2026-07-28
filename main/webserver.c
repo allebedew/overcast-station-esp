@@ -21,6 +21,7 @@
 #include "cJSON.h"
 #include "mdns.h"
 #include "nvs.h"
+#include "chip_temp.h"
 #include "history.h"
 #include "led.h"
 #include "ota.h"
@@ -236,8 +237,19 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     nvs_stats_t nvs = {0};
     nvs_get_stats(NULL, &nvs);
 
-    scd40_data_t air;
+    scd40_data_t air = {0};
     bool air_ok = sensors_scd40_get(&air);
+
+    /* One object per I2C device, so an absent or failing sensor still shows
+     * up with its own `ok` instead of vanishing from the reply. */
+    tmp117_data_t tmp117 = {0};
+    bool tmp117_ok = sensors_tmp117_get(&tmp117);
+
+    bmp581_data_t bmp581 = {0};
+    bool bmp581_ok = sensors_bmp581_get(&bmp581);
+
+    veml7700_data_t veml = { .gain = "" };
+    bool veml_ok = sensors_veml7700_get(&veml);
 
     weather_api_data_t weather;
     bool weather_ok = weather_api_get(&weather);
@@ -256,11 +268,16 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         strftime(time_str, sizeof(time_str), "%d.%m.%Y %H:%M:%S", &tm);
     }
 
-    static char json[2304];
+    static char json[3072];
     int len = snprintf(json, sizeof(json),
         "{%s,%s,"
-        "\"sensors\":{\"scd40_ok\":%s,\"co2\":%u,\"air_temp\":%.1f,"
-        "\"air_rh\":%.1f,\"chip_temp\":%.1f},"
+        "\"sensors\":{\"chip_temp\":%.1f,"
+        "\"scd40\":{\"ok\":%s,\"co2\":%u,\"temp\":%.1f,\"rh\":%.1f},"
+        "\"tmp117\":{\"ok\":%s,\"temp\":%.2f},"
+        "\"bmp581\":{\"ok\":%s,\"press\":%.2f,\"press_pa\":%.1f,\"temp\":%.2f},"
+        "\"veml7700\":{\"ok\":%s,"
+        "\"lux\":%.2f,\"white\":%.2f,\"als_raw\":%u,\"white_raw\":%u,"
+        "\"gain\":\"%s\",\"it\":%u}},"
         "\"weather\":{\"ok\":%s,\"temp\":%.1f,\"feels\":%.1f,"
         "\"tmin\":%.1f,\"tmax\":%.1f,"
         "\"hum\":%.0f,\"press\":%.0f,\"press_msl\":%.0f,"
@@ -281,8 +298,14 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"settings\":{\"led_brightness\":%u,"
         "\"backlight_rgb\":\"%06X\"}}",
         sta_json, ap_json,
+        chip_temp_celsius(),
         air_ok ? "true" : "false", air.co2_ppm, air.temp_c, air.rh_pct,
-        sensors_chip_temp(),
+        tmp117_ok ? "true" : "false", tmp117.temp_c,
+        bmp581_ok ? "true" : "false",
+        bmp581.press_hpa, bmp581.press_hpa * 100.0f, bmp581.temp_c,
+        veml_ok ? "true" : "false",
+        veml.lux, veml.white_lux, veml.als_raw, veml.white_raw,
+        veml.gain, veml.it_ms,
         weather_ok ? "true" : "false", weather.temp_c, weather.feels_c,
         weather.temp_min_c, weather.temp_max_c,
         weather.humidity_pct, weather.pressure_hpa, weather.pressure_msl_hpa,
