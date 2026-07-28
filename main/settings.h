@@ -7,3 +7,7 @@
 uint8_t settings_get_u8(const char *key, uint8_t def);
 
 void settings_set_u8(const char *key, uint8_t value);
+
+uint32_t settings_get_u32(const char *key, uint32_t def);
+
+void settings_set_u32(const char *key, uint32_t value);

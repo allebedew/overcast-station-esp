@@ -721,6 +721,48 @@
                 cursor: pointer;
                 border: 3px solid var(--bg);
             }
+            /* hue slider with its two step buttons on either side */
+            .hue-row {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-top: 10px;
+            }
+            .hue-row input[type="range"] {
+                flex: 1;
+                min-width: 0;
+                margin-top: 0;
+                background: linear-gradient(
+                    to right,
+                    #f00 0%,
+                    #ff0 17%,
+                    #0f0 33%,
+                    #0ff 50%,
+                    #00f 67%,
+                    #f0f 83%,
+                    #f00 100%
+                );
+            }
+            .hue-row .btn {
+                padding: 4px 13px;
+                line-height: 1.4;
+            }
+            #blHexInput {
+                font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+            }
+            /* live preview of the resulting backlight color */
+            .bl-dot {
+                display: inline-block;
+                width: 11px;
+                height: 11px;
+                border-radius: 50%;
+                margin-right: 6px;
+                vertical-align: -1px;
+                border: 1px solid var(--border);
+                background: #000;
+            }
             .frc-row {
                 display: flex;
                 gap: 8px;
@@ -1156,6 +1198,64 @@
 
                     <div class="set-row">
                         <div class="head">
+                            <span class="name" data-i18n="blHue"
+                                >Оттенок подсветки</span
+                            ><span class="val"
+                                ><span class="bl-dot" id="blDot"></span
+                                ><span id="blHueVal">—</span></span
+                            >
+                        </div>
+                        <div class="hue-row">
+                            <button class="btn" id="blHueDown">−</button>
+                            <input
+                                type="range"
+                                id="blHue"
+                                min="0"
+                                max="359"
+                                value="200"
+                            />
+                            <button class="btn" id="blHueUp">+</button>
+                        </div>
+                    </div>
+
+                    <div class="set-row">
+                        <div class="head">
+                            <span class="name" data-i18n="blBrightness"
+                                >Яркость подсветки</span
+                            ><span class="val" id="blBrightVal">—</span>
+                        </div>
+                        <input
+                            type="range"
+                            id="blBright"
+                            min="0"
+                            max="100"
+                            value="100"
+                        />
+                    </div>
+
+                    <div class="set-row">
+                        <div class="head">
+                            <span class="name" data-i18n="blHex"
+                                >Цвет подсветки (HEX)</span
+                            ><span class="val" data-i18n="blHexHint"
+                                >Enter — применить</span
+                            >
+                        </div>
+                        <div class="frc-row">
+                            <input
+                                id="blHexInput"
+                                type="text"
+                                maxlength="7"
+                                placeholder="00AAFF"
+                                spellcheck="false"
+                                autocapitalize="off"
+                                autocorrect="off"
+                            />
+                        </div>
+                    </div>
+
+                    <div class="set-row">
+                        <div class="head">
                             <span class="name" data-i18n="frcTitle"
                                 >Калибровка CO₂ (FRC)</span
                             ><span class="val">ppm</span>
@@ -1264,7 +1364,7 @@
      DELETE /api/locations      - {index}
      PUT  /api/locations/active - {index} (switch the displayed location)
      POST /api/connect          - restart the STA connection cycle
-     POST /api/settings         - {led_brightness}
+     POST /api/settings         - {led_brightness, backlight_rgb: "RRGGBB"}
      POST /api/scd40/calibrate  - {ppm}
    ===================================================================== */
 
@@ -1362,6 +1462,12 @@
                     reconnect: "Переподключиться к сохранённым сетям",
                     settings: "Настройки",
                     ledBrightness: "Яркость светодиода",
+                    blHue: "Оттенок подсветки",
+                    blBrightness: "Яркость подсветки",
+                    blHex: "Цвет подсветки (HEX)",
+                    blHexHint: "Enter — применить",
+                    blBadHex: "Нужны 6 шестнадцатеричных цифр, например 00AAFF",
+                    blSaved: "Подсветка сохранена",
                     frcTitle: "Калибровка CO₂ (FRC)",
                     calibrate: "Калибровать",
                     footer: "Метеостанция · ESP32-C6 · http://weather.local",
@@ -1515,6 +1621,12 @@
                     reconnect: "Reconnect to saved networks",
                     settings: "Settings",
                     ledBrightness: "LED brightness",
+                    blHue: "Backlight hue",
+                    blBrightness: "Backlight brightness",
+                    blHex: "Backlight color (hex)",
+                    blHexHint: "Enter to apply",
+                    blBadHex: "Six hex digits expected, e.g. 00AAFF",
+                    blSaved: "Backlight saved",
                     frcTitle: "CO₂ calibration (FRC)",
                     calibrate: "Calibrate",
                     footer: "Weather Station · ESP32-C6 · http://weather.local",
@@ -1730,6 +1842,7 @@
             let lastOk = null;
             let lastStatus = null;
             let brightLoaded = false;
+            let blLoaded = false;
             let polling = false;
             const STALE_AFTER_MS = 1500; /* no successful poll this long → offline */
             const POLL_TIMEOUT_MS = 1200; /* give up on a single stuck request */
@@ -1942,6 +2055,16 @@
                         brightLoaded = true;
                         $("briRange").value = st.led_brightness;
                         $("briVal").textContent = st.led_brightness;
+                    }
+                    if (!blLoaded && st.backlight_rgb !== undefined) {
+                        blLoaded = true;
+                        const hex = st.backlight_rgb.toUpperCase();
+                        const [hue, bright] = hexToHueBright(hex);
+                        $("blHue").value = hue;
+                        $("blBright").value = bright;
+                        /* show the stored color, not what the sliders would
+                           produce — the two differ for e.g. FFFFFF */
+                        paintBacklight(hex);
                     }
                 } catch (e) {
                     setStale(true);
@@ -2714,6 +2837,106 @@
                 });
                 toast(t("brightSaved"));
             });
+
+            /* Backlight: the device stores plain RGB, so hue and brightness
+               live here — these two controls are one way to pick a color, and
+               the conversion never leaves the browser. */
+            const HUE_STEP = 5;
+
+            function backlightHex(hue, bright) {
+                /* HSV at full saturation: inside each 60° sector one channel
+                   is at the top, one at zero, the third ramps between them */
+                const v = Math.floor((bright * 255) / 100);
+                const rising = Math.floor((v * (hue % 60)) / 60);
+                const falling = v - rising;
+                const rgb = [
+                    [v, rising, 0],
+                    [falling, v, 0],
+                    [0, v, rising],
+                    [0, falling, v],
+                    [rising, 0, v],
+                    [v, 0, falling],
+                ][Math.floor(hue / 60)];
+                return rgb
+                    .map((c) => c.toString(16).padStart(2, "0"))
+                    .join("")
+                    .toUpperCase();
+            }
+
+            /* One place that reflects a color everywhere: dot, hex field and
+               the slider read-outs. */
+            function paintBacklight(hex) {
+                $("blHueVal").textContent = `${+$("blHue").value}°`;
+                $("blBrightVal").textContent = `${+$("blBright").value}%`;
+                $("blDot").style.background = "#" + hex;
+                $("blHexInput").value = hex;
+            }
+
+            function showBacklight() {
+                const hex = backlightHex(+$("blHue").value, +$("blBright").value);
+                paintBacklight(hex);
+                return hex;
+            }
+
+            /* Back from a stored color to slider positions, so a reload (or
+               another browser) picks up where the device actually is. With
+               saturation assumed full this is unambiguous. */
+            function hexToHueBright(hex) {
+                const n = parseInt(hex, 16) || 0;
+                const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+                const max = Math.max(...c),
+                    min = Math.min(...c),
+                    d = max - min;
+                let hue = 0;
+                if (d) {
+                    if (max === c[0]) hue = 60 * (((c[1] - c[2]) / d + 6) % 6);
+                    else if (max === c[1]) hue = 60 * ((c[2] - c[0]) / d + 2);
+                    else hue = 60 * ((c[0] - c[1]) / d + 4);
+                }
+                return [Math.round(hue) % 360, Math.round((max * 100) / 255)];
+            }
+
+            async function sendBacklight(hex) {
+                await fetch("/api/settings", {
+                    method: "POST",
+                    body: JSON.stringify({ backlight_rgb: hex }),
+                });
+                toast(t("blSaved"));
+            }
+
+            async function saveBacklight() {
+                await sendBacklight(showBacklight());
+            }
+
+            function stepHue(delta) {
+                /* hue is a circle: stepping past either end wraps around */
+                $("blHue").value = (+$("blHue").value + delta + 360) % 360;
+                saveBacklight();
+            }
+
+            /* Typed color wins as-is: the sliders cannot express every RGB
+               (their saturation is fixed), so it is sent verbatim and they
+               are only moved to the closest match. */
+            $("blHexInput").addEventListener("change", async (e) => {
+                const hex = e.target.value.trim().replace(/^#/, "").toUpperCase();
+                if (!/^[0-9A-F]{6}$/.test(hex)) {
+                    toast(t("blBadHex"));
+                    showBacklight(); /* put the current color back */
+                    return;
+                }
+                const [hue, bright] = hexToHueBright(hex);
+                $("blHue").value = hue;
+                $("blBright").value = bright;
+                paintBacklight(hex);
+                await sendBacklight(hex);
+            });
+
+            $("blHue").addEventListener("input", showBacklight);
+            $("blBright").addEventListener("input", showBacklight);
+            $("blHue").addEventListener("change", saveBacklight);
+            $("blBright").addEventListener("change", saveBacklight);
+            $("blHueDown").addEventListener("click", () => stepHue(-HUE_STEP));
+            $("blHueUp").addEventListener("click", () => stepHue(HUE_STEP));
 
             $("frcBtn").addEventListener("click", async () => {
                 const ppm = +$("frcPpm").value;

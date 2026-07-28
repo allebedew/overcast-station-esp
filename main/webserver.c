@@ -1,6 +1,7 @@
 #include "webserver.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -23,6 +24,7 @@
 #include "history.h"
 #include "led.h"
 #include "ota.h"
+#include "screen_16x2.h"
 #include "sensors.h"
 #include "timesync.h"
 #include "weather_api.h"
@@ -276,7 +278,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"http_conns\":%d,"
         "\"heap_free\":%u,\"heap_min\":%u,\"heap_total\":%u,\"heap_largest\":%u,"
         "\"nvs_used\":%u,\"nvs_total\":%u},"
-        "\"settings\":{\"led_brightness\":%u}}",
+        "\"settings\":{\"led_brightness\":%u,"
+        "\"backlight_rgb\":\"%06X\"}}",
         sta_json, ap_json,
         air_ok ? "true" : "false", air.co2_ppm, air.temp_c, air.rh_pct,
         sensors_chip_temp(),
@@ -304,7 +307,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         (unsigned)heap_caps_get_total_size(MALLOC_CAP_DEFAULT),
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT),
         (unsigned)nvs.used_entries, (unsigned)nvs.total_entries,
-        (unsigned)led_get_brightness());
+        (unsigned)led_get_brightness(),
+        (unsigned)screen_16x2_backlight_rgb());
 
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json, len);
@@ -576,6 +580,20 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
     const cJSON *bright = cJSON_GetObjectItem(root, "led_brightness");
     if (cJSON_IsNumber(bright) && bright->valueint >= 1 && bright->valueint <= 255) {
         led_set_brightness((uint8_t)bright->valueint);
+    }
+
+    /* The backlight arrives as a ready RGB hex string ("00AAFF", a leading
+     * "#" is tolerated): picking the color is the UI's job, the device only
+     * stores what it is given. */
+    const cJSON *rgb = cJSON_GetObjectItem(root, "backlight_rgb");
+    if (cJSON_IsString(rgb) && rgb->valuestring != NULL) {
+        const char *hex = rgb->valuestring;
+        hex += (*hex == '#');
+        char *end;
+        unsigned long value = strtoul(hex, &end, 16);
+        if (end != hex && *end == '\0' && value <= 0xFFFFFF) {
+            screen_16x2_set_backlight((uint32_t)value);
+        }
     }
     cJSON_Delete(root);
     return httpd_resp_sendstr(req, "{\"ok\":true}");

@@ -13,7 +13,7 @@
 #define LED_GPIO           8
 #define DEFAULT_BRIGHTNESS 4
 #define BLINK_PERIOD_MS    100
-#define PULSE_CYCLE_MS     3000
+#define PULSE_CYCLE_MS     2000
 
 /* CO2 anchors (ppm) for the connected-state color: fully green at/below
  * CO2_GREEN, pure yellow at CO2_YELLOW, fully red at/above CO2_RED, with a
@@ -25,7 +25,7 @@
 /* Ignore a missing SCD40 reading right after boot: the sensor needs a few
  * seconds for its first measurement, and we must not flash the "sensor error"
  * code while it is simply warming up. */
-#define SENSOR_WARMUP_US (10 * 1000000LL)
+#define SENSOR_WARMUP_US (5 * 1000000LL)
 
 /* Error codes: number of red blinks per cycle. */
 #define ERR_SENSOR 2 /* SCD40 not responding */

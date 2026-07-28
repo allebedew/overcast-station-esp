@@ -7,6 +7,7 @@
 #include "history.h"
 #include "led.h"
 #include "ota.h"
+#include "screen_16x2.h"
 #include "sensors.h"
 #include "storage.h"
 #include "telegram.h"
@@ -48,6 +49,10 @@ void app_main(void)
     alerts_init();
     weather_store_init();
     weather_api_init();
+
+    /* Needs the I2C bus from sensors_init(); kept after the data modules so
+     * the display can go back to showing their readings. */
+    screen_16x2_init();
 
     /* Last: the request handlers read from every module above, so the server
      * must not accept a request before those are initialised. */

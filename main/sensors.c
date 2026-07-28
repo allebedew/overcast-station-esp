@@ -13,6 +13,13 @@
 #define I2C_SCL_GPIO 3
 #define I2C_TIMEOUT_MS 100
 
+/* Bus scan: 7-bit address space minus the reserved ranges (0x00-0x07,
+ * 0x78-0x7F). A missing device NACKs immediately, so a short timeout
+ * keeps a full sweep well under a second. */
+#define I2C_SCAN_FIRST_ADDR 0x08
+#define I2C_SCAN_LAST_ADDR  0x77
+#define I2C_SCAN_TIMEOUT_MS 20
+
 /* Sensirion I2C protocol: 16-bit commands, big-endian 16-bit data words
  * each followed by CRC-8 (poly 0x31, init 0xFF). */
 #define SCD40_ADDR           0x62
@@ -232,6 +239,52 @@ esp_err_t sensors_scd40_calibrate(uint16_t target_ppm, int *correction_ppm)
     return err;
 }
 
+i2c_master_bus_handle_t sensors_i2c_bus(void)
+{
+    return s_i2c_bus;
+}
+
+/* Names for the addresses we expect to see, to make the log self-explanatory. */
+static const char *i2c_known_device(uint8_t addr)
+{
+    switch (addr) {
+    case SCD40_ADDR: return " (SCD40)";
+    case 0x3E:       return " (LCD1602 controller)";
+    case 0x60: case 0x6B: case 0x30: case 0x2D:
+                     return " (LCD1602 RGB backlight)";
+    default:         return "";
+    }
+}
+
+int sensors_i2c_scan(void)
+{
+    int found = 0;
+
+    /* The driver logs an error for every address that NACKs, which is the
+     * normal case here — mute it for the duration of the sweep. */
+    esp_log_level_set("i2c.master", ESP_LOG_NONE);
+
+    xSemaphoreTake(s_i2c_mutex, portMAX_DELAY);
+    ESP_LOGI(TAG, "I2C scan on GPIO%d/%d (SDA/SCL):", I2C_SDA_GPIO, I2C_SCL_GPIO);
+    for (uint8_t addr = I2C_SCAN_FIRST_ADDR; addr <= I2C_SCAN_LAST_ADDR; addr++) {
+        if (i2c_master_probe(s_i2c_bus, addr, I2C_SCAN_TIMEOUT_MS) != ESP_OK) {
+            continue;
+        }
+        found++;
+        ESP_LOGI(TAG, "  0x%02X%s", addr, i2c_known_device(addr));
+    }
+    xSemaphoreGive(s_i2c_mutex);
+
+    esp_log_level_set("i2c.master", ESP_LOG_INFO);
+
+    if (found == 0) {
+        ESP_LOGW(TAG, "I2C scan: no devices found");
+    } else {
+        ESP_LOGI(TAG, "I2C scan: %d device(s) found", found);
+    }
+    return found;
+}
+
 void sensors_init(void)
 {
     temperature_sensor_config_t cfg = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
@@ -256,9 +309,11 @@ void sensors_init(void)
     ESP_ERROR_CHECK(i2c_master_bus_add_device(s_i2c_bus, &dev_cfg, &s_scd40));
 
     s_i2c_mutex = xSemaphoreCreateMutex();
-    xTaskCreate(scd40_task, "scd40", 3072, NULL, 2, NULL);
     ESP_LOGI(TAG, "Chip temperature sensor ready, I2C bus on GPIO%d/%d",
              I2C_SDA_GPIO, I2C_SCL_GPIO);
+
+    sensors_i2c_scan(); /* before the task starts, so the log stays readable */
+    xTaskCreate(scd40_task, "scd40", 3072, NULL, 2, NULL);
 }
 
 float sensors_chip_temp(void)

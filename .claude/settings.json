@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(idf.py build)",
+      "Bash(idf.py build *)",
+      "Bash(idf.py reconfigure)",
+      "Bash(idf.py reconfigure *)",
+      "Bash(source ~/esp/esp-idf/export.sh)",
+      "Bash(source ~/esp/esp-idf/export.sh *)",
+      "Bash(source /Users/alex/esp/esp-idf/export.sh)",
+      "Bash(source /Users/alex/esp/esp-idf/export.sh *)",
+      "Bash(. ~/esp/esp-idf/export.sh)",
+      "Bash(. ~/esp/esp-idf/export.sh *)",
+      "Bash(. /Users/alex/esp/esp-idf/export.sh)",
+      "Bash(. /Users/alex/esp/esp-idf/export.sh *)",
+      "Bash(system_profiler *)"
+    ]
+  }
+}
