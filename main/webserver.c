@@ -22,6 +22,7 @@
 #include "mdns.h"
 #include "nvs.h"
 #include "chip_temp.h"
+#include "climate.h"
 #include "history.h"
 #include "led.h"
 #include "ota.h"
@@ -72,6 +73,19 @@ static const char *json_escape(const char *src, char *dst, size_t dstlen)
         }
     }
     dst[o] = '\0';
+    return dst;
+}
+
+/* A JSON number, or `null` when there is no sensor behind the quantity —
+ * a reading that does not exist must not be served as a zero. Returns dst. */
+static const char *json_num(char *dst, size_t dstlen, bool ok,
+                            const char *fmt, double value)
+{
+    if (ok) {
+        snprintf(dst, dstlen, fmt, value);
+    } else {
+        snprintf(dst, dstlen, "null");
+    }
     return dst;
 }
 
@@ -268,15 +282,32 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         strftime(time_str, sizeof(time_str), "%d.%m.%Y %H:%M:%S", &tm);
     }
 
+    /* The room, as opposed to the chips below: one source per quantity, no
+     * substitutions. This is what the main cards and the charts show, so the
+     * value on a card and the line under it always come from the same
+     * sensor. */
+    climate_t cl;
+    climate_get(&cl);
+    char cl_temp[12], cl_rh[12], cl_co2[12], cl_press[12], cl_msl[12], cl_lux[16];
+    json_num(cl_temp, sizeof(cl_temp), cl.temp_ok, "%.2f", cl.temp_c);
+    json_num(cl_rh, sizeof(cl_rh), cl.rh_ok, "%.1f", cl.rh_pct);
+    json_num(cl_co2, sizeof(cl_co2), cl.co2_ok, "%.0f", (double)cl.co2_ppm);
+    json_num(cl_press, sizeof(cl_press), cl.press_ok, "%.3f", cl.press_hpa);
+    json_num(cl_msl, sizeof(cl_msl), cl.press_ok, "%.3f", cl.press_msl_hpa);
+    json_num(cl_lux, sizeof(cl_lux), cl.lux_ok, "%.1f", cl.lux);
+
     static char json[3072];
     int len = snprintf(json, sizeof(json),
         "{%s,%s,"
+        "\"climate\":{"
+        "\"temp\":%s,\"rh\":%s,\"co2\":%s,"
+        "\"press\":%s,\"press_msl\":%s,\"lux\":%s},"
         "\"sensors\":{\"chip_temp\":%.1f,"
         "\"scd40\":{\"ok\":%s,\"co2\":%u,\"temp\":%.1f,\"rh\":%.1f},"
         "\"tmp117\":{\"ok\":%s,\"temp\":%.2f},"
-        "\"bmp581\":{\"ok\":%s,\"press\":%.2f,\"press_pa\":%.1f,\"temp\":%.2f},"
+        "\"bmp581\":{\"ok\":%s,\"press\":%.3f,\"press_pa\":%.1f,\"temp\":%.2f},"
         "\"veml7700\":{\"ok\":%s,"
-        "\"lux\":%.2f,\"white\":%.2f,\"als_raw\":%u,\"white_raw\":%u,"
+        "\"lux\":%.1f,\"white\":%.1f,\"als_raw\":%u,\"white_raw\":%u,"
         "\"gain\":\"%s\",\"it\":%u}},"
         "\"weather\":{\"ok\":%s,\"temp\":%.1f,\"feels\":%.1f,"
         "\"tmin\":%.1f,\"tmax\":%.1f,"
@@ -296,8 +327,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"heap_free\":%u,\"heap_min\":%u,\"heap_total\":%u,\"heap_largest\":%u,"
         "\"nvs_used\":%u,\"nvs_total\":%u},"
         "\"settings\":{\"led_brightness\":%u,"
-        "\"backlight_rgb\":\"%06X\"}}",
+        "\"backlight_rgb\":\"%06X\",\"altitude\":%d}}",
         sta_json, ap_json,
+        cl_temp, cl_rh, cl_co2, cl_press, cl_msl, cl_lux,
         chip_temp_celsius(),
         air_ok ? "true" : "false", air.co2_ppm, air.temp_c, air.rh_pct,
         tmp117_ok ? "true" : "false", tmp117.temp_c,
@@ -331,7 +363,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT),
         (unsigned)nvs.used_entries, (unsigned)nvs.total_entries,
         (unsigned)led_get_brightness(),
-        (unsigned)screen_16x2_backlight_rgb());
+        (unsigned)screen_16x2_backlight_rgb(),
+        climate_altitude_m());
 
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json, len);
@@ -359,22 +392,46 @@ static esp_err_t history_get_handler(httpd_req_t *req)
     static char buf[1024]; /* single httpd task */
     httpd_resp_set_type(req, "application/json");
 
+    /* One array per quantity, each gated on its own bit: a sensor that was
+     * absent for part of the window leaves nulls in its own series without
+     * punching holes in the others. */
+    static const struct {
+        const char *name;
+        uint8_t bit;
+    } series[] = {
+        { "co2",   HISTORY_HAS_CO2 },
+        { "temp",  HISTORY_HAS_TEMP },
+        { "rh",    HISTORY_HAS_RH },
+        { "press", HISTORY_HAS_PRESS },
+        { "lux",   HISTORY_HAS_LUX },
+    };
+
     int len = snprintf(buf, sizeof(buf), "{\"period\":%d",
                        history_interval(tier));
-    static const char *names[] = { "co2", "temp", "rh" };
-    for (int m = 0; m < 3; m++) {
-        len += snprintf(buf + len, sizeof(buf) - len, ",\"%s\":[", names[m]);
+    for (int m = 0; m < (int)(sizeof(series) / sizeof(series[0])); m++) {
+        len += snprintf(buf + len, sizeof(buf) - len, ",\"%s\":[",
+                        series[m].name);
         int count = history_count(tier);
         for (int i = 0; i < count; i++) {
             history_point_t p;
             char val[16] = "null";
-            if (history_get(tier, i, &p) && p.valid) {
-                if (m == 0) {
+            if (history_get(tier, i, &p) && (p.have & series[m].bit)) {
+                switch (series[m].bit) {
+                case HISTORY_HAS_CO2:
                     snprintf(val, sizeof(val), "%u", p.co2_ppm);
-                } else if (m == 1) {
-                    snprintf(val, sizeof(val), "%.1f", p.temp_cx10 / 10.0);
-                } else {
-                    snprintf(val, sizeof(val), "%u", p.rh_pct);
+                    break;
+                case HISTORY_HAS_TEMP:
+                    snprintf(val, sizeof(val), "%.2f", p.temp_cx100 / 100.0);
+                    break;
+                case HISTORY_HAS_RH:
+                    snprintf(val, sizeof(val), "%.1f", p.rh_dpct / 10.0);
+                    break;
+                case HISTORY_HAS_PRESS:
+                    snprintf(val, sizeof(val), "%.3f", p.press_mhpa / 1000.0);
+                    break;
+                default:
+                    snprintf(val, sizeof(val), "%.1f", p.lux);
+                    break;
                 }
             }
             len += snprintf(buf + len, sizeof(buf) - len, "%s%s",
@@ -618,6 +675,14 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
             screen_16x2_set_backlight((uint32_t)value);
         }
     }
+    /* Height of the station above sea level, metres — the only input to the
+     * reduction of the measured pressure to sea level. */
+    const cJSON *alt = cJSON_GetObjectItem(root, "altitude");
+    if (cJSON_IsNumber(alt) && alt->valueint >= CLIMATE_ALTITUDE_MIN &&
+        alt->valueint <= CLIMATE_ALTITUDE_MAX) {
+        climate_set_altitude_m(alt->valueint);
+    }
+
     cJSON_Delete(root);
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }

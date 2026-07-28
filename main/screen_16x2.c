@@ -1,6 +1,7 @@
 #include "screen_16x2.h"
 
 #include <stdio.h>
+#include <string.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -11,7 +12,7 @@
 #include "esp_timer.h"
 
 #include "lcd1602_rgb.h"
-#include "sensors.h"
+#include "climate.h"
 #include "settings.h"
 #include "timesync.h"
 #include "weather_api.h"
@@ -59,67 +60,83 @@ static TaskHandle_t s_task;
 static volatile uint32_t s_rgb = DEFAULT_RGB;
 
 /* Air inside on the top row, outside on the bottom:
- *   23.4° 45% 1250
- *   12.3° Overcast          (description cut to the space left) */
+ *   23.46° 45.3 1250
+ *   12.3° Overcast          (description cut to the space left)
+ * Sixteen characters take the reading resolution the rest of the firmware
+ * uses but not the "%" after the humidity — of the two markers on this row
+ * the degree sign is the one worth keeping, since the row below carries a
+ * temperature too. */
 static void render_indoor(char *l0, char *l1)
 {
-    scd40_data_t d;
-    if (sensors_scd40_get(&d)) {
-        snprintf(l0, RENDER_BUF, "%.1f" DEG " %.0f%% %u",
-                 d.temp_c, d.rh_pct, d.co2_ppm);
-    } else {
-        snprintf(l0, RENDER_BUF, "no sensor data");
+    climate_t c;
+    climate_get(&c);
+
+    char temp[12] = "--.--" DEG;
+    char rh[12] = " --%";
+    char co2[12] = "----";
+    if (c.temp_ok) {
+        snprintf(temp, sizeof(temp), "%.2f" DEG, c.temp_c);
     }
+    if (c.rh_ok) {
+        snprintf(rh, sizeof(rh), "%3.0f%%", c.rh_pct);
+    }
+    if (c.co2_ok) {
+        snprintf(co2, sizeof(co2), "%4u", c.co2_ppm);
+    }
+    snprintf(l0, RENDER_BUF, "%s %s %s", temp, rh, co2);
 
     weather_api_data_t w;
     if (weather_api_get(&w)) {
         snprintf(l1, RENDER_BUF, "%.1f" DEG " %s",
                  w.temp_c, weather_api_code_str(w.weather_code));
     } else {
-        snprintf(l1, RENDER_BUF, "no weather data");
+        snprintf(l1, RENDER_BUF, "--.-" DEG " ---");
     }
 }
 
-/* The dedicated sensors at the resolution they actually deliver, which is what
- * the SCD40 line on the first page cannot show:
- *   23.456° 1013.250    (TMP117 °C, BMP581 hPa — exactly 16 characters)
- *   1250 45% 78lx       (SCD40 CO₂ and humidity, VEML7700 illuminance)
+/* Every reading at the resolution the firmware standardised on, which is what
+ * the headline page has no room for:
+ *   23.46° 1013.250     (TMP117 °C, BMP581 hPa — 15 characters)
+ *   1250 45.3% 999.9    (SCD40 CO₂ and humidity, VEML7700 lx — 16 exactly)
+ * That leaves five columns for the illuminance, so the tenth of a lux
+ * survives only below 1000 lx; brighter than that the row drops to whole lux
+ * and then to kilolux. Nowhere else does it have to give way.
  * Each value is filled in on its own, so one absent sensor leaves the others
  * readable instead of blanking the row. */
 static void render_precise(char *l0, char *l1)
 {
-    char temp[12] = "--" DEG;
-    char press[12] = "--";
-    tmp117_data_t t;
-    bmp581_data_t b;
-    if (sensors_tmp117_get(&t)) {
-        snprintf(temp, sizeof(temp), "%.2f" DEG, t.temp_c);
-    }
-    if (sensors_bmp581_get(&b)) {
-        snprintf(press, sizeof(press), "%.3f", b.press_hpa);
-    }
-    snprintf(l0, RENDER_BUF, "%s %s", temp, press);
+    climate_t c;
+    climate_get(&c);
 
-    char co2[12] = "--";
-    char rh[12] = "--";
-    scd40_data_t d;
-    if (sensors_scd40_get(&d)) {
-        snprintf(co2, sizeof(co2), "%uppm", d.co2_ppm);
-        snprintf(rh, sizeof(rh), "%.0f%%", d.rh_pct);
+    char temp[12] = "--.--" DEG;
+    char press[12] = "----.---";
+    char co2[12] = "----";
+    char rh[12] = "--.-";
+    char lux[10] = "-----x";
+    if (c.temp_ok) {
+        snprintf(temp, sizeof(temp), "%5.2f" DEG, c.temp_c);
     }
-
-    char lux[10] = "--";
-    veml7700_data_t v;
-    if (sensors_veml7700_get(&v)) {
-        /* Four characters at most: past 9999 lx the row switches to kilolux,
-         * and that far into daylight the trailing digits carry nothing. */
-        if (v.lux < 9999.5f) {
-            snprintf(lux, sizeof(lux), "%.0f", v.lux);
+    if (c.press_ok) {
+        snprintf(press, sizeof(press), "%-8.3f", c.press_hpa);
+    }
+    if (c.co2_ok) {
+        snprintf(co2, sizeof(co2), "%4u", c.co2_ppm);
+    }
+    if (c.rh_ok) {
+        snprintf(rh, sizeof(rh), "%4.1f", c.rh_pct);
+    }
+    if (c.lux_ok) {
+        if (c.lux < 999.95f) {
+            snprintf(lux, sizeof(lux), "%5.1fx", c.lux);
+        } else if (c.lux < 9999.5f) {
+            snprintf(lux, sizeof(lux), "%5.0fx", c.lux);
         } else {
-            snprintf(lux, sizeof(lux), "%.0fk", v.lux / 1000.0f);
+            snprintf(lux, sizeof(lux), "%4.0fkx", c.lux / 1000.0f);
         }
     }
-    snprintf(l1, RENDER_BUF, "%s %s %sx", co2, rh, lux);
+
+    snprintf(l0, RENDER_BUF, "%s %s %s", temp, rh, co2);
+    snprintf(l1, RENDER_BUF, "%s   %s", press, lux);
 }
 
 /* Meteorological degrees to an 8-point compass label — the direction the wind

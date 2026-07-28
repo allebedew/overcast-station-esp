@@ -45,3 +45,24 @@ void settings_set_u32(const char *key, uint32_t value)
         nvs_close(h);
     }
 }
+
+int32_t settings_get_i32(const char *key, int32_t def)
+{
+    nvs_handle_t h;
+    int32_t value = def;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
+        nvs_get_i32(h, key, &value);
+        nvs_close(h);
+    }
+    return value;
+}
+
+void settings_set_i32(const char *key, int32_t value)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_i32(h, key, value);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}

@@ -23,6 +23,8 @@
                 --co2: #7ee081;
                 --co2-warn: #ffd24d;
                 --co2-bad: #ff6b6b;
+                --press: #a78bfa;
+                --lux: #ffc94d;
                 --ok: #3fb950;
                 --radius: 12px;
                 --font:
@@ -115,10 +117,18 @@
             }
 
             /* ============ GRID ============ */
+            /* Five cards on a six-column grid: three across on the first row,
+             * the remaining two sharing the second at half width each. */
             .grid-sensors {
                 display: grid;
-                grid-template-columns: repeat(3, 1fr);
+                grid-template-columns: repeat(6, 1fr);
                 gap: 12px;
+            }
+            .grid-sensors > .card {
+                grid-column: span 2;
+            }
+            .grid-sensors > .card:nth-child(n + 4) {
+                grid-column: span 3;
             }
             .grid-bottom {
                 display: grid;
@@ -128,6 +138,13 @@
                 align-items: start;
             }
             @media (max-width: 900px) {
+                .grid-sensors {
+                    grid-template-columns: repeat(2, 1fr);
+                }
+                .grid-sensors > .card,
+                .grid-sensors > .card:nth-child(n + 4) {
+                    grid-column: span 1;
+                }
                 .grid-bottom {
                     grid-template-columns: 1fr 1fr;
                 }
@@ -199,6 +216,19 @@
             }
             .trend.flat {
                 color: var(--text-faint);
+            }
+            /* A second, derived reading under the measured one — currently
+               only the sea-level pressure. Sized between the big number and
+               the min/max row: it is a reading, not a footnote. */
+            .sensor .subval {
+                margin-top: 3px;
+                font-size: 12.5px;
+                color: var(--text-dim);
+                font-variant-numeric: tabular-nums;
+            }
+            .sensor .subval b {
+                color: var(--text);
+                font-weight: 600;
             }
             .sensor .minmax {
                 display: flex;
@@ -1100,6 +1130,52 @@
                     </div>
                     <canvas id="cChart"></canvas>
                 </div>
+                <div class="card sensor">
+                    <h2>
+                        <span class="ic">🌀</span>
+                        <span data-i18n="sensPress">Давление</span>
+                        <span class="trend flat" id="pTrend">—</span>
+                    </h2>
+                    <div class="reading">
+                        <span class="value" id="pVal">--</span
+                        ><span class="unit">hPa</span>
+                    </div>
+                    <div class="subval">
+                        <span data-i18n="atSeaLevel">на уровне моря</span>
+                        <b id="pMslVal">--</b> hPa
+                    </div>
+                    <div class="minmax">
+                        <span
+                            ><span data-i18n="min">мин</span>
+                            <b id="pMin">--</b></span
+                        ><span
+                            ><span data-i18n="max">макс</span>
+                            <b id="pMax">--</b></span
+                        >
+                    </div>
+                    <canvas id="pChart"></canvas>
+                </div>
+                <div class="card sensor">
+                    <h2>
+                        <span class="ic">☀️</span>
+                        <span data-i18n="sensLux">Освещённость</span>
+                        <span class="trend flat" id="lTrend">—</span>
+                    </h2>
+                    <div class="reading">
+                        <span class="value" id="lVal">--</span
+                        ><span class="unit">lx</span>
+                    </div>
+                    <div class="minmax">
+                        <span
+                            ><span data-i18n="min">мин</span>
+                            <b id="lMin">--</b></span
+                        ><span
+                            ><span data-i18n="max">макс</span>
+                            <b id="lMax">--</b></span
+                        >
+                    </div>
+                    <canvas id="lChart"></canvas>
+                </div>
             </div>
 
             <!-- I2C SENSORS (raw readings, one nested card per device) -->
@@ -1353,6 +1429,24 @@
 
                     <div class="set-row">
                         <div class="head">
+                            <span class="name" data-i18n="altitude"
+                                >Высота над уровнем моря</span
+                            ><span class="val" data-i18n="uMeters">м</span>
+                        </div>
+                        <div class="frc-row">
+                            <input
+                                id="altInput"
+                                type="number"
+                                value="0"
+                                min="-500"
+                                max="9000"
+                                step="1"
+                            />
+                        </div>
+                    </div>
+
+                    <div class="set-row">
+                        <div class="head">
                             <span class="name" data-i18n="frcTitle"
                                 >Калибровка CO₂ (FRC)</span
                             ><span class="val">ppm</span>
@@ -1450,8 +1544,13 @@
             /* =====================================================================
    Data sources (all existing endpoints, unchanged):
      GET  /api/status           - polled every second, feeds cards + 5-min live window
-                                  objects: sta, ap, sensors, weather, system, settings
-     GET  /api/history          - 24 h of 1-min points {period, co2[], temp[], rh[]}
+                                  objects: sta, ap, climate, sensors, weather, system,
+                                  settings. `climate` is the room (one source per
+                                  quantity, null where there is none, plus press_msl
+                                  reduced from the configured altitude), `sensors` the
+                                  chips on the bus
+     GET  /api/history          - {period, co2[], temp[], rh[], press[], lux[]},
+                                  ?p=5m|1h|1d, null = gap in that series alone
      GET  /api/scan             - [{ssid, bssid, ch, rssi, auth}] (one per BSSID)
      GET  /api/networks         - saved networks [{ssid, bssid?}] (bssid = pinned AP)
      POST /api/networks/add     - {ssid, password, bssid?} (bssid pins the AP)
@@ -1461,7 +1560,7 @@
      DELETE /api/locations      - {index}
      PUT  /api/locations/active - {index} (switch the displayed location)
      POST /api/connect          - restart the STA connection cycle
-     POST /api/settings         - {led_brightness, backlight_rgb: "RRGGBB"}
+     POST /api/settings         - {led_brightness, backlight_rgb: "RRGGBB", altitude}
      POST /api/scd40/calibrate  - {ppm}
    ===================================================================== */
 
@@ -1516,6 +1615,9 @@
                     sensVemlSub: "Освещённость",
                     sensPress: "Давление",
                     sensLux: "Освещённость",
+                    atSeaLevel: "на уровне моря",
+                    altitude: "Высота над уровнем моря",
+                    altSaved: "Высота сохранена",
                     sensWhite: "Белый канал",
                     sensAlsRaw: "ALS",
                     sensWhiteRaw: "White",
@@ -1693,6 +1795,9 @@
                     sensVemlSub: "Ambient light",
                     sensPress: "Pressure",
                     sensLux: "Illuminance",
+                    atSeaLevel: "at sea level",
+                    altitude: "Altitude above sea level",
+                    altSaved: "Altitude saved",
                     sensWhite: "White channel",
                     sensAlsRaw: "ALS",
                     sensWhiteRaw: "White",
@@ -1981,7 +2086,7 @@
                             k: "press",
                             l: "sensPress",
                             u: "hPa",
-                            f: (v) => v.toFixed(2),
+                            f: (v) => v.toFixed(3),
                         },
                         {
                             k: "temp",
@@ -2106,6 +2211,11 @@
             }
 
             /* ---------- CO2 level ---------- */
+            /* One tenth of a lux, at any level — the reading resolution the
+             * whole firmware agrees on. Abbreviating daylight to "50k" would
+             * make the same value read differently here and in the API. */
+            const fmtLux = (v) => v.toFixed(1);
+
             function co2Level(ppm) {
                 if (ppm < 800)
                     return {
@@ -2131,6 +2241,7 @@
             let lastStatus = null;
             let brightLoaded = false;
             let blLoaded = false;
+            let altLoaded = false;
             let polling = false;
             const STALE_AFTER_MS = 1500; /* no successful poll this long → offline */
             const POLL_TIMEOUT_MS = 1200; /* give up on a single stuck request */
@@ -2177,15 +2288,25 @@
                         $("hdrSub").textContent = bits.join("  ·  ") || t("notConn");
                     }
 
-                    /* sensor cards */
-                    const air = sn.scd40 || {};
-                    const ok = air.ok;
-                    $("tVal").textContent = ok ? air.temp.toFixed(1) : "--";
-                    $("hVal").textContent = ok ? air.rh.toFixed(0) : "--";
-                    $("cVal").textContent = ok ? air.co2 : "--";
+                    /* Main cards read the climate object, not the individual
+                     * devices: one source per quantity, the same one the
+                     * history is recorded from, so a card and the chart under
+                     * it can never disagree. */
+                    const cl = s.climate || {};
+                    $("tVal").textContent =
+                        cl.temp != null ? cl.temp.toFixed(2) : "--";
+                    $("hVal").textContent =
+                        cl.rh != null ? cl.rh.toFixed(1) : "--";
+                    $("cVal").textContent = cl.co2 != null ? cl.co2 : "--";
+                    $("pVal").textContent =
+                        cl.press != null ? cl.press.toFixed(3) : "--";
+                    $("pMslVal").textContent =
+                        cl.press_msl != null ? cl.press_msl.toFixed(3) : "--";
+                    $("lVal").textContent =
+                        cl.lux != null ? fmtLux(cl.lux) : "--";
                     const b = $("cBadge");
-                    if (ok) {
-                        const l = co2Level(air.co2);
+                    if (cl.co2 != null) {
+                        const l = co2Level(cl.co2);
                         b.className = "badge " + l.cls;
                         b.textContent = l.text;
                     } else {
@@ -2347,6 +2468,10 @@
                         $("briRange").value = st.led_brightness;
                         $("briVal").textContent = st.led_brightness;
                     }
+                    if (!altLoaded && st.altitude !== undefined) {
+                        altLoaded = true;
+                        $("altInput").value = st.altitude;
+                    }
                     if (!blLoaded && st.backlight_rgb !== undefined) {
                         blLoaded = true;
                         const hex = st.backlight_rgb.toUpperCase();
@@ -2420,6 +2545,8 @@
                     t: padTo(hd.temp, n),
                     h: padTo(hd.rh, n),
                     c: padTo(hd.co2, n),
+                    p: padTo(hd.press || [], n),
+                    l: padTo(hd.lux || [], n),
                     times: Array.from(
                         { length: n },
                         (_, i) => now - (n - 1 - i) * step,
@@ -2427,11 +2554,16 @@
                 };
             }
 
-            /* One record per chart; data/times/stroke are refreshed by renderCharts() */
+            /* One record per chart; data/times/stroke are refreshed by
+             * renderCharts(). `scale: "log"` is for illuminance only — a
+             * linear axis over six decades leaves everything below noon
+             * flattened onto the baseline. */
             const charts = {
-                t: { canvas: $("tChart"), unit: "°C", dec: 1 },
-                h: { canvas: $("hChart"), unit: "%", dec: 0 },
+                t: { canvas: $("tChart"), unit: "°C", dec: 2 },
+                h: { canvas: $("hChart"), unit: "%", dec: 1 },
                 c: { canvas: $("cChart"), unit: "ppm", dec: 0 },
+                p: { canvas: $("pChart"), unit: "hPa", dec: 3 },
+                l: { canvas: $("lChart"), unit: "lx", dec: 1, scale: "log" },
             };
             const M = {
                 l: 36,
@@ -2484,9 +2616,7 @@
                 ctx.clearRect(0, 0, w, h);
                 ctx.font = "10px " + css("--font");
 
-                const pw = w - M.l - M.r,
-                    ph = h - M.t - M.b;
-                ch.pw = pw; /* used by the hover handler to map px -> index */
+                const ph = h - M.t - M.b;
 
                 const vals = data.filter((v) => v != null);
                 if (vals.length < 2) {
@@ -2497,35 +2627,106 @@
                     return;
                 }
 
-                const min = Math.min(...vals),
-                    max = Math.max(...vals);
-                const pad = (max - min) * 0.15 || 1;
+                /* Everything below works in "axis space": identical to the
+                 * value for a linear chart, its base-10 logarithm for a log
+                 * one. Only the tick generator and y() know the difference. */
+                const log = ch.scale === "log";
+                const LOG_FLOOR = 0.01; /* darker than the sensor can tell */
+                const ax = log
+                    ? (v) => Math.log10(Math.max(v, LOG_FLOOR))
+                    : (v) => v;
+
+                const axv = vals.map(ax);
+                const min = Math.min(...axv),
+                    max = Math.max(...axv);
+                const pad = (max - min) * 0.15 || (log ? 0.5 : 1);
                 const lo = min - pad,
                     hi = max + pad;
-                const x = (i) => M.l + (i / (data.length - 1)) * pw;
-                const y = (v) => M.t + ph - ((v - lo) / (hi - lo)) * ph;
+
+                /* y axis: round-valued gridlines with labels on the left.
+                 * Linear picks one round step; log walks 1/2/5 per decade and
+                 * keeps whatever lands inside the window. */
+                const yticks = [];
+                let ydec = 0;
+                if (log) {
+                    /* Subdivide a decade only while there is room for it —
+                     * over four decades even 1/2/5 would put 15 lines on a
+                     * sparkline and reach the top before running out. */
+                    const decades = hi - lo;
+                    const mults =
+                        decades <= 0.7
+                            ? [1, 1.5, 2, 3, 5, 7]
+                            : decades <= 2
+                              ? [1, 2, 5]
+                              : decades <= 4
+                                ? [1, 5]
+                                : [1];
+                    /* never below the floor ax() clamps to, or the tick and
+                     * the line it labels would sit at different values */
+                    const k0 = Math.max(
+                        Math.floor(lo),
+                        Math.log10(LOG_FLOOR),
+                    );
+                    for (let k = k0; k <= Math.ceil(hi); k++) {
+                        for (const m of mults) {
+                            const v = m * Math.pow(10, k);
+                            if (ax(v) >= lo && ax(v) <= hi) yticks.push(v);
+                        }
+                    }
+                } else {
+                    const ystep = niceStep((hi - lo) / 3);
+                    /* Labels follow the step, not the value: a window a third
+                     * of a degree wide needs both decimals, and a pressure one
+                     * spanning hundredths of a hPa needs three. */
+                    ydec = Math.max(
+                        0,
+                        Math.min(3, Math.ceil(-Math.log10(ystep))),
+                    );
+                    for (
+                        let v = Math.ceil(lo / ystep) * ystep;
+                        v <= hi + ystep * 0.01;
+                        v += ystep
+                    ) {
+                        yticks.push(v);
+                    }
+                }
+                /* Log ticks are 1/1.5/2/… x 10^k, so two significant digits
+                 * name every one of them exactly, at any decade. */
+                const ylabel = (v) =>
+                    log
+                        ? v >= 1000
+                            ? v / 1000 + "k"
+                            : String(Number(v.toPrecision(2)))
+                        : v.toFixed(ydec);
+
+                /* The left margin follows the widest label instead of being
+                 * fixed: "1013.250" does not fit the 36 px that "23.4" needs,
+                 * and a clipped axis label is worse than a narrower plot. */
+                const labels = yticks.map(ylabel);
+                const ml = Math.max(
+                    M.l,
+                    Math.max(0, ...labels.map((s) => ctx.measureText(s).width)) + 9,
+                );
+                const pw = w - ml - M.r;
+                ch.pw = pw; /* used by the hover handler to map px -> index */
+                ch.ml = ml;
+
+                const x = (i) => ml + (i / (data.length - 1)) * pw;
+                const y = (v) => M.t + ph - ((ax(v) - lo) / (hi - lo)) * ph;
 
                 ctx.lineWidth = 1;
                 ctx.fillStyle = css("--text-faint");
-
-                /* y axis: round-valued gridlines with labels on the left */
-                const ystep = niceStep((hi - lo) / 3);
-                const ydec = ystep < 1 ? 1 : 0;
                 ctx.textAlign = "right";
                 ctx.textBaseline = "middle";
-                for (
-                    let v = Math.ceil(lo / ystep) * ystep;
-                    v <= hi + ystep * 0.01;
-                    v += ystep
-                ) {
+                yticks.forEach((v, i) => {
                     const yy = y(v);
                     ctx.strokeStyle = "rgba(139,152,169,.12)";
                     ctx.beginPath();
-                    ctx.moveTo(M.l, yy);
+                    ctx.moveTo(ml, yy);
                     ctx.lineTo(w - M.r, yy);
                     ctx.stroke();
-                    ctx.fillText(v.toFixed(ydec), M.l - 5, yy);
-                }
+                    ctx.fillText(labels[i], ml - 5, yy);
+                });
 
                 /* x axis: time labels aligned to a round step, <= 6 ticks */
                 const tstep = times[1] - times[0];
@@ -2542,7 +2743,7 @@
                     tt += xstep
                 ) {
                     const xx = x((tt - times[0]) / tstep);
-                    if (xx < M.l + 14 || xx > w - 16)
+                    if (xx < ml + 14 || xx > w - 16)
                         continue; /* label would clip */
                     ctx.strokeStyle = "rgba(139,152,169,.08)";
                     ctx.beginPath();
@@ -2620,7 +2821,7 @@
                 if (!ch.data || !ch.pw) return;
                 const rect = ch.canvas.getBoundingClientRect();
                 let i = Math.round(
-                    ((ev.clientX - rect.left - M.l) / ch.pw) *
+                    ((ev.clientX - rect.left - (ch.ml ?? M.l)) / ch.pw) *
                         (ch.data.length - 1),
                 );
                 i = Math.max(0, Math.min(ch.data.length - 1, i));
@@ -2641,8 +2842,12 @@
                 draw(ch);
 
                 const tip = $("tip");
+                const shown =
+                    ch.scale === "log"
+                        ? fmtLux(ch.data[i])
+                        : ch.data[i].toFixed(ch.dec);
                 tip.innerHTML =
-                    `<b>${ch.data[i].toFixed(ch.dec)} ${ch.unit}</b>` +
+                    `<b>${shown} ${ch.unit}</b>` +
                     `<span>${fmtTipTime(ch.times[i])}</span>`;
                 tip.style.display = "block";
                 let tx = ev.clientX + 14;
@@ -2672,7 +2877,7 @@
                 );
             }
 
-            function trendArrow(el, vals) {
+            function trendArrow(el, vals, fmt) {
                 if (vals.length < 2) {
                     el.textContent = "—";
                     el.className = "trend flat";
@@ -2681,11 +2886,12 @@
                 const d =
                     vals[vals.length - 1] - vals[Math.max(0, vals.length - 6)];
                 const eps = (Math.max(...vals) - Math.min(...vals)) * 0.05;
+                const f = fmt || ((v) => v.toFixed(1));
                 el.textContent =
                     d > eps
-                        ? "↑ " + Math.abs(d).toFixed(1)
+                        ? "↑ " + f(Math.abs(d))
                         : d < -eps
-                          ? "↓ " + Math.abs(d).toFixed(1)
+                          ? "↓ " + f(Math.abs(d))
                           : "→";
                 el.className =
                     "trend " + (d > eps ? "up" : d < -eps ? "down" : "flat");
@@ -2697,34 +2903,40 @@
 
                 const tv = s.t.filter((v) => v != null),
                     hv = s.h.filter((v) => v != null),
-                    cv = s.c.filter((v) => v != null);
-                $("tMin").textContent = tv.length
-                    ? Math.min(...tv).toFixed(1) + "°"
-                    : "--";
-                $("tMax").textContent = tv.length
-                    ? Math.max(...tv).toFixed(1) + "°"
-                    : "--";
-                $("hMin").textContent = hv.length
-                    ? Math.min(...hv).toFixed(0) + "%"
-                    : "--";
-                $("hMax").textContent = hv.length
-                    ? Math.max(...hv).toFixed(0) + "%"
-                    : "--";
-                $("cMin").textContent = cv.length
-                    ? Math.min(...cv).toFixed(0)
-                    : "--";
-                $("cMax").textContent = cv.length
-                    ? Math.max(...cv).toFixed(0)
-                    : "--";
+                    cv = s.c.filter((v) => v != null),
+                    pv = s.p.filter((v) => v != null),
+                    lv = s.l.filter((v) => v != null);
+
+                /* min/max over the visible window, formatted like the card's
+                 * own reading */
+                const span = (id, vals, fmt) => {
+                    $(id + "Min").textContent = vals.length
+                        ? fmt(Math.min(...vals))
+                        : "--";
+                    $(id + "Max").textContent = vals.length
+                        ? fmt(Math.max(...vals))
+                        : "--";
+                };
+                span("t", tv, (v) => v.toFixed(2) + "°");
+                span("h", hv, (v) => v.toFixed(1) + "%");
+                span("c", cv, (v) => v.toFixed(0));
+                span("p", pv, (v) => v.toFixed(3));
+                span("l", lv, fmtLux);
 
                 trendArrow($("tTrend"), tv);
                 trendArrow($("hTrend"), hv);
+                trendArrow($("pTrend"), pv);
+                trendArrow($("lTrend"), lv, fmtLux);
 
                 charts.t.data = s.t;
                 charts.h.data = s.h;
                 charts.c.data = s.c;
+                charts.p.data = s.p;
+                charts.l.data = s.l;
                 charts.t.stroke = css("--temp");
                 charts.h.stroke = css("--hum");
+                charts.p.stroke = css("--press");
+                charts.l.stroke = css("--lux");
                 charts.c.stroke = cv.length
                     ? co2Level(cv[cv.length - 1]).color
                     : css("--co2");
@@ -3127,6 +3339,23 @@
                     body: JSON.stringify({ led_brightness: +e.target.value }),
                 });
                 toast(t("brightSaved"));
+            });
+
+            /* Site altitude: the one input to the sea-level reduction. Saved on
+               change (blur or Enter), so the field is not written back while it
+               is being typed into. */
+            $("altInput").addEventListener("change", async (e) => {
+                const m = Math.round(+e.target.value);
+                if (!Number.isFinite(m) || m < -500 || m > 9000) {
+                    e.target.value = lastStatus?.settings?.altitude ?? 0;
+                    return;
+                }
+                e.target.value = m;
+                await fetch("/api/settings", {
+                    method: "POST",
+                    body: JSON.stringify({ altitude: m }),
+                });
+                toast(t("altSaved"));
             });
 
             /* Backlight: the device stores plain RGB, so hue and brightness

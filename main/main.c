@@ -5,6 +5,7 @@
 #include "alerts.h"
 #include "button.h"
 #include "chip_temp.h"
+#include "climate.h"
 #include "history.h"
 #include "i2c_bus.h"
 #include "led.h"
@@ -43,6 +44,7 @@ void app_main(void)
 
     ESP_ERROR_CHECK(wifi_connect());
     storage_init();
+    climate_init(); /* before history: it samples climate every second */
     history_init();
     chip_temp_init();
 

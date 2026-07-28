@@ -10,15 +10,25 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "climate.h"
 #include "timesync.h"
 
 #define SNAPSHOT_MAGIC   0x48495354 /* "HIST" */
-#define SNAPSHOT_VERSION 1
+/* Bumped when history_point_t changed shape; a file from an older firmware
+ * fails the check below and is dropped rather than reinterpreted. */
+#define SNAPSHOT_VERSION 2
 
 static const char *TAG = "history";
 
-/* Writers: sensor task (add) and esp_timer task (tick); reader: httpd. */
+/* Ring writer: the esp_timer task; readers: httpd and the snapshot task. The
+ * accumulators need no lock — only the timer callback touches them. */
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
+
+/* One quantity's running mean over the slot in progress. */
+typedef struct {
+    float sum;
+    int n;
+} acc_t;
 
 typedef struct {
     const char *file; /* NULL = RAM only */
@@ -29,10 +39,10 @@ typedef struct {
     history_point_t *ring;
     int head; /* next write position */
     int count;
-    /* accumulator for the slot in progress (tiers with interval > 1 s) */
-    uint32_t acc_co2;
-    float acc_temp, acc_rh;
-    int acc_n;
+    /* accumulators for the slot in progress (tiers with interval > 1 s).
+     * Counted per quantity, so one sensor dropping out does not turn the
+     * whole slot into a gap. */
+    acc_t co2, temp, rh, press, lux;
 } tier_t;
 
 static history_point_t s_ring_5m[5 * 60];
@@ -64,8 +74,7 @@ static tier_t s_tiers[HISTORY_TIER_COUNT] = {
 };
 
 /* Snapshot file: header + all `len` slots (only the first `count` are
- * meaningful). Byte-compatible with the old single-ring format, so a
- * pre-existing 24 h file is read back as-is after an OTA update. */
+ * meaningful). */
 typedef struct {
     uint32_t magic;
     uint16_t version;
@@ -78,11 +87,6 @@ typedef struct {
 static history_point_t s_snap_points[24 * 60]; /* sized for the largest tier */
 static TaskHandle_t s_save_task;
 static bool s_restored;
-
-/* Latest raw reading, replayed into the 1 s tier while it stays fresh. */
-static history_point_t s_last;
-static int64_t s_last_us = INT64_MIN;
-#define LAST_FRESH_US (6 * 1000000LL) /* SCD40 updates every 5 s */
 
 /* Callers hold s_lock. */
 static void ring_push(tier_t *t, const history_point_t *p)
@@ -168,7 +172,7 @@ static void restore_snapshot(tier_t *t)
     }
 
     taskENTER_CRITICAL(&s_lock);
-    const history_point_t hole = { .valid = false };
+    const history_point_t hole = { .have = 0 };
     t->head = 0;
     t->count = 0;
     for (int i = 0; i < hdr.count; i++) {
@@ -208,22 +212,91 @@ static void shutdown_save(void)
     }
 }
 
-/* Turns the readings accumulated over the tier interval into one ring
- * point. With no readings the point is a gap, so the time axis stays
- * uniform even when the sensor is offline. */
+static void acc_add(acc_t *a, bool ok, float value)
+{
+    if (ok) {
+        a->sum += value;
+        a->n++;
+    }
+}
+
+/* Feeds one sample into every averaging tier. */
+static void acc_sample(const climate_t *c)
+{
+    for (int i = HISTORY_1H; i < HISTORY_TIER_COUNT; i++) {
+        tier_t *t = &s_tiers[i];
+        acc_add(&t->co2, c->co2_ok, c->co2_ppm);
+        acc_add(&t->temp, c->temp_ok, c->temp_c);
+        acc_add(&t->rh, c->rh_ok, c->rh_pct);
+        acc_add(&t->press, c->press_ok, c->press_hpa);
+        acc_add(&t->lux, c->lux_ok, c->lux);
+    }
+}
+
+/* One climate reading as a ring point, at the resolutions history_point_t
+ * stores. A quantity whose sensor is missing leaves its bit clear. */
+static history_point_t point_of(const climate_t *c)
+{
+    history_point_t p = {0};
+
+    if (c->co2_ok) {
+        p.co2_ppm = c->co2_ppm;
+        p.have |= HISTORY_HAS_CO2;
+    }
+    if (c->temp_ok) {
+        p.temp_cx100 = (int16_t)lroundf(100.0f * c->temp_c);
+        p.have |= HISTORY_HAS_TEMP;
+    }
+    if (c->rh_ok) {
+        p.rh_dpct = (uint16_t)lroundf(10.0f * c->rh_pct);
+        p.have |= HISTORY_HAS_RH;
+    }
+    if (c->press_ok) {
+        p.press_mhpa = (int32_t)lroundf(1000.0f * c->press_hpa);
+        p.have |= HISTORY_HAS_PRESS;
+    }
+    if (c->lux_ok) {
+        p.lux = c->lux;
+        p.have |= HISTORY_HAS_LUX;
+    }
+    return p;
+}
+
+/* Turns the samples accumulated over the tier interval into one ring point.
+ * A quantity with no samples leaves its bit clear; with none at all the point
+ * is a gap, so the time axis stays uniform even when everything is offline. */
 static void flush_tier(tier_t *t)
 {
-    taskENTER_CRITICAL(&s_lock);
-    history_point_t p = { .valid = t->acc_n > 0 };
-    if (p.valid) {
-        p.co2_ppm = t->acc_co2 / t->acc_n;
-        p.temp_cx10 = (int16_t)lroundf(10.0f * t->acc_temp / t->acc_n);
-        p.rh_pct = (uint8_t)lroundf(t->acc_rh / t->acc_n);
+    climate_t mean = {0};
+
+    if (t->co2.n) {
+        mean.co2_ok = true;
+        mean.co2_ppm = (uint16_t)lroundf(t->co2.sum / t->co2.n);
     }
-    t->acc_co2 = 0;
-    t->acc_temp = 0;
-    t->acc_rh = 0;
-    t->acc_n = 0;
+    if (t->temp.n) {
+        mean.temp_ok = true;
+        mean.temp_c = t->temp.sum / t->temp.n;
+    }
+    if (t->rh.n) {
+        mean.rh_ok = true;
+        mean.rh_pct = t->rh.sum / t->rh.n;
+    }
+    if (t->press.n) {
+        mean.press_ok = true;
+        mean.press_hpa = t->press.sum / t->press.n;
+    }
+    if (t->lux.n) {
+        mean.lux_ok = true;
+        mean.lux = t->lux.sum / t->lux.n;
+    }
+    t->co2 = (acc_t){0};
+    t->temp = (acc_t){0};
+    t->rh = (acc_t){0};
+    t->press = (acc_t){0};
+    t->lux = (acc_t){0};
+
+    history_point_t p = point_of(&mean);
+    taskENTER_CRITICAL(&s_lock);
     ring_push(t, &p);
     taskEXIT_CRITICAL(&s_lock);
 }
@@ -233,11 +306,16 @@ static void tick_cb(void *arg)
     static uint32_t ticks;
     ticks++;
 
-    /* 1 s tier: replay the latest reading while it stays fresh */
+    /* Sampling, not listening: whatever each sensor last published is what
+     * gets recorded. A sensor slower than 1 Hz repeats its value into the 1 s
+     * tier — the alternative, four gaps out of five, is not more truthful and
+     * draws far worse. */
+    climate_t c;
+    climate_get(&c);
+    acc_sample(&c);
+
+    history_point_t p = point_of(&c);
     taskENTER_CRITICAL(&s_lock);
-    history_point_t p = s_last;
-    p.valid = s_last.valid &&
-              esp_timer_get_time() - s_last_us <= LAST_FRESH_US;
     ring_push(&s_tiers[HISTORY_5M], &p);
     taskEXIT_CRITICAL(&s_lock);
 
@@ -282,26 +360,6 @@ void history_init(void)
     esp_timer_handle_t timer;
     ESP_ERROR_CHECK(esp_timer_create(&args, &timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(timer, 1000000ULL));
-}
-
-void history_add(uint16_t co2_ppm, float temp_c, float rh_pct)
-{
-    taskENTER_CRITICAL(&s_lock);
-    for (int i = HISTORY_1H; i < HISTORY_TIER_COUNT; i++) {
-        tier_t *t = &s_tiers[i];
-        t->acc_co2 += co2_ppm;
-        t->acc_temp += temp_c;
-        t->acc_rh += rh_pct;
-        t->acc_n++;
-    }
-    s_last = (history_point_t){
-        .valid = true,
-        .co2_ppm = co2_ppm,
-        .temp_cx10 = (int16_t)lroundf(10.0f * temp_c),
-        .rh_pct = (uint8_t)lroundf(rh_pct),
-    };
-    s_last_us = esp_timer_get_time();
-    taskEXIT_CRITICAL(&s_lock);
 }
 
 int history_count(history_tier_t tier)

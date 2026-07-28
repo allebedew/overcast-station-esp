@@ -7,7 +7,6 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
-#include "history.h"
 #include "i2c_bus.h"
 
 /* Every sensor on the bus delivers its reading from one driver call, so a
@@ -80,7 +79,6 @@ static esp_err_t bmp581_read_any(sensor_reading_t *r) { return bmp581_read(&r->b
 static esp_err_t veml7700_read_any(sensor_reading_t *r) { return veml7700_read(&r->veml7700); }
 
 static void scd40_started(void);
-static void scd40_published(const sensor_reading_t *r);
 static void bmp581_published(const sensor_reading_t *r);
 
 /* Written by the poll task, read by httpd, the display, the LED and alerts. */
@@ -91,7 +89,7 @@ enum { SENSOR_SCD40, SENSOR_TMP117, SENSOR_BMP581, SENSOR_VEML7700, SENSOR_COUNT
 static sensor_t s_sensors[SENSOR_COUNT] = {
     [SENSOR_SCD40] = { .name = "SCD40", .period_ms = SCD40_PERIOD_MS,
                        .start = scd40_start, .read = scd40_read_any,
-                       .on_start = scd40_started, .on_reading = scd40_published },
+                       .on_start = scd40_started },
     [SENSOR_TMP117] = { .name = "TMP117", .period_ms = TMP117_PERIOD_MS,
                         .start = tmp117_start, .read = tmp117_read_any },
     [SENSOR_BMP581] = { .name = "BMP581", .period_ms = BMP581_PERIOD_MS,
@@ -155,11 +153,6 @@ static void scd40_started(void)
 {
     s_scd40_hpa = 0;
     scd40_sync_pressure();
-}
-
-static void scd40_published(const sensor_reading_t *r)
-{
-    history_add(r->scd40.co2_ppm, r->scd40.temp_c, r->scd40.rh_pct);
 }
 
 static void bmp581_published(const sensor_reading_t *r)

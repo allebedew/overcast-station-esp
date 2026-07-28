@@ -1,9 +1,9 @@
 # Weather Station
 
 ESP32-C6 firmware (ESP-IDF 5.5, 16 MB flash) for a weather station. Work in
-progress — networking, web UI and OTA infrastructure are done; the I2C sensors
-report into `/api/status`, the web page and the LCD, but only the SCD40 feeds
-the history, the charts and the alerts so far.
+progress — networking, web UI and OTA infrastructure are done; all four I2C
+sensors report into `/api/status`, the web page, the LCD and the history, and
+the alerts are still the only consumer left tied to the SCD40 alone.
 
 ## Implemented
 
@@ -25,8 +25,12 @@ the history, the charts and the alerts so far.
   A short click of the same button browses the display pages.
 - **Web UI** — single page embedded into the firmware (gzipped at build time,
   served with `Content-Encoding: gzip`), `http://weather.local`
-  (mDNS). Dark dashboard: three sensor cards (temperature / humidity / CO₂)
-  with current value, trend arrow, min/max and a sparkline chart, then a
+  (mDNS). Dark dashboard: five sensor cards (temperature / humidity / CO₂ on
+  the first row, pressure / illuminance on the second) fed from the `climate`
+  object, each with current value, trend arrow, min/max and a sparkline chart
+  — CO₂ carries a level badge instead of a trend arrow, and pressure carries a
+  second line under the reading with the same value reduced to sea level.
+  Then a
   sensors card holding one equal-height nested card per I2C device — SCD40,
   TMP117, BMP581, VEML7700 — each with an online/no-response badge and its
   readings as tiles built like the weather ones (the VEML7700's raw counts,
@@ -46,8 +50,11 @@ the history, the charts and the alerts so far.
   badged; tap an AP → password modal with an optional "pin BSSID" toggle →
   save; per-network delete; reconnect button) and a settings card (LED
   brightness, LCD backlight hue — a rainbow slider with −/+ buttons stepping
-  5° at a time, wrapping around the circle — LCD backlight brightness, and
-  SCD40 FRC calibration). Hue/brightness are a browser-side way to pick a
+  5° at a time, wrapping around the circle — LCD backlight brightness, site
+  altitude in metres, and SCD40 FRC calibration). The altitude field saves on
+  change and is written back from the device only once per page load, so a
+  1 s status poll cannot overwrite what is being typed.
+  Hue/brightness are a browser-side way to pick a
   color: the page converts them to RGB (HSV at full saturation), previews the
   result as a color dot, and sends the device only the finished value; on load
   the sliders are derived back from the stored color. A hex field next to them
@@ -98,8 +105,9 @@ the history, the charts and the alerts so far.
   (`esp_rom_delay_us`): the FreeRTOS tick is 10 ms, so
   `vTaskDelay(pdMS_TO_TICKS(n))` for a few ms rounds down to zero ticks and
   does not delay at all.
-  Only the SCD40 is consumed by anything beyond the API and the display — the
-  other three do not feed the history, the charts or the alerts yet.
+  Everything the rest of the firmware needs from these devices it takes
+  through `climate.c`, one quantity at a time, rather than per chip — the
+  exception is the alerts, which still read the SCD40 directly.
   - **SCD40** (`0x62`) — CO₂ / temperature / humidity, periodic measurement
     mode (fresh reading every 5 s, the sensor's maximum). The result appears at
     a phase the firmware does not know until it has caught one, so the poll
@@ -163,14 +171,23 @@ the history, the charts and the alerts so far.
   four are probed, none collides with the SCD40 at `0x62`). Four pages,
   switched by a short click of the BOOT button and remembered across reboots
   (NVS `settings/screen_page`):
-  - indoor + headline — `23.4° 45% 1250` / `12.3° Overcast` (SCD40 temperature,
-    humidity, CO₂; outdoor temperature and the decoded WMO description, cut to
-    the room left)
-  - indoor precise — `23.46° 1013.250` / `1250ppm 45% 78x` (TMP117 °C and
-    BMP581 hPa at the resolution the sensors actually deliver; below them SCD40
-    CO₂ and humidity plus VEML7700 illuminance, switched to kilolux past
-    9999 lx). Each value is rendered on its own, so one absent sensor shows as
-    `--` and leaves the rest readable
+  - indoor + headline — `23.46° 45.3 1250` / `12.3° Overcast` (indoor
+    temperature, humidity and CO₂ from `climate`; outdoor temperature and the
+    decoded WMO description, cut to the room left). Sixteen characters take the
+    standard resolution but not the `%` after the humidity — of the two markers
+    on the row the degree sign is the one worth keeping, since the row below
+    carries a temperature too. A five-digit CO₂ (past the SCD40's specified
+    range, but not impossible) would still overrun, and the temperature drops
+    to one decimal for as long as it does: a truncated number reads as a
+    plausible wrong one
+  - indoor precise — `23.46° 1013.250` / `1250 45.3% 999.9` (TMP117 °C and
+    BMP581 hPa; below them SCD40 CO₂ and humidity plus VEML7700 illuminance).
+    The unit suffixes are what the second row spends its characters on
+    instead of digits. That leaves five columns for the illuminance, so its
+    tenth of a lux survives below 1000 lx, then the row drops to whole lux and
+    past 9999 lx to kilolux — the only reading in the firmware that ever shows
+    fewer digits than the standard. Each value is rendered on its own, so one
+    absent sensor shows as `--` and leaves the rest readable
   - outdoor detail — `12.3° 8..17°U3` / `78% 1013 NW15 3` (current temperature,
     today's min/max, UV index; humidity %, sea-level pressure hPa, wind as an
     8-point compass label + km/h, WMO code)
@@ -190,19 +207,81 @@ the history, the charts and the alerts so far.
   `no sensor data` / `no weather data`. Hot-plug: an absent display is
   re-probed every 5 s. Text is ASCII-only — the character ROM has no Cyrillic,
   so other bytes show as `?`.
-- **History & charts** — SCD40 readings in three ring buffers:
-  5 min of 1 s samples (RAM only), 1 h of 5 s points (the sensor's native
-  rate) and 24 h of 1-min averages, ~20 KB RAM total. The two longer rings
-  are snapshotted to LittleFS (`/data/hist_1h.bin` every 5 min,
-  `/data/history.bin` every 10 min, both on graceful shutdown / OTA reboot)
-  and restored on boot — downtime shows up as a gap, anchored via SNTP time;
-  points collected before the deferred restore are merged in after the gap.
-  The web UI draws CO₂/temperature/humidity sparkline charts inside the
-  sensor cards with a small dependency-free canvas renderer: switchable
-  window (5 min / hour / day, one switch for all charts) fetched from
-  `/api/history?p=` and re-polled at 2/10/60 s respectively, time/value
-  axis labels, hover crosshair with a value + time tooltip; offline periods
-  show as gaps. No charting library is bundled.
+- **Climate** — the room as opposed to the chips. One source per quantity and
+  **no fallbacks**: temperature is the TMP117's and nothing else, humidity and
+  CO₂ the SCD40's, pressure the BMP581's, illuminance the VEML7700's. The
+  SCD40 and the BMP581 also report a temperature and both are ignored — a
+  sensor quietly standing in for a missing TMP117 would put a step of about a
+  degree into the charts, and that step is indistinguishable from a real
+  event. A quantity with no sensor behind it is reported as absent, never as
+  zero. Pure composition of the published snapshots (`climate.c`): no task, no
+  state, no lock. Exposed as the `climate` object in `/api/status`, and it is
+  what the main cards and the history both read, so a card and the chart under
+  it cannot disagree. Alongside the measured pressure it carries the same
+  reading **reduced to sea level** — the international barometric formula, with
+  the site altitude (a setting, see below) as its only input. That standard
+  atmosphere is the whole approximation: the real air column has its own
+  temperature, and in hard frost a temperature-corrected reduction lands up to
+  ~2 hPa higher. Taking that temperature from the indoor sensor would be worse
+  than assuming the standard profile — the column is outdoors — and taking it
+  from the weather API would make a local reading stop working when the network
+  does. At altitude 0 the factor is exactly 1, so an unconfigured station
+  reports its measurement unchanged rather than something subtly wrong. The
+  reduced value is not stored in the history: at a fixed altitude it is the
+  measured pressure times a constant, so its curve would be the same one
+  shifted.
+- **Site altitude** — metres above sea level, −500…9000, stored in NVS
+  (`settings/altitude_m`, default 0) and set from the settings card on the web
+  page. Nothing else depends on it.
+- **Reading resolution** — one per quantity, the same everywhere a value is
+  shown or stored: the web page, the HTTP API, the charts, the history rings
+  and the LCD. Written down once in `climate.h`, next to the quantities
+  themselves.
+
+  | Quantity | Resolution | Sensor | Format |
+  |---|---|---|---|
+  | temperature | 0.01 °C | TMP117 | `%.2f` |
+  | pressure | 0.001 hPa | BMP581 | `%.3f` |
+  | CO₂ | 1 ppm | SCD40 | `%u` |
+  | humidity | 0.1 % | SCD40 | `%.1f` |
+  | illuminance | 0.1 lx | VEML7700 | `%.1f` |
+
+  These are resolutions, not accuracies — the parts are worth ±0.1 °C,
+  ±0.3 hPa absolute (±0.06 hPa relative), ±(50 ppm + 5 %) and ±6 %RH. What
+  they buy is that one reading reads identically in every place it appears,
+  and that a five-minute chart window is not quantised into a single flat
+  step. The 16x2 display is the sole exception, and only where sixteen
+  characters run out — see its layouts below.
+- **History & charts** — five quantities (CO₂, temperature, humidity,
+  pressure, illuminance) in three ring buffers: 5 min of 1 s samples (RAM
+  only), 1 h of 5 s points and 24 h of 1-min averages — 38 KB of rings plus a
+  23 KB staging buffer the snapshots are copied through (it was 20 + 11 KB
+  with three quantities at 8 bytes a point).
+  Filled by **sampling** `climate_get()` once a second — nothing pushes into
+  it, so each quantity keeps being recorded for exactly as long as its own
+  sensor is alive, and validity is per quantity: an absent BMP581 leaves nulls
+  in the pressure series alone. A sensor slower than the sampling rate (the
+  SCD40 produces a result every 5 s) repeats its latest value into the 1 s
+  tier; the averaged tiers are unaffected.
+  Points are 16 bytes, at the reading resolutions below — fixed-point for the
+  four bounded quantities and a float for illuminance, which spans six decades
+  and fits no fixed scale.
+  The two longer rings are snapshotted to LittleFS (`/data/hist_1h.bin` every
+  5 min, `/data/history.bin` every 10 min, both on graceful shutdown / OTA
+  reboot) and restored on boot — downtime shows up as a gap, anchored via SNTP
+  time; points collected before the deferred restore are merged in after the
+  gap. The snapshot header carries a version, and a file written by an older
+  firmware is dropped rather than reinterpreted.
+  The web UI draws a sparkline inside each of the five sensor cards with a
+  small dependency-free canvas renderer: switchable window (5 min / hour /
+  day, one switch for all charts) fetched from `/api/history?p=` and re-polled
+  at 2/10/60 s respectively, time/value axis labels, hover crosshair with a
+  value + time tooltip; offline periods show as gaps. Value labels take their
+  decimals from the gridline step, and the left margin follows the widest of
+  them — `1013.250` does not fit the width `23.4` needs. The illuminance chart is
+  drawn on a **logarithmic** y axis (gridlines 1/1.5/2/3/5/7 x 10^k, thinned
+  as the window widens) — on a linear one everything below noon collapses onto
+  the baseline. No charting library is bundled.
 - **Telegram notifications** — push-only bot (no incoming commands yet):
   welcome message on boot (chip temp + IP + BSSID + channel + RSSI),
   notification on IP change,
@@ -268,21 +347,22 @@ everything that talks to a device on the I2C bus sits in `main/sensors/`
 | `screen_16x2.c` | what the display shows: three pages advanced by the button (selection persisted), 60 fps frame timer, backlight as a stored RGB value. Sized for 16x2 — a bigger display gets its own layout module |
 | `lcd1602_rgb.c` | transport for the DFR0464 panel: character output, backlight registers, revision detection, hot-plug recovery. Takes the bus and its lock from `i2c_bus.c` like the sensors do. The only file tied to this particular display |
 | `timesync.c` | SNTP client; `timesync_is_synced()` flag |
-| `history.c` | three RAM rings (5 min @ 1 s, 1 h @ 5 s, 24 h @ 1 min); fed by `sensors.c`, driven by a 1 s esp_timer; the two longer rings persist to `/data/hist_1h.bin` / `/data/history.bin` (5/10-min snapshots + shutdown handler) |
+| `sensors/climate.c` | the room-level view over the devices: one source per quantity, no fallbacks, absent where there is no sensor. Composition of the snapshots from `sensors.c`, plus the reduction of the measured pressure to sea level; owns the site-altitude setting (cached from NVS — the reduction runs on every read). Its header also carries the firmware-wide reading resolutions |
+| `history.c` | three RAM rings (5 min @ 1 s, 1 h @ 5 s, 24 h @ 1 min) of five quantities with per-quantity validity; samples `climate_get()` from a 1 s esp_timer — nothing pushes into it; the two longer rings persist to `/data/hist_1h.bin` / `/data/history.bin` (5/10-min snapshots + shutdown handler, versioned header) |
 | `storage.c` | mounts the LittleFS `storage` partition at `/data` |
 | `telegram.c` | message queue + sender task (Telegram Bot API over HTTPS); `telegram_notify(fmt, ...)` |
 | `weather_api.c` | Open-Meteo client; own task fetches the active location's outdoor conditions (temp/feels-like, daily min/max, humidity, surface & MSL pressure, UVI, wind, clouds, precipitation, WMO code, elevation, UTC offset) over HTTPS once an hour, exposed via `weather_api_get()` / `weather_api_code_str()`; `weather_api_refresh()` forces an immediate reload on a location change |
 | `weather_store.c` | saved weather locations `{name, lat, lon}` + active index in NVS (namespace `weather_loc`), mutex-protected; empty until the user adds a location |
 | `alerts.c` | notification rules & thresholds; own task polls sensors/network every 10 s |
-| `settings.c` | thin u8 get/set over NVS namespace `settings` |
+| `settings.c` | thin u8/u32/i32 get/set over NVS namespace `settings` |
 
 ## HTTP API
 
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (index.html, gzipped) |
-| `/api/status` | GET | full status JSON, grouped into objects: `sta` / `ap` (Wi-Fi), `sensors`, `weather` (Open-Meteo), `system` (firmware, chip, heap, NVS, uptime, clock), `settings` (`led_brightness`, `backlight_rgb`); nothing is left at the top level. `sensors` holds one object per I2C device, each with its own `ok` — `scd40` (`co2`, `temp`, `rh`), `tmp117` (`temp`), `bmp581` (`press` hPa, `press_pa`, `temp`), `veml7700` (`lux`, `white`, `als_raw`, `white_raw`, `gain`, `it`) — plus `chip_temp` (the SoC sensor, not on the bus) at the top of the group |
-| `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`) selects the ring; returns `{period: <s>, co2: [...], temp: [...], rh: [...]}`, `null` = gap |
+| `/api/status` | GET | full status JSON, grouped into objects: `sta` / `ap` (Wi-Fi), `climate`, `sensors`, `weather` (Open-Meteo), `system` (firmware, chip, heap, NVS, uptime, clock), `settings` (`led_brightness`, `backlight_rgb`, `altitude`); nothing is left at the top level. `climate` is the room — `temp`, `rh`, `co2`, `press`, `press_msl` (the same reading reduced to sea level from the configured altitude), `lux`, each a number or `null` when no sensor stands behind it. `sensors` is the hardware view: one object per I2C device, each with its own `ok` — `scd40` (`co2`, `temp`, `rh`), `tmp117` (`temp`), `bmp581` (`press` hPa, `press_pa`, `temp`), `veml7700` (`lux`, `white`, `als_raw`, `white_raw`, `gain`, `it`) — plus `chip_temp` (the SoC sensor, not on the bus) at the top of the group |
+| `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`) selects the ring; returns `{period: <s>, co2: [...], temp: [...], rh: [...], press: [...], lux: [...]}`. Each series is gated on its own quantity, so `null` is a gap in that series alone |
 | `/api/scan` | GET | scan for Wi-Fi networks, returns `[{ssid, bssid, ch, rssi, auth}]` (one entry per BSSID — same SSID may repeat across APs) |
 | `/api/networks` | GET | list of saved networks `[{ssid, bssid?}]` (bssid present only when the network is pinned to an AP) |
 | `/api/networks/add` | POST | save a network; body `{"ssid": "...", "password": "...", "bssid": "aa:bb:.."}` (bssid optional — pins the connection to that AP; omit/all-zero = connect to strongest), updates existing SSID |
@@ -292,7 +372,7 @@ everything that talks to a device on the I2C bus sits in `main/sensors/`
 | `/api/locations` | DELETE | remove a location; body `{"index": <n>}` |
 | `/api/locations/active` | PUT | switch the displayed location; body `{"index": <n>}` (triggers an immediate refetch) |
 | `/api/connect` | POST | leave AP mode / restart the STA connection cycle |
-| `/api/settings` | POST | apply settings; body `{"led_brightness": 1–255, "backlight_rgb": "RRGGBB"}` (hex string, leading `#` tolerated), any subset, all persisted in NVS |
+| `/api/settings` | POST | apply settings; body `{"led_brightness": 1–255, "backlight_rgb": "RRGGBB", "altitude": −500…9000}` (hex string, leading `#` tolerated; altitude in metres above sea level), any subset, all persisted in NVS |
 | `/api/scd40/calibrate` | POST | SCD40 forced recalibration; body `{"ppm": 400–2000}`, returns applied correction |
 | `/api/ota` | POST | firmware update; raw binary body, requires `X-OTA-Key` header; reboots on success |
 
