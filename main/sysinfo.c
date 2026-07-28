@@ -1,5 +1,7 @@
 #include "sysinfo.h"
 
+#include <stdlib.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/temperature_sensor.h"
@@ -124,10 +126,30 @@ void sysinfo_get_runtime(sysinfo_runtime_t *out)
 
 void sysinfo_log_tasks(void)
 {
-    static char task_list[1024];
+    /* vTaskList() writes without bounds checking, so the buffer is sized from
+     * the task count rather than fixed: a line is the name padded to
+     * configMAX_TASK_NAME_LEN plus state, priority, free stack and number,
+     * around forty bytes. A fixed 1 KB used to be enough and stopped being so
+     * as tasks were added. The slack covers tasks started between the count
+     * and the walk. */
+    size_t len = (uxTaskGetNumberOfTasks() + 4) * (configMAX_TASK_NAME_LEN + 32);
+    char *task_list = malloc(len);
+    if (task_list == NULL) {
+        ESP_LOGW(TAG, "Task list: %u bytes not available", (unsigned)len);
+        return;
+    }
+
+    /* Empty on its own allocation failure inside uxTaskGetSystemState(), which
+     * it does not report — say so rather than log a bare header. */
+    task_list[0] = '\0';
     vTaskList(task_list);
-    ESP_LOGI(TAG, "Task list:\nName          State  Prio  Stack  Num\n%s",
-             task_list);
+    if (task_list[0] == '\0') {
+        ESP_LOGW(TAG, "Task list unavailable");
+    } else {
+        ESP_LOGI(TAG, "Task list:\nName          State  Prio  Stack  Num\n%s",
+                 task_list);
+    }
+    free(task_list);
 }
 
 const char *sysinfo_reset_reason_str(void)

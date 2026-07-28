@@ -1,5 +1,6 @@
 #include "screen_16x2.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
@@ -17,7 +18,6 @@
 #include "sysinfo.h"
 #include "timesync.h"
 #include "weather_api.h"
-#include "wifi.h"
 
 /* 60 fps, paced by esp_timer: the FreeRTOS tick is 10 ms, too coarse for a
  * 16.7 ms frame. The rate is what the panel is polled at, not what it is
@@ -34,6 +34,20 @@
 
 /* Backlight default: a cyan-ish tint at full brightness. */
 #define DEFAULT_RGB 0x00AAFF
+
+/* Backlight brightness follows the room: the stored colour is what the panel
+ * shows in a lit room, and it is scaled down as the VEML7700 reading falls.
+ * At BL_LUX_BRIGHT and above the colour goes out unscaled; at BL_LUX_DARK and
+ * below it sits at BL_MIN. The curve between them is logarithmic, like the
+ * perception of brightness and like the range the room spans. */
+#define BL_LUX_DARK   1.0f
+#define BL_LUX_BRIGHT 100.0f
+#define BL_MIN        16 /* never dark: an unreadable screen reads as a fault */
+
+/* log10f(BL_LUX_DARK + 1) and the span from there to log10f(BL_LUX_BRIGHT + 1),
+ * precomputed — this runs per frame and the C6 has no FPU. */
+#define BL_LOG_DARK 0.30103f
+#define BL_LOG_SPAN 1.70329f
 
 /* "\xDF" is the degree sign in the panel's character ROM — the UTF-8 one
  * would take two bytes and show up as garbage. */
@@ -59,6 +73,10 @@ static TaskHandle_t s_task;
 
 /* Written from the web handler, read by the screen task. */
 static volatile uint32_t s_rgb = DEFAULT_RGB;
+
+/* The other way round: computed by the screen task, published for the API and
+ * the system page. */
+static volatile uint8_t s_bl_scale = 255;
 
 /* A reading, or the dashes standing in for the sensor that did not produce
  * it. Both spellings of a field sit on one line this way, so a row's layout
@@ -169,8 +187,8 @@ static void render_outdoor(char *l0, char *l1)
 }
 
 /* The station itself rather than the air around it:
- *   17:27:40 28.07     (the colons blink, once a second)
- *   12% 184k -58dBm    (CPU load, free heap, Wi-Fi signal) */
+ *   17:27:40 28.07     (the colons blink, one second on, one second off)
+ *   12% 184k BL184     (CPU load, free heap, backlight scale) */
 static void render_system(char *l0, char *l1)
 {
     if (timesync_is_synced()) {
@@ -183,29 +201,56 @@ static void render_system(char *l0, char *l1)
         struct tm tm;
         gmtime_r(&now, &tm);
 
-        /* The blink is this row's seconds hand: colons for the first half of
-         * every second, blanks for the second. The year does not fit next to
-         * the seconds — sixteen characters go to the time and the day. */
+        /* The blink is this row's pendulum: colons through one whole second,
+         * blanks through the next. Parity is taken off the UTC second rather
+         * than the local one — the offset can be a half-hour, never an odd
+         * number of seconds, so both give the same swing. The year does not
+         * fit next to the seconds — sixteen characters go to the time and the
+         * day. */
         strftime(l0, RENDER_BUF,
-                 tv.tv_usec < 500000 ? "%H:%M:%S %d.%m" : "%H %M %S %d.%m",
+                 tv.tv_sec % 2 == 0 ? "%H:%M:%S %d.%m" : "%H %M %S %d.%m",
                  &tm);
     } else {
         snprintf(l0, RENDER_BUF, "clock not set");
     }
 
-    /* An idle station is on Wi-Fi, so the link is worth a permanent slot:
-     * signal when associated, "AP" while it serves its own network. */
-    wifi_info_t wifi;
-    wifi_get_info(&wifi);
-    char link[12];
-    if (wifi.sta_state == WIFI_STA_CONNECTED) {
-        snprintf(link, sizeof(link), "%ddBm", wifi.rssi);
-    } else {
-        snprintf(link, sizeof(link), "%s", wifi.ap_active ? "AP" : "--");
+    /* The backlight scale has no other readout — there is no setting behind
+     * it and the web page shows the stored color, not the one on the panel.
+     * The worst case still fits: "100% 1024k BL255" is sixteen exactly. */
+    snprintf(l1, RENDER_BUF, "%2.d%% %uk BL%u", sysinfo_cpu_load_percent(),
+             (unsigned)(esp_get_free_heap_size() / 1024), s_bl_scale);
+}
+
+/* Scaling a channel to zero would drop it out of the mix and shift the hue, so
+ * a channel that was lit stays lit. */
+static uint8_t scale8(uint8_t c, uint8_t k)
+{
+    uint8_t v = (uint16_t)c * k / 255;
+    return (v == 0 && c != 0) ? 1 : v;
+}
+
+/* Backlight scale for the current illuminance, 0-255. Without a reading the
+ * colour is left alone: a dimmed screen is not the way to report a missing
+ * sensor. The result is cached against the reading it came from — the
+ * VEML7700 produces one a second and this is asked sixty times a second. */
+static uint8_t backlight_scale(float lux, bool lux_ok)
+{
+    static float cached_lux;
+    static uint8_t cached_k = 255;
+
+    if (!lux_ok) {
+        return 255;
+    }
+    if (lux == cached_lux) {
+        return cached_k;
     }
 
-    snprintf(l1, RENDER_BUF, "%2.d%% %uk %s", sysinfo_cpu_load_percent(),
-             (unsigned)(esp_get_free_heap_size() / 1024), link);
+    float t = (log10f(lux + 1.0f) - BL_LOG_DARK) / BL_LOG_SPAN;
+    t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+
+    cached_lux = lux;
+    cached_k = BL_MIN + (uint8_t)(t * (255 - BL_MIN));
+    return cached_k;
 }
 
 static void frame_tick(void *arg)
@@ -220,6 +265,15 @@ static void screen_task(void *arg)
          * all at once drops the backlog instead of running behind. */
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
+        /* Ahead of the rendering: the system page prints this. The scale only
+         * moves when the illuminance does, once a second, so the colour
+         * written below is identical frame to frame and the transport drops
+         * it — same as it does for the text. */
+        climate_t c;
+        climate_get(&c);
+        uint8_t k = backlight_scale(c.lux, c.lux_ok);
+        s_bl_scale = k;
+
         char l0[RENDER_BUF] = "", l1[RENDER_BUF] = "";
         switch (s_page) {
         case PAGE_INDOOR:  render_indoor(l0, l1); break;
@@ -231,7 +285,8 @@ static void screen_task(void *arg)
         uint32_t rgb = s_rgb;
         lcd1602_rgb_set_line(0, l0);
         lcd1602_rgb_set_line(1, l1);
-        lcd1602_rgb_set_color(rgb >> 16, (rgb >> 8) & 0xFF, rgb & 0xFF);
+        lcd1602_rgb_set_color(scale8(rgb >> 16, k), scale8((rgb >> 8) & 0xFF, k),
+                              scale8(rgb & 0xFF, k));
 
         /* Persist here rather than in the button callback: that one runs in
          * the timer context, and an NVS write can take tens of ms. */
@@ -257,6 +312,11 @@ void screen_16x2_set_backlight(uint32_t rgb)
 uint32_t screen_16x2_backlight_rgb(void)
 {
     return s_rgb;
+}
+
+uint8_t screen_16x2_backlight_scale(void)
+{
+    return s_bl_scale;
 }
 
 void screen_16x2_init(void)

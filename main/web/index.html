@@ -1503,8 +1503,8 @@
      POST /api/history/reset    - wipes all tiers (RAM + flash snapshots)
      GET  /api/scan             - [{ssid, bssid, ch, rssi, auth}] (one per BSSID)
      GET  /api/networks         - saved networks [{ssid, bssid?}] (bssid = pinned AP)
-     POST /api/networks/add     - {ssid, password, bssid?} (bssid pins the AP)
-     POST /api/networks/delete  - {ssid}
+     POST /api/networks         - add {ssid, password, bssid?} (bssid pins the AP)
+     DELETE /api/networks       - {ssid}
      GET  /api/locations        - {active, locations:[{name, lat, lon}]}
      POST /api/locations        - add {name, lat, lon} (coords resolved in-browser)
      DELETE /api/locations      - {index}
@@ -2276,14 +2276,14 @@
                             w.tmax.toFixed(1);
                         $("weatherHumVal").textContent = w.hum.toFixed(0);
                         $("weatherPressVal").textContent =
-                            w.press.toFixed(0);
+                            w.press.toFixed(1);
                         $("weatherPressMslVal").textContent =
-                            w.press_msl.toFixed(0);
-                        $("weatherUviVal").textContent = w.uvi.toFixed(1);
+                            w.press_msl.toFixed(1);
+                        $("weatherUviVal").textContent = w.uvi.toFixed(2);
                         $("weatherWindVal").textContent =
-                            w.wind.toFixed(0);
+                            w.wind.toFixed(1);
                         $("weatherGustVal").textContent =
-                            w.gust.toFixed(0);
+                            w.gust.toFixed(1);
                         $("weatherDirVal").textContent = windDir(
                             w.wind_dir,
                         );
@@ -2963,7 +2963,7 @@
                         password: $("mPass").value,
                     };
                     if ($("mPin").checked) payload.bssid = modalNet.bssid;
-                    const r = await fetch("/api/networks/add", {
+                    const r = await fetch("/api/networks", {
                         method: "POST",
                         body: JSON.stringify(payload),
                     });
@@ -3091,8 +3091,8 @@
             }
 
             async function delNet(ssid) {
-                await fetch("/api/networks/delete", {
-                    method: "POST",
+                await fetch("/api/networks", {
+                    method: "DELETE",
                     body: JSON.stringify({ ssid }),
                 });
                 toast(t("netRemoved") + ssid);

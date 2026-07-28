@@ -307,9 +307,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"gain\":\"%s\",\"it\":%u}},"
         "\"weather\":{\"ok\":%s,\"temp\":%.1f,\"feels\":%.1f,"
         "\"tmin\":%.1f,\"tmax\":%.1f,"
-        "\"hum\":%.0f,\"press\":%.0f,\"press_msl\":%.0f,"
-        "\"uvi\":%.1f,\"wind\":%.1f,\"gust\":%.1f,"
-        "\"wind_dir\":%d,\"precip\":%.1f,"
+        "\"hum\":%.0f,\"press\":%.1f,\"press_msl\":%.1f,"
+        "\"uvi\":%.2f,\"wind\":%.1f,\"gust\":%.1f,"
+        "\"wind_dir\":%d,\"precip\":%.2f,"
         "\"clouds\":%d,\"code\":%d,"
         "\"elev\":%.0f,\"utc_offset\":%d,\"age\":%d,"
         "\"name\":\"%s\",\"active\":%d,"
@@ -323,7 +323,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"heap_free\":%u,\"heap_min\":%u,\"heap_total\":%u,\"heap_largest\":%u,"
         "\"nvs_used\":%u,\"nvs_total\":%u},"
         "\"settings\":{\"led_brightness\":%u,"
-        "\"backlight_rgb\":\"%06X\",\"altitude\":%d}}",
+        "\"backlight_rgb\":\"%06X\",\"backlight_scale\":%u,"
+        "\"altitude\":%d}}",
         sta_json, ap_json,
         cl_temp, cl_rh, cl_co2, cl_press, cl_msl, cl_lux,
         sysinfo_chip_temp_c(),
@@ -357,6 +358,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         (unsigned)sys->nvs_used_entries, (unsigned)sys->nvs_total_entries,
         (unsigned)led_get_brightness(),
         (unsigned)screen_16x2_backlight_rgb(),
+        (unsigned)screen_16x2_backlight_scale(),
         climate_altitude_m());
 
     return jbuf_send(req, &j);
@@ -557,7 +559,7 @@ static esp_err_t network_add_post_handler(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
-static esp_err_t network_delete_post_handler(httpd_req_t *req)
+static esp_err_t network_delete_handler(httpd_req_t *req)
 {
     cJSON *root = read_json_body(req);
     if (!root) {
@@ -741,8 +743,8 @@ static const struct {
     { "/api/history/reset",    HTTP_POST,   history_reset_post_handler },
     { "/api/scan",             HTTP_GET,    scan_get_handler },
     { "/api/networks",         HTTP_GET,    networks_get_handler },
-    { "/api/networks/add",     HTTP_POST,   network_add_post_handler },
-    { "/api/networks/delete",  HTTP_POST,   network_delete_post_handler },
+    { "/api/networks",         HTTP_POST,   network_add_post_handler },
+    { "/api/networks",         HTTP_DELETE, network_delete_handler },
     { "/api/locations",        HTTP_GET,    locations_get_handler },
     { "/api/locations",        HTTP_POST,   location_add_post_handler },
     { "/api/locations",        HTTP_DELETE, location_delete_handler },

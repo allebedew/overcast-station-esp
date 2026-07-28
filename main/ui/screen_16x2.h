@@ -27,3 +27,8 @@ void screen_16x2_next_page(void);
 void screen_16x2_set_backlight(uint32_t rgb);
 
 uint32_t screen_16x2_backlight_rgb(void);
+
+/* What that color is currently scaled by, 0-255, following the illuminance —
+ * 255 is the stored color untouched, which is also what an absent VEML7700
+ * gives. Read-only: the curve has no settings. */
+uint8_t screen_16x2_backlight_scale(void);

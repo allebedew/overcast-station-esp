@@ -126,9 +126,9 @@ static bool parse(const char *json)
         taskEXIT_CRITICAL(&s_lock);
         ok = true;
         ESP_LOGI(TAG,
-                 "updated: %.1f C (feels %.1f, %.1f..%.1f), %.0f%%, %.0f/%.0f hPa, "
-                 "UVI %.1f, wind %.0f (gust %.0f) km/h @%d, clouds %d%%, "
-                 "precip %.1f mm, %s",
+                 "updated: %.1f C (feels %.1f, %.1f..%.1f), %.0f%%, %.1f/%.1f hPa, "
+                 "UVI %.2f, wind %.1f (gust %.1f) km/h @%d, clouds %d%%, "
+                 "precip %.2f mm, %s",
                  d.temp_c, d.feels_c, d.temp_min_c, d.temp_max_c, d.humidity_pct,
                  d.pressure_hpa, d.pressure_msl_hpa, d.uvi, d.wind_kmh, d.gust_kmh,
                  d.wind_dir_deg, d.cloud_pct, d.precip_mm,

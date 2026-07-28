@@ -202,14 +202,30 @@ the alerts are still the only consumer left tied to the SCD40 alone.
     today's min/max, UV index; humidity %, sea-level pressure hPa, wind as an
     8-point compass label + km/h, WMO code)
 
-  - system — `17:27:40 28.07` / `12% 184k -58dBm` (time in the active
-    location's timezone with the colons blinking once a second as the seconds
-    hand, day and month — the year does not fit alongside the seconds; below
-    them CPU load over the last second, free heap in KiB and the Wi-Fi signal,
-    `AP` while the station serves its own network, `--` with no link at all)
+  - system — `17:27:40 28.07` / `12% 184k BL184` (time in the active
+    location's timezone with the colons blinking on a two-second swing — one
+    second lit, one second blank — day and month — the year does not fit alongside the seconds; below
+    them CPU load over the last second, free heap in KiB and the backlight
+    scale the illuminance is currently producing, which has no other readout
+    on the device itself)
 
-  The backlight color is stored and applied as plain RGB (NVS `bl_rgb`,
-  default `00AAFF`); the device knows nothing about hue or color models.
+  The backlight color is stored as plain RGB (NVS `bl_rgb`, default `00AAFF`);
+  the device knows nothing about hue or color models. What reaches the panel is
+  that color scaled by the ambient light: the VEML7700 reading is mapped
+  logarithmically — like the perception of brightness and like the four decades
+  a room spans — from 1 lx or less, where the scale sits at its 16/255 floor
+  (dim, never dark: a black screen reads as a fault), up to 100 lx and above,
+  where the stored color goes out untouched. Because of the logarithm the top
+  of that range is nearly flat, so the exact ceiling matters far less than the
+  floor does. There is no setting: it is always on, and the one thing that
+  turns it off is a missing reading — no VEML7700, or none yet, means full
+  brightness. A channel that is lit stays lit at the bottom end (scaled to at
+  least 1), otherwise it would drop out of the mix and shift the hue. The web
+  page shows and edits the stored color, so at night it will read brighter than
+  the panel looks; the scale itself is on the display's system page and in
+  `settings.backlight_scale`. Recomputing costs a `log10f` — the C6 has no FPU
+  — so the result is cached against the reading it came from: sixty frames a
+  second ask, and the sensor answers once a second.
   Redrawn at 60 fps, paced by an `esp_timer` (the 10 ms FreeRTOS tick is too
   coarse for a 16.7 ms frame); that is the polling rate — the transport skips
   frames that would repaint identical characters, so the actual bus traffic
@@ -315,7 +331,9 @@ the alerts are still the only consumer left tied to the SCD40 alone.
   empties — no stale values are shown) and is retried in 5 min.
   Exposed as the `weather` object in
   `/api/status` (incl. `name` / `active`) and shown in a
-  dedicated "outside weather" card on the web page;
+  dedicated "outside weather" card on the web page — both at the resolution
+  Open-Meteo publishes: 0.1 for temperatures, pressures and wind, 0.01 for the
+  UV index and precipitation, so nothing is rounded away on the way out;
   `weather_api_code_str()` decodes the WMO code to English text for the panel
   and the log. The API carries the code, not the text, so the web UI decodes it
   itself (`wcode` in `index.html`, one table per language) — its English table
@@ -366,7 +384,7 @@ flat (`#include "screen_16x2.h"`, not `"ui/screen_16x2.h"`).
 | `sensors/bmp581.c` | BMP581/BMP580 transport: address auto-detection (`0x47`/`0x46`), chip-ID check, soft reset, DSP/IIR + OSR/ODR setup, 6-byte burst read |
 | `sensors/veml7700.c` | VEML7700 transport: little-endian command registers, the auto-ranging gain / integration-time table with its settle deadline, lux conversion with the >1000 lx correction |
 | `sysinfo.c` | how the station itself is doing, in two shapes: a snapshot of what cannot change until the next boot (firmware and IDF version, build stamp, chip revision, CPU clock, flash size, NVS fill) read once at start-up, and the live counters (uptime, CPU load, task count, four heap figures) sampled per call. Owns the SoC's own temperature sensor — not on the bus and measuring the die rather than the room, so it is reported with the health readings — the reset reason, and the start-up task-list dump. The CPU load is measured in one 1 s window shared by every caller, so the display and `/api/status` read the same figure and neither one's polling rate distorts the other's |
-| `ui/screen_16x2.c` | what the display shows: three pages advanced by the button (selection persisted), 60 fps frame timer, backlight as a stored RGB value. Sized for 16x2 — a bigger display gets its own layout module |
+| `ui/screen_16x2.c` | what the display shows: three pages advanced by the button (selection persisted), 60 fps frame timer, backlight as a stored RGB value dimmed to the ambient light. Sized for 16x2 — a bigger display gets its own layout module |
 | `ui/lcd1602_rgb.c` | transport for the DFR0464 panel: character output, backlight registers, revision detection, hot-plug recovery. Takes the bus and its lock from `i2c_bus.c` like the sensors do. The only file tied to this particular display |
 | `timesync.c` | SNTP client; `timesync_is_synced()` flag and `timesync_format()` for the clock shown in the UI (dashes of the same shape until the clock is set) |
 | `sensors/climate.c` | the room-level view over the devices: one source per quantity, no fallbacks, absent where there is no sensor. Composition of the snapshots from `sensors.c`, plus the reduction of the measured pressure to sea level; owns the site-altitude setting (cached from NVS — the reduction runs on every read). Its header also carries the firmware-wide reading resolutions |
@@ -383,13 +401,13 @@ flat (`#include "screen_16x2.h"`, not `"ui/screen_16x2.h"`).
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (index.html, gzipped) |
-| `/api/status` | GET | full status JSON, grouped into objects: `sta` / `ap` (Wi-Fi), `climate`, `sensors`, `weather` (Open-Meteo), `system` (firmware, chip, heap, uptime, clock, plus `nvs_used`/`nvs_total` as counted once at boot — the count only moves when a setting is written, and walking the NVS pages on every poll is not worth it), `settings` (`led_brightness`, `backlight_rgb`, `altitude`); nothing is left at the top level. `climate` is the room — `temp`, `rh`, `co2`, `press`, `press_msl` (the same reading reduced to sea level from the configured altitude), `lux`, each a number or `null` when no sensor stands behind it. `sensors` is the hardware view: one object per I2C device, each with its own `ok` — `scd40` (`co2`, `temp`, `rh`), `tmp117` (`temp`), `bmp581` (`press` hPa, `press_pa`, `temp`), `veml7700` (`lux`, `white`, `als_raw`, `white_raw`, `gain`, `it`) — plus `chip_temp` (the SoC sensor, not on the bus) at the top of the group |
+| `/api/status` | GET | full status JSON, grouped into objects: `sta` / `ap` (Wi-Fi), `climate`, `sensors`, `weather` (Open-Meteo), `system` (firmware, chip, heap, uptime, clock, plus `nvs_used`/`nvs_total` as counted once at boot — the count only moves when a setting is written, and walking the NVS pages on every poll is not worth it), `settings` (`led_brightness`, `backlight_rgb`, `backlight_scale` — read-only, what the ambient light is scaling that color by right now, 0-255 — and `altitude`); nothing is left at the top level. `climate` is the room — `temp`, `rh`, `co2`, `press`, `press_msl` (the same reading reduced to sea level from the configured altitude), `lux`, each a number or `null` when no sensor stands behind it. `sensors` is the hardware view: one object per I2C device, each with its own `ok` — `scd40` (`co2`, `temp`, `rh`), `tmp117` (`temp`), `bmp581` (`press` hPa, `press_pa`, `temp`), `veml7700` (`lux`, `white`, `als_raw`, `white_raw`, `gain`, `it`) — plus `chip_temp` (the SoC sensor, not on the bus) at the top of the group |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`) selects the ring; returns `{period: <s>, co2: [...], temp: [...], rh: [...], press: [...], lux: [...]}`. Each series is gated on its own quantity, so `null` is a gap in that series alone |
 | `/api/history/reset` | POST | wipe all history tiers (RAM rings and the `/data/hist_1h.bin` / `/data/history.bin` flash snapshots); sampling keeps running and refills from empty |
 | `/api/scan` | GET | scan for Wi-Fi networks, returns `[{ssid, bssid, ch, rssi, auth}]` (one entry per BSSID — same SSID may repeat across APs) |
 | `/api/networks` | GET | list of saved networks `[{ssid, bssid?}]` (bssid present only when the network is pinned to an AP) |
-| `/api/networks/add` | POST | save a network; body `{"ssid": "...", "password": "...", "bssid": "aa:bb:.."}` (bssid optional — pins the connection to that AP; omit/all-zero = connect to strongest), updates existing SSID |
-| `/api/networks/delete` | POST | remove a saved network; body `{"ssid": "..."}` |
+| `/api/networks` | POST | save a network; body `{"ssid": "...", "password": "...", "bssid": "aa:bb:.."}` (bssid optional — pins the connection to that AP; omit/all-zero = connect to strongest), updates existing SSID |
+| `/api/networks` | DELETE | remove a saved network; body `{"ssid": "..."}` |
 | `/api/locations` | GET | saved weather locations `{"active": <idx>, "locations": [{"name", "lat", "lon"}]}` |
 | `/api/locations` | POST | add a location; body `{"name": "...", "lat": <n>, "lon": <n>}` (coordinates resolved in-browser via Open-Meteo geocoding), updates an existing name |
 | `/api/locations` | DELETE | remove a location; body `{"index": <n>}` |
