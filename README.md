@@ -72,6 +72,14 @@ the alerts are still the only consumer left tied to the SCD40 alone.
   dims when the device is unreachable. Bilingual (RU/EN): all strings live in
   an in-page dictionary, the header has a language switch, the choice persists
   in localStorage and defaults to the browser language.
+  Every reading is a fixed slot: the sensor cards, the weather tiles and the
+  rows of the system card are generated once from the tables at the top of the
+  script (`SERIES`, `WEATHER_TILES`, `SENSOR_DEVS`) and only their text changes
+  afterwards, so a missing value renders as `--` in place and the layout is the
+  same with data and without it. Adding a metric is a table entry, not markup.
+  Fetching and rendering sit in separate `try` blocks, so a failed request is
+  the only thing that means "no link" — a rendering bug goes to the console
+  instead of turning the connection pill red.
 - **OTA** — push model: `./flash-ota.sh [host]` builds and uploads the binary
   to `POST /api/ota` (auth via `X-OTA-Key` header, key defined in `ota.c`).
   Two 4 MB app partitions + otadata; rollback is enabled — a new image must
@@ -170,11 +178,14 @@ the alerts are still the only consumer left tied to the SCD40 alone.
     integration periods before trusting the data register: reading it earlier
     returns the leftovers of the previous settings, which looked like darkness
     and used to send the auto-ranging climbing for no reason. Both the
-    lux-matched (ALS) and the unfiltered white channel are reported, in lux and
-    raw counts, together with the gain and integration time in effect. Above
-    1000 lx the Vishay fourth-order linearity correction is applied — to the
-    ALS channel it is calibrated for; the white channel's lux figure shares the
-    same scaling and is an estimate, its raw counts being the honest number.
+    lux-matched (ALS) and the unfiltered white channel are read, together with
+    the gain and integration time in effect. Above 1000 lx the Vishay
+    fourth-order linearity correction is applied — to the ALS channel it is
+    calibrated for; the white channel's lux figure shares the same scaling and
+    is an estimate, its raw counts being the honest number. The API reports
+    `lux` plus the white/lux ratio (a light-source signature — how far the
+    spectrum departs from the ALS channel's calibration) rather than the
+    white channel's lux estimate itself, alongside both raw counts.
 - **16x2 LCD** (DFRobot Gravity I2C LCD1602 RGB, DFR0464) — shares the sensor
   I2C bus (GPIO2/GPIO3) and its lock; LCD controller at `0x3E`, RGB backlight driver at
   whichever of `0x60` / `0x30` / `0x6B` / `0x2D` the board revision uses (all
@@ -401,7 +412,7 @@ flat (`#include "screen_16x2.h"`, not `"ui/screen_16x2.h"`).
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (index.html, gzipped) |
-| `/api/status` | GET | full status JSON, grouped into objects: `sta` / `ap` (Wi-Fi), `climate`, `sensors`, `weather` (Open-Meteo), `system` (firmware, chip, heap, uptime, clock, plus `nvs_used`/`nvs_total` as counted once at boot — the count only moves when a setting is written, and walking the NVS pages on every poll is not worth it), `settings` (`led_brightness`, `backlight_rgb`, `backlight_scale` — read-only, what the ambient light is scaling that color by right now, 0-255 — and `altitude`); nothing is left at the top level. `climate` is the room — `temp`, `rh`, `co2`, `press`, `press_msl` (the same reading reduced to sea level from the configured altitude), `lux`, each a number or `null` when no sensor stands behind it. `sensors` is the hardware view: one object per I2C device, each with its own `ok` — `scd40` (`co2`, `temp`, `rh`), `tmp117` (`temp`), `bmp581` (`press` hPa, `press_pa`, `temp`), `veml7700` (`lux`, `white`, `als_raw`, `white_raw`, `gain`, `it`) — plus `chip_temp` (the SoC sensor, not on the bus) at the top of the group |
+| `/api/status` | GET | full status JSON, grouped into objects: `sta` / `ap` (Wi-Fi), `climate`, `sensors`, `weather` (Open-Meteo), `system` (firmware, chip, heap, uptime, clock, plus `nvs_used`/`nvs_total` as counted once at boot — the count only moves when a setting is written, and walking the NVS pages on every poll is not worth it), `settings` (`led_brightness`, `backlight_rgb`, `backlight_scale` — read-only, what the ambient light is scaling that color by right now, 0-255 — and `altitude`); nothing is left at the top level. `climate` is the room — `temp`, `rh`, `co2`, `press`, `press_msl` (the same reading reduced to sea level from the configured altitude), `lux`, each a number or `null` when no sensor stands behind it. `sensors` is the hardware view: one object per I2C device, each with its own `ok` — `scd40` (`co2`, `temp`, `rh`), `tmp117` (`temp`), `bmp581` (`press` hPa, `press_pa`, `temp`), `veml7700` (`lux`, `white_ratio`, `als_raw`, `white_raw`, `gain`, `it`) — plus `chip_temp` (the SoC sensor, not on the bus) at the top of the group |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`) selects the ring; returns `{period: <s>, co2: [...], temp: [...], rh: [...], press: [...], lux: [...]}`. Each series is gated on its own quantity, so `null` is a gap in that series alone |
 | `/api/history/reset` | POST | wipe all history tiers (RAM rings and the `/data/hist_1h.bin` / `/data/history.bin` flash snapshots); sampling keeps running and refills from empty |
 | `/api/scan` | GET | scan for Wi-Fi networks, returns `[{ssid, bssid, ch, rssi, auth}]` (one entry per BSSID — same SSID may repeat across APs) |

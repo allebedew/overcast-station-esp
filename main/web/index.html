@@ -72,16 +72,6 @@
                 box-sizing: border-box;
                 flex: none;
             }
-            .logo {
-                width: 34px;
-                height: 34px;
-                border-radius: 9px;
-                flex: none;
-                background: linear-gradient(135deg, #2563eb, #4da3ff);
-                display: grid;
-                place-items: center;
-                font-size: 17px;
-            }
             header h1 {
                 font-size: 16px;
                 font-weight: 600;
@@ -188,9 +178,6 @@
                 align-items: center;
                 gap: 7px;
                 margin-bottom: 10px;
-            }
-            .card h2 .ic {
-                font-size: 13px;
             }
 
             /* --- Sensor card --- */
@@ -969,6 +956,17 @@
                 transform: translateX(-50%) translateY(0);
             }
 
+            /* Keyboard focus, for the list rows that are divs acting as
+               buttons as much as for the real ones */
+            [role="button"]:focus-visible,
+            .btn:focus-visible,
+            .seg button:focus-visible,
+            .icon-btn:focus-visible,
+            input:focus-visible {
+                outline: 2px solid var(--accent);
+                outline-offset: 2px;
+            }
+
             /* --- Chart tooltip --- */
             #tip {
                 position: fixed;
@@ -999,7 +997,6 @@
         <div class="wrap">
             <!-- HEADER -->
             <header>
-                <div class="logo">🌡</div>
                 <h1 data-i18n="appName">Метеостанция</h1>
                 <div class="spacer"></div>
                 <div class="seg" id="periodSeg">
@@ -1041,124 +1038,13 @@
                 </div>
             </header>
 
-            <!-- SENSORS -->
-            <div class="grid-sensors">
-                <div class="card sensor">
-                    <h2>
-                        <span class="ic">🌡</span>
-                        <span data-i18n="temperature">Температура</span>
-                        <span class="trend flat" id="tTrend">—</span>
-                    </h2>
-                    <div class="reading">
-                        <span class="value" id="tVal">--</span
-                        ><span class="unit">°C</span>
-                        <div class="minmax">
-                            <span
-                                ><span data-i18n="max">макс</span>
-                                <b id="tMax">--</b></span
-                            ><span
-                                ><span data-i18n="min">мин</span>
-                                <b id="tMin">--</b></span
-                            >
-                        </div>
-                    </div>
-                    <canvas id="tChart"></canvas>
-                </div>
-                <div class="card sensor">
-                    <h2>
-                        <span class="ic">💧</span>
-                        <span data-i18n="humidity">Влажность</span>
-                        <span class="trend flat" id="hTrend">—</span>
-                    </h2>
-                    <div class="reading">
-                        <span class="value" id="hVal">--</span
-                        ><span class="unit">%</span>
-                        <div class="minmax">
-                            <span
-                                ><span data-i18n="max">макс</span>
-                                <b id="hMax">--</b></span
-                            ><span
-                                ><span data-i18n="min">мин</span>
-                                <b id="hMin">--</b></span
-                            >
-                        </div>
-                    </div>
-                    <canvas id="hChart"></canvas>
-                </div>
-                <div class="card sensor">
-                    <h2>
-                        <span class="ic">☁️</span> CO₂
-                        <span class="badge off" id="cBadge" data-i18n="noData"
-                            >Нет данных</span
-                        >
-                    </h2>
-                    <div class="reading">
-                        <span class="value" id="cVal">--</span
-                        ><span class="unit">ppm</span>
-                        <div class="minmax">
-                            <span
-                                ><span data-i18n="max">макс</span>
-                                <b id="cMax">--</b></span
-                            ><span
-                                ><span data-i18n="min">мин</span>
-                                <b id="cMin">--</b></span
-                            >
-                        </div>
-                    </div>
-                    <canvas id="cChart"></canvas>
-                </div>
-                <div class="card sensor">
-                    <h2>
-                        <span class="ic">🌀</span>
-                        <span data-i18n="sensPress">Давление</span>
-                        <span class="trend flat" id="pTrend">—</span>
-                    </h2>
-                    <div class="reading">
-                        <span class="value" id="pVal">--</span
-                        ><span class="unit">hPa</span>
-                        <div class="minmax">
-                            <span
-                                ><span data-i18n="max">макс</span>
-                                <b id="pMax">--</b></span
-                            ><span
-                                ><span data-i18n="min">мин</span>
-                                <b id="pMin">--</b></span
-                            >
-                        </div>
-                    </div>
-                    <div class="subval">
-                        <span data-i18n="atSeaLevel">на уровне моря</span>
-                        <b id="pMslVal">--</b> hPa
-                    </div>
-                    <canvas id="pChart"></canvas>
-                </div>
-                <div class="card sensor">
-                    <h2>
-                        <span class="ic">☀️</span>
-                        <span data-i18n="sensLux">Освещённость</span>
-                        <span class="trend flat" id="lTrend">—</span>
-                    </h2>
-                    <div class="reading">
-                        <span class="value" id="lVal">--</span
-                        ><span class="unit">lx</span>
-                        <div class="minmax">
-                            <span
-                                ><span data-i18n="max">макс</span>
-                                <b id="lMax">--</b></span
-                            ><span
-                                ><span data-i18n="min">мин</span>
-                                <b id="lMin">--</b></span
-                            >
-                        </div>
-                    </div>
-                    <canvas id="lChart"></canvas>
-                </div>
-            </div>
+            <!-- SENSORS — one card per series, built from SERIES at startup;
+                 every card is always present, with "--" where no reading is -->
+            <div class="grid-sensors" id="sensorCards"></div>
 
             <!-- I2C SENSORS (raw readings, one nested card per device) -->
             <div class="card sensors">
                 <h2>
-                    <span class="ic">🔬</span>
                     <span data-i18n="sensorsTitle">Датчики</span>
                 </h2>
                 <div class="sens-grid" id="sensorsGrid">
@@ -1169,112 +1055,14 @@
             <!-- OUTSIDE WEATHER (Open-Meteo, hourly) -->
             <div class="card weather">
                 <h2>
-                    <span class="ic">🌤</span>
                     <span data-i18n="weatherTitle">Погода на улице</span>
                     <span class="weather-age" id="weatherAge"></span>
                 </h2>
                 <div class="loc-bar" id="locBar"></div>
                 <div class="weather-cond" id="weatherCond"></div>
-                <div class="weather-grid">
-                    <div class="weather-metric">
-                        <div>
-                            <span class="ov" id="weatherTempVal">--</span
-                            ><span class="ou">°C</span>
-                        </div>
-                        <span class="ol" data-i18n="weatherTemp">Температура</span>
-                    </div>
-                    <div class="weather-metric">
-                        <div>
-                            <span class="ov" id="weatherFeelsVal">--</span
-                            ><span class="ou">°C</span>
-                        </div>
-                        <span class="ol" data-i18n="weatherFeels"
-                            >По ощущениям</span
-                        >
-                    </div>
-                    <div class="weather-metric">
-                        <div>
-                            <span class="ov" id="weatherTminVal">--</span
-                            ><span class="ou">°C</span>
-                        </div>
-                        <span class="ol" data-i18n="weatherTmin"
-                            >Мин. за день</span
-                        >
-                    </div>
-                    <div class="weather-metric">
-                        <div>
-                            <span class="ov" id="weatherTmaxVal">--</span
-                            ><span class="ou">°C</span>
-                        </div>
-                        <span class="ol" data-i18n="weatherTmax"
-                            >Макс. за день</span
-                        >
-                    </div>
-                    <div class="weather-metric">
-                        <div>
-                            <span class="ov" id="weatherHumVal">--</span
-                            ><span class="ou">%</span>
-                        </div>
-                        <span class="ol" data-i18n="weatherHum">Влажность</span>
-                    </div>
-                    <div class="weather-metric">
-                        <div>
-                            <span class="ov" id="weatherPressVal">--</span
-                            ><span class="ou">hPa</span>
-                        </div>
-                        <span class="ol" data-i18n="weatherPress">Давление</span>
-                    </div>
-                    <div class="weather-metric">
-                        <div>
-                            <span class="ov" id="weatherPressMslVal">--</span
-                            ><span class="ou">hPa</span>
-                        </div>
-                        <span class="ol" data-i18n="weatherMsl"
-                            >На ур. моря</span
-                        >
-                    </div>
-                    <div class="weather-metric">
-                        <div><span class="ov" id="weatherUviVal">--</span></div>
-                        <span class="ol" data-i18n="weatherUvi">УФ-индекс</span>
-                    </div>
-                    <div class="weather-metric">
-                        <div>
-                            <span class="ov" id="weatherWindVal">--</span
-                            ><span class="ou" data-i18n="uKmh">км/ч</span>
-                        </div>
-                        <span class="ol" data-i18n="weatherWind">Ветер</span>
-                    </div>
-                    <div class="weather-metric">
-                        <div>
-                            <span class="ov" id="weatherGustVal">--</span
-                            ><span class="ou" data-i18n="uKmh">км/ч</span>
-                        </div>
-                        <span class="ol" data-i18n="weatherGust">Порывы</span>
-                    </div>
-                    <div class="weather-metric">
-                        <div>
-                            <span class="ov" id="weatherDirVal">--</span
-                            ><span class="ou" id="weatherDirDeg"></span>
-                        </div>
-                        <span class="ol" data-i18n="weatherDir"
-                            >Направление</span
-                        >
-                    </div>
-                    <div class="weather-metric">
-                        <div>
-                            <span class="ov" id="weatherCloudsVal">--</span
-                            ><span class="ou">%</span>
-                        </div>
-                        <span class="ol" data-i18n="weatherClouds">Облачность</span>
-                    </div>
-                    <div class="weather-metric">
-                        <div>
-                            <span class="ov" id="weatherPrecipVal">--</span
-                            ><span class="ou" data-i18n="uMm">мм</span>
-                        </div>
-                        <span class="ol" data-i18n="weatherPrecip">Осадки</span>
-                    </div>
-                </div>
+                <!-- built from WEATHER_TILES at startup; the full set of tiles
+                     is always laid out, data or not -->
+                <div class="weather-grid" id="weatherGrid"></div>
                 <div class="weather-meta" id="weatherMeta"></div>
             </div>
 
@@ -1283,7 +1071,6 @@
                 <!-- SYSTEM -->
                 <div class="card">
                     <h2>
-                        <span class="ic">⚙️</span>
                         <span data-i18n="system">Система</span>
                     </h2>
                     <table class="kv">
@@ -1299,7 +1086,6 @@
                 <!-- SETTINGS -->
                 <div class="card">
                     <h2>
-                        <span class="ic">🎛</span>
                         <span data-i18n="settings">Настройки</span>
                     </h2>
 
@@ -1398,7 +1184,6 @@
                 <!-- WIFI -->
                 <div class="card">
                     <h2>
-                        <span class="ic">📶</span>
                         <span data-i18n="wifiNetworks">Wi-Fi сети</span>
                     </h2>
                     <button
@@ -1439,7 +1224,7 @@
                     autocapitalize="off"
                     autocorrect="off"
                     spellcheck="false"
-                    maxlength="64"
+                    maxlength="63"
                 />
                 <label class="m-check">
                     <input type="checkbox" id="mPin" checked />
@@ -1510,15 +1295,33 @@
      DELETE /api/locations      - {index}
      PUT  /api/locations/active - {index} (switch the displayed location)
      POST /api/connect          - restart the STA connection cycle
-     POST /api/settings         - {led_brightness, backlight_rgb: "RRGGBB", altitude}
+     POST /api/settings         - {led_brightness, backlight_rgb: "RRGGBB",
+                                  backlight_scale, altitude} (any subset)
      POST /api/scd40/calibrate  - {ppm}
+
+   Every reading on the page is a fixed slot: the markup for a card, a tile
+   or a chart is built once and only its text is updated afterwards, so a
+   missing value shows as NA in place and never changes the layout.
    ===================================================================== */
 
             const $ = (id) => document.getElementById(id);
+
+            /* Theme colors are read once instead of on every frame: draw() is
+             * called per chart on every pointermove, and getComputedStyle()
+             * forces a style recalculation each time. */
+            const CSSV = {};
             const css = (v) =>
-                getComputedStyle(document.documentElement)
+                CSSV[v] ??
+                (CSSV[v] = getComputedStyle(document.documentElement)
                     .getPropertyValue(v)
-                    .trim();
+                    .trim());
+
+            /* The one placeholder for "no reading", identical to what the
+             * generated markup starts out with. */
+            const NA = "--";
+            const num = (v, f) =>
+                typeof v === "number" && Number.isFinite(v) ? f(v) : NA;
+            const txt = (v) => (v === undefined || v === null || v === "" ? NA : String(v));
 
             /* ---------- i18n ---------- */
             const I18N = {
@@ -1535,12 +1338,9 @@
                     max: "макс",
                     noData: "Нет данных",
                     weatherTitle: "Погода на улице",
-                    weatherTemp: "Температура",
                     weatherFeels: "По ощущениям",
                     weatherTmin: "Мин. за день",
                     weatherTmax: "Макс. за день",
-                    weatherHum: "Влажность",
-                    weatherPress: "Давление",
                     weatherMsl: "На ур. моря",
                     weatherUvi: "УФ-индекс",
                     weatherWind: "Ветер",
@@ -1567,7 +1367,7 @@
                     atSeaLevel: "на уровне моря",
                     altitude: "Высота над уровнем моря",
                     altSaved: "Высота сохранена",
-                    sensWhite: "Белый канал",
+                    sensWhiteRatio: "Соотношение white/lux",
                     sensAlsRaw: "ALS",
                     sensWhiteRaw: "White",
                     sensGain: "Усиление",
@@ -1646,7 +1446,9 @@
                     wifiSta: "Wi-Fi (станция)",
                     device: "Устройство",
                     state: "Состояние",
+                    staOn: "Подключено",
                     notConn: "Не подключено",
+                    apOn: "Включена",
                     apOff: "Выключена",
                     wifiNet: "Сеть Wi-Fi",
                     signal: "Сигнал",
@@ -1717,12 +1519,9 @@
                     max: "max",
                     noData: "No data",
                     weatherTitle: "Outside weather",
-                    weatherTemp: "Temperature",
                     weatherFeels: "Feels like",
                     weatherTmin: "Daily min",
                     weatherTmax: "Daily max",
-                    weatherHum: "Humidity",
-                    weatherPress: "Pressure",
                     weatherMsl: "Sea level",
                     weatherUvi: "UV index",
                     weatherWind: "Wind",
@@ -1749,7 +1548,7 @@
                     atSeaLevel: "at sea level",
                     altitude: "Altitude above sea level",
                     altSaved: "Altitude saved",
-                    sensWhite: "White channel",
+                    sensWhiteRatio: "White/lux ratio",
                     sensAlsRaw: "ALS",
                     sensWhiteRaw: "White",
                     sensGain: "Gain",
@@ -1831,7 +1630,9 @@
                     wifiSta: "Wi-Fi (station)",
                     device: "Device",
                     state: "State",
+                    staOn: "Connected",
                     notConn: "Not connected",
+                    apOn: "On",
                     apOff: "Off",
                     wifiNet: "Wi-Fi network",
                     signal: "Signal",
@@ -1927,7 +1728,11 @@
                 applyLang();
                 loadNets(); /* re-render list hints and delete tooltips */
                 renderLocBar(); /* refresh chip tooltips for the new language */
-                renderSensors((lastStatus && lastStatus.sensors) || {});
+                /* Anything whose text comes from the poll rather than from a
+                 * data-i18n attribute — the CO2 badge, the weather conditions,
+                 * the system table — is re-rendered from the last reply, so
+                 * nothing keeps the previous language until the next second. */
+                if (lastStatus) renderStatus(lastStatus);
             });
 
             /* ---------- collapsible system panels (hidden by default) ---------- */
@@ -1955,6 +1760,21 @@
                             "'": "&#39;",
                         })[c],
                 );
+            }
+
+            /* The lists are built from divs, so the button semantics a mouse
+             * gets for free have to be spelled out for the keyboard. */
+            function clickable(el, fn) {
+                el.tabIndex = 0;
+                el.setAttribute("role", "button");
+                el.style.cursor = "pointer";
+                el.addEventListener("click", fn);
+                el.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        fn(e);
+                    }
+                });
             }
 
             function fmtUptime(s) {
@@ -2066,10 +1886,9 @@
                             f: (v) => v.toFixed(1),
                         },
                         {
-                            k: "white",
-                            l: "sensWhite",
-                            ui: "uLux",
-                            f: (v) => v.toFixed(1),
+                            k: "white_ratio",
+                            l: "sensWhiteRatio",
+                            f: (v) => v.toFixed(2),
                         },
                         {
                             k: "als_raw",
@@ -2100,12 +1919,14 @@
                 },
             ];
 
+            /* Rows go in as plain values and are escaped here, once, so no
+             * caller has to remember which of them the device controls. */
             function kvRows(rows) {
                 return rows
                     .map((r) =>
                         r.h !== undefined
-                            ? `<tr class="kv-h"><td colspan="2">${r.h}</td></tr>`
-                            : `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`,
+                            ? `<tr class="kv-h"><td colspan="2">${esc(r.h)}</td></tr>`
+                            : `<tr><td>${esc(r[0])}</td><td>${esc(txt(r[1]))}</td></tr>`,
                     )
                     .join("");
             }
@@ -2117,10 +1938,17 @@
                 $("sensorsGrid").innerHTML = SENSOR_DEVS.map((dev) => {
                     const d = sn[dev.key] || {};
                     const ok = !!d.ok;
-                    const val = (m) =>
-                        ok && d[m.k] !== undefined && d[m.k] !== null
-                            ? esc(m.f(d[m.k]))
-                            : "--";
+                    /* `gain` arrives as a string ("1/8"), the rest as numbers,
+                     * so this checks for a usable value rather than for a
+                     * finite number. */
+                    const val = (m) => {
+                        const v = d[m.k];
+                        const bad =
+                            v === undefined ||
+                            v === null ||
+                            (typeof v === "number" && !Number.isFinite(v));
+                        return ok && !bad ? esc(m.f(v)) : NA;
+                    };
                     const unit = (m) => esc(m.ui ? t(m.ui) : m.u || "");
 
                     const tiles = dev.metrics
@@ -2158,14 +1986,103 @@
                 }).join("");
             }
 
+            /* ---------- outside weather card ----------
+             * One tile per parameter, in the order they are listed. The grid
+             * is built once at startup and every tile stays in place for the
+             * life of the page: an absent reading only changes the text to
+             * NA, never the set of tiles. `u` is a literal unit, `ui` an i18n
+             * key, `uf` derives the unit from the value itself. */
+            const WEATHER_TILES = [
+                { k: "temp", l: "temperature", u: "°C", f: (v) => v.toFixed(1) },
+                { k: "feels", l: "weatherFeels", u: "°C", f: (v) => v.toFixed(1) },
+                { k: "tmin", l: "weatherTmin", u: "°C", f: (v) => v.toFixed(1) },
+                { k: "tmax", l: "weatherTmax", u: "°C", f: (v) => v.toFixed(1) },
+                { k: "hum", l: "humidity", u: "%", f: (v) => v.toFixed(0) },
+                { k: "press", l: "sensPress", u: "hPa", f: (v) => v.toFixed(1) },
+                {
+                    k: "press_msl",
+                    l: "weatherMsl",
+                    u: "hPa",
+                    f: (v) => v.toFixed(1),
+                },
+                { k: "uvi", l: "weatherUvi", f: (v) => v.toFixed(2) },
+                { k: "wind", l: "weatherWind", ui: "uKmh", f: (v) => v.toFixed(1) },
+                { k: "gust", l: "weatherGust", ui: "uKmh", f: (v) => v.toFixed(1) },
+                {
+                    k: "wind_dir",
+                    l: "weatherDir",
+                    f: windDir,
+                    uf: (v) => v + "°",
+                },
+                { k: "clouds", l: "weatherClouds", u: "%", f: (v) => v.toFixed(0) },
+                {
+                    k: "precip",
+                    l: "weatherPrecip",
+                    ui: "uMm",
+                    f: (v) => v.toFixed(1),
+                },
+            ];
+
+            function buildWeatherGrid() {
+                $("weatherGrid").innerHTML = WEATHER_TILES.map((m) => {
+                    const unit = m.uf
+                        ? `<span class="ou" id="wxu_${m.k}"></span>`
+                        : m.ui
+                          ? `<span class="ou" data-i18n="${m.ui}"></span>`
+                          : m.u
+                            ? `<span class="ou">${m.u}</span>`
+                            : "";
+                    return (
+                        '<div class="weather-metric"><div>' +
+                        `<span class="ov" id="wx_${m.k}">${NA}</span>${unit}` +
+                        `</div><span class="ol" data-i18n="${m.l}"></span></div>`
+                    );
+                }).join("");
+            }
+
+            function renderWeather(w) {
+                const ok = !!w.ok;
+                const live = (v) =>
+                    ok && typeof v === "number" && Number.isFinite(v) ? v : null;
+                WEATHER_TILES.forEach((m) => {
+                    const v = live(w[m.k]);
+                    $("wx_" + m.k).textContent = num(v, m.f);
+                    if (m.uf)
+                        $("wxu_" + m.k).textContent = v === null ? "" : m.uf(v);
+                });
+
+                const code = live(w.code);
+                const wtext = code === null ? "" : t("wcode")[code] || "";
+                $("weatherCond").textContent =
+                    (code !== null && code >= 0
+                        ? wtext
+                            ? `${wtext} (${code})`
+                            : String(code)
+                        : wtext) || "—";
+
+                $("weatherMeta").textContent = ok
+                    ? `${t("weatherAlt")} ${num(live(w.elev), Math.round)} ` +
+                      `${t("uMeters")} · lat ${num(live(w.lat), (v) => v.toFixed(2))}` +
+                      `, lon ${num(live(w.lon), (v) => v.toFixed(2))}` +
+                      ` · ${num(live(w.utc_offset), fmtUtc)}`
+                    : "—";
+
+                const age = live(w.age);
+                $("weatherAge").textContent = !ok
+                    ? t("weatherWait")
+                    : age !== null && age >= 0
+                      ? t("weatherAgo").replace("{n}", fmtAgo(age))
+                      : "";
+            }
+
             /* ---------- toast ---------- */
             let toastTimer;
             function toast(msg) {
-                const t = $("toast");
-                t.textContent = msg;
-                t.classList.add("show");
+                const el = $("toast"); /* not `t` — that is the translator */
+                el.textContent = msg;
+                el.classList.add("show");
                 clearTimeout(toastTimer);
-                toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+                toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
             }
 
             /* ---------- CO2 level ---------- */
@@ -2217,219 +2134,157 @@
                 }
             }
 
+            /* Fetching and rendering are kept apart on purpose: only a failed
+             * request means "no link". A bug in the rendering below used to
+             * land in the same catch and put the page offline with nothing in
+             * the console to say why. */
             async function refresh() {
                 if (polling) return; /* don't stack requests while one is stuck */
                 polling = true;
                 const ctrl = new AbortController();
                 const to = setTimeout(() => ctrl.abort(), POLL_TIMEOUT_MS);
+                let s = null;
                 try {
                     const r = await fetch("/api/status", {
                         signal: ctrl.signal,
                         cache: "no-store",
                     });
                     if (!r.ok) throw new Error(r.status);
-                    const s = await r.json();
-                    lastStatus = s;
-                    lastOk = Date.now();
-                    setStale(false);
-                    const sn = s.sensors || {};
-                    const w = s.weather || {};
-                    const sy = s.system || {};
-                    const st = s.settings || {};
-
-                    /* Main cards read the climate object, not the individual
-                     * devices: one source per quantity, the same one the
-                     * history is recorded from, so a card and the chart under
-                     * it can never disagree. */
-                    const cl = s.climate || {};
-                    $("tVal").textContent =
-                        cl.temp != null ? cl.temp.toFixed(2) : "--";
-                    $("hVal").textContent =
-                        cl.rh != null ? cl.rh.toFixed(1) : "--";
-                    $("cVal").textContent = cl.co2 != null ? cl.co2 : "--";
-                    $("pVal").textContent =
-                        cl.press != null ? cl.press.toFixed(3) : "--";
-                    $("pMslVal").textContent =
-                        cl.press_msl != null ? cl.press_msl.toFixed(3) : "--";
-                    $("lVal").textContent =
-                        cl.lux != null ? fmtLux(cl.lux) : "--";
-                    const b = $("cBadge");
-                    if (cl.co2 != null) {
-                        const l = co2Level(cl.co2);
-                        b.className = "badge " + l.cls;
-                        b.textContent = l.text;
-                    } else {
-                        b.className = "badge off";
-                        b.textContent = t("noData");
-                    }
-
-                    /* outside weather card (Open-Meteo, refreshed hourly);
-                     * one tile per parameter */
-                    if (w.ok) {
-                        $("weatherTempVal").textContent =
-                            w.temp.toFixed(1);
-                        $("weatherFeelsVal").textContent =
-                            w.feels.toFixed(1);
-                        $("weatherTminVal").textContent =
-                            w.tmin.toFixed(1);
-                        $("weatherTmaxVal").textContent =
-                            w.tmax.toFixed(1);
-                        $("weatherHumVal").textContent = w.hum.toFixed(0);
-                        $("weatherPressVal").textContent =
-                            w.press.toFixed(1);
-                        $("weatherPressMslVal").textContent =
-                            w.press_msl.toFixed(1);
-                        $("weatherUviVal").textContent = w.uvi.toFixed(2);
-                        $("weatherWindVal").textContent =
-                            w.wind.toFixed(1);
-                        $("weatherGustVal").textContent =
-                            w.gust.toFixed(1);
-                        $("weatherDirVal").textContent = windDir(
-                            w.wind_dir,
-                        );
-                        $("weatherDirDeg").textContent =
-                            w.wind_dir + "°";
-                        $("weatherCloudsVal").textContent =
-                            w.clouds.toFixed(0);
-                        $("weatherPrecipVal").textContent =
-                            w.precip.toFixed(1);
-                        const wc = w.code;
-                        const wtext = t("wcode")[wc] || "";
-                        $("weatherCond").textContent =
-                            wc >= 0
-                                ? wtext
-                                    ? `${wtext} (${wc})`
-                                    : String(wc)
-                                : wtext;
-                        $("weatherMeta").textContent =
-                            t("weatherAlt") +
-                            " " +
-                            Math.round(w.elev) +
-                            " " +
-                            t("uMeters") +
-                            " · lat " +
-                            w.lat.toFixed(2) +
-                            ", lon " +
-                            w.lon.toFixed(2) +
-                            " · " +
-                            fmtUtc(w.utc_offset);
-                        $("weatherAge").textContent =
-                            w.age >= 0
-                                ? t("weatherAgo").replace(
-                                      "{n}",
-                                      fmtAgo(w.age),
-                                  )
-                                : "";
-                    } else {
-                        [
-                            "weatherTempVal",
-                            "weatherFeelsVal",
-                            "weatherTminVal",
-                            "weatherTmaxVal",
-                            "weatherHumVal",
-                            "weatherPressVal",
-                            "weatherPressMslVal",
-                            "weatherUviVal",
-                            "weatherWindVal",
-                            "weatherGustVal",
-                            "weatherDirVal",
-                            "weatherCloudsVal",
-                            "weatherPrecipVal",
-                        ].forEach((id) => ($(id).textContent = "--"));
-                        $("weatherDirDeg").textContent = "";
-                        /* dash placeholders keep both lines occupied until data arrives */
-                        $("weatherCond").textContent = "—";
-                        $("weatherMeta").textContent = "—";
-                        $("weatherAge").textContent = t("weatherWait");
-                    }
-
-                    renderSensors(sn);
-
-                    /* system card: Wi-Fi station and access point shown as
-                     * separate sections (in APSTA both can be up at once) */
-                    const sta = s.sta || {};
-                    const ap = s.ap || {};
-                    const rows = [{ h: t("wifiSta") }];
-                    if (sta.connected) {
-                        rows.push(
-                            [t("wifiNet"), esc(sta.ssid)],
-                            [t("signal"), `${sta.rssi} dBm (ch ${sta.channel})`],
-                            [t("phy"), sta.phy],
-                            [t("ipAddr"), sta.ip],
-                            ["MAC", sta.mac],
-                        );
-                    } else {
-                        rows.push([t("state"), t("notConn")]);
-                    }
-                    rows.push({ h: t("apMode") });
-                    if (ap.active) {
-                        rows.push(
-                            [t("network"), esc(ap.ssid)],
-                            [t("ipAddr"), ap.ip],
-                            [t("channel"), ap.channel],
-                            ["MAC", ap.mac],
-                            [t("clients"), ap.clients.length],
-                        );
-                        ap.clients.forEach((c, i) =>
-                            rows.push([
-                                `${t("client")} ${i + 1}`,
-                                `${c.mac} · ${c.rssi} dBm`,
-                            ]),
-                        );
-                    } else {
-                        rows.push([t("state"), t("apOff")]);
-                    }
-                    rows.push({ h: t("device") });
-                    const heapPct = (
-                        (100 * sy.heap_free) /
-                        sy.heap_total
-                    ).toFixed(0);
-                    rows.push(
-                        [
-                            t("chip"),
-                            `ESP32-C6 ${sy.chip_rev} ${sy.cpu_mhz} ${t("mhz")}`,
-                        ],
-                        [t("cpuLoad"), sy.cpu_load + "%"],
-                        [
-                            t("heapMem"),
-                            `${fmtKib(sy.heap_free)} / ${fmtKib(sy.heap_total)}`,
-                        ],
-                        [
-                            t("heapMin"),
-                            `${fmtKib(sy.heap_min)} / ${fmtKib(sy.heap_largest)}`,
-                        ],
-                        [t("chipTemp"), sn.chip_temp.toFixed(1) + " °C"],
-                        [t("tasksConns"), `${sy.tasks}/${sy.http_conns}`],
-                        ["NVS", `${sy.nvs_used}/${sy.nvs_total}`],
-                        [t("uptime"), fmtUptime(sy.uptime)],
-                        [t("resetReason"), sy.reset_reason],
-                        [t("timeUtc"), sy.time],
-                        [
-                            t("firmware"),
-                            `${esc(sy.app_version)}, ${esc(sy.build)}, idf: ${esc(sy.idf_ver)}`,
-                        ],
-                    );
-                    $("sysRows").innerHTML = kvRows(rows);
-
-                    if (!brightLoaded) {
-                        /* once, to avoid fighting the user's hand */
-                        brightLoaded = true;
-                        $("briRange").value = st.led_brightness;
-                        $("briVal").textContent = st.led_brightness;
-                    }
-                    if (!altLoaded && st.altitude !== undefined) {
-                        altLoaded = true;
-                        $("altInput").value = st.altitude;
-                    }
-                    if (!blLoaded && st.backlight_rgb !== undefined) {
-                        blLoaded = true;
-                        paintBacklight(st.backlight_rgb.toUpperCase());
-                    }
+                    s = await r.json();
                 } catch (e) {
                     setStale(true);
+                    return;
                 } finally {
                     clearTimeout(to);
                     polling = false;
+                }
+                lastStatus = s;
+                lastOk = Date.now();
+                setStale(false);
+                try {
+                    renderStatus(s);
+                } catch (e) {
+                    console.error("render", e);
+                }
+            }
+
+            /* Also called on a language switch, with the last reply, so the
+             * text that does not come from data-i18n follows along. */
+            function renderStatus(s) {
+                const sn = s.sensors || {};
+                const sy = s.system || {};
+                const st = s.settings || {};
+
+                /* Main cards read the climate object, not the individual
+                 * devices: one source per quantity, the same one the
+                 * history is recorded from, so a card and the chart under
+                 * it can never disagree. */
+                const cl = s.climate || {};
+                SERIES.forEach((sr) => {
+                    $(sr.k + "Val").textContent = num(cl[sr.src], sr.fmt);
+                    if (sr.sub)
+                        $(sr.k + "SubVal").textContent = num(
+                            cl[sr.subSrc],
+                            sr.fmt,
+                        );
+                });
+
+                /* the one card that carries a level badge instead of a trend */
+                const bs = SERIES.find((sr) => sr.badge);
+                const b = $(bs.k + "Badge");
+                const bv = cl[bs.src];
+                if (typeof bv === "number" && Number.isFinite(bv)) {
+                    const l = co2Level(bv);
+                    b.className = "badge " + l.cls;
+                    b.textContent = l.text;
+                } else {
+                    b.className = "badge off";
+                    b.textContent = t("noData");
+                }
+
+                renderWeather(s.weather || {});
+                renderSensors(sn);
+
+                /* system card: Wi-Fi station and access point shown as
+                 * separate sections (in APSTA both can be up at once). Each
+                 * section always lists the same rows, an unconnected one
+                 * filled with NA, so the panel keeps its shape. */
+                const sta = s.sta || {};
+                const ap = s.ap || {};
+                const on = (cond, v) => (cond ? v : NA);
+                const rows = [
+                    { h: t("wifiSta") },
+                    [t("state"), sta.connected ? t("staOn") : t("notConn")],
+                    [t("wifiNet"), on(sta.connected, sta.ssid)],
+                    [
+                        t("signal"),
+                        on(
+                            sta.connected,
+                            `${sta.rssi} dBm (ch ${sta.channel})`,
+                        ),
+                    ],
+                    [t("phy"), on(sta.connected, sta.phy)],
+                    [t("ipAddr"), on(sta.connected, sta.ip)],
+                    ["MAC", on(sta.connected, sta.mac)],
+                    { h: t("apMode") },
+                    [t("state"), ap.active ? t("apOn") : t("apOff")],
+                    [t("network"), on(ap.active, ap.ssid)],
+                    [t("ipAddr"), on(ap.active, ap.ip)],
+                    [t("channel"), on(ap.active, ap.channel)],
+                    ["MAC", on(ap.active, ap.mac)],
+                    [t("clients"), on(ap.active, (ap.clients || []).length)],
+                ];
+                if (ap.active)
+                    (ap.clients || []).forEach((c, i) =>
+                        rows.push([
+                            `${t("client")} ${i + 1}`,
+                            `${c.mac} · ${c.rssi} dBm`,
+                        ]),
+                    );
+                rows.push(
+                    { h: t("device") },
+                    [
+                        t("chip"),
+                        `ESP32-C6 ${txt(sy.chip_rev)} ${txt(sy.cpu_mhz)} ${t("mhz")}`,
+                    ],
+                    [t("cpuLoad"), num(sy.cpu_load, (v) => v + "%")],
+                    [
+                        t("heapMem"),
+                        `${num(sy.heap_free, fmtKib)} / ${num(sy.heap_total, fmtKib)}`,
+                    ],
+                    [
+                        t("heapMin"),
+                        `${num(sy.heap_min, fmtKib)} / ${num(sy.heap_largest, fmtKib)}`,
+                    ],
+                    [
+                        t("chipTemp"),
+                        num(sn.chip_temp, (v) => v.toFixed(1) + " °C"),
+                    ],
+                    [t("tasksConns"), `${txt(sy.tasks)}/${txt(sy.http_conns)}`],
+                    ["NVS", `${txt(sy.nvs_used)}/${txt(sy.nvs_total)}`],
+                    [t("uptime"), num(sy.uptime, fmtUptime)],
+                    [t("resetReason"), sy.reset_reason],
+                    [t("timeUtc"), sy.time],
+                    [
+                        t("firmware"),
+                        `${txt(sy.app_version)}, ${txt(sy.build)}, idf: ${txt(sy.idf_ver)}`,
+                    ],
+                );
+                $("sysRows").innerHTML = kvRows(rows);
+
+                if (!brightLoaded && st.led_brightness !== undefined) {
+                    /* once, to avoid fighting the user's hand */
+                    brightLoaded = true;
+                    $("briRange").value = st.led_brightness;
+                    $("briVal").textContent = st.led_brightness;
+                }
+                if (!altLoaded && st.altitude !== undefined) {
+                    altLoaded = true;
+                    $("altInput").value = st.altitude;
+                }
+                if (!blLoaded && st.backlight_rgb !== undefined) {
+                    blLoaded = true;
+                    paintBacklight(String(st.backlight_rgb).toUpperCase());
                 }
             }
 
@@ -2468,13 +2323,81 @@
                     loadHistory(period);
             }, 1000);
 
-            /* Tail of arr left-padded with nulls to exactly n points. */
+            /* Tail of arr left-padded with nulls to exactly n points. A tier
+             * longer than its window is clamped rather than throwing. */
             function padTo(arr, n) {
-                const tail = arr.slice(-n);
-                return Array(n - tail.length)
+                const tail = (arr || []).slice(-n);
+                return Array(Math.max(0, n - tail.length))
                     .fill(null)
                     .concat(tail);
             }
+
+            /* ---------- the five measured series ----------
+             * One entry drives the whole column: the card markup, the reading,
+             * the min/max pair, the trend arrow and the chart under it. `src`
+             * names the field in /api/status `climate`, `hist` the array in
+             * /api/history. `span`/`trendFmt` fall back to `fmt`.
+             * `scale: "log"` is for illuminance only — a linear axis over six
+             * decades leaves everything below noon flat on the baseline. */
+            const SERIES = [
+                {
+                    k: "t",
+                    src: "temp",
+                    hist: "temp",
+                    title: "temperature",
+                    unit: "°C",
+                    color: "--temp",
+                    fmt: (v) => v.toFixed(2),
+                    span: (v) => v.toFixed(2) + "°",
+                },
+                {
+                    k: "h",
+                    src: "rh",
+                    hist: "rh",
+                    title: "humidity",
+                    unit: "%",
+                    color: "--hum",
+                    fmt: (v) => v.toFixed(1),
+                    span: (v) => v.toFixed(1) + "%",
+                },
+                {
+                    k: "c",
+                    src: "co2",
+                    hist: "co2",
+                    title: "co2",
+                    unit: "ppm",
+                    color: "--co2",
+                    /* the line takes the color of the level it ends at */
+                    colorOf: (v) => co2Level(v).color,
+                    /* the level badge sits where the other cards put the
+                     * trend arrow */
+                    badge: true,
+                    fmt: (v) => v.toFixed(0),
+                },
+                {
+                    k: "p",
+                    src: "press",
+                    hist: "press",
+                    title: "sensPress",
+                    unit: "hPa",
+                    color: "--press",
+                    sub: "atSeaLevel",
+                    subSrc: "press_msl",
+                    fmt: (v) => v.toFixed(3),
+                    /* a 3-decimal delta is noise; the reading itself is not */
+                    trendFmt: (v) => v.toFixed(2),
+                },
+                {
+                    k: "l",
+                    src: "lux",
+                    hist: "lux",
+                    title: "sensLux",
+                    unit: "lx",
+                    color: "--lux",
+                    scale: "log",
+                    fmt: fmtLux,
+                },
+            ];
 
             /* Data arrays for the current window; null = gap. `times` holds the unix
              * timestamp of every slot (uniform grid of `period` seconds). */
@@ -2484,30 +2407,59 @@
                 const step = hd.period;
                 const n = TIERS[period].len;
                 const now = Math.floor(Date.now() / 1000 / step) * step;
-                return {
-                    t: padTo(hd.temp, n),
-                    h: padTo(hd.rh, n),
-                    c: padTo(hd.co2, n),
-                    p: padTo(hd.press || [], n),
-                    l: padTo(hd.lux || [], n),
+                const out = {
                     times: Array.from(
                         { length: n },
                         (_, i) => now - (n - 1 - i) * step,
                     ),
                 };
+                SERIES.forEach((sr) => (out[sr.k] = padTo(hd[sr.hist], n)));
+                return out;
             }
 
-            /* One record per chart; data/times/stroke are refreshed by
-             * renderCharts(). `scale: "log"` is for illuminance only — a
-             * linear axis over six decades leaves everything below noon
-             * flattened onto the baseline. */
-            const charts = {
-                t: { canvas: $("tChart"), unit: "°C", dec: 2 },
-                h: { canvas: $("hChart"), unit: "%", dec: 1 },
-                c: { canvas: $("cChart"), unit: "ppm", dec: 0 },
-                p: { canvas: $("pChart"), unit: "hPa", dec: 3 },
-                l: { canvas: $("lChart"), unit: "lx", dec: 1, scale: "log" },
-            };
+            /* Cards are generated once and then only their text changes, so a
+             * sensor that never reports still holds its place with NA. */
+            function buildSensorCards() {
+                $("sensorCards").innerHTML = SERIES.map((sr) => {
+                    /* data-i18n on the badge is only the "no data" starting
+                     * text; renderStatus() overwrites it right after
+                     * applyLang() on every poll and on a language switch */
+                    const head = sr.badge
+                        ? `<span class="badge off" id="${sr.k}Badge" data-i18n="noData"></span>`
+                        : `<span class="trend flat" id="${sr.k}Trend">—</span>`;
+                    const sub = sr.sub
+                        ? '<div class="subval">' +
+                          `<span data-i18n="${sr.sub}"></span> ` +
+                          `<b id="${sr.k}SubVal">${NA}</b> ${sr.unit}</div>`
+                        : "";
+                    return (
+                        '<div class="card sensor"><h2>' +
+                        `<span data-i18n="${sr.title}"></span>${head}</h2>` +
+                        '<div class="reading">' +
+                        `<span class="value" id="${sr.k}Val">${NA}</span>` +
+                        `<span class="unit">${sr.unit}</span>` +
+                        '<div class="minmax">' +
+                        `<span><span data-i18n="max"></span> <b id="${sr.k}Max">${NA}</b></span>` +
+                        `<span><span data-i18n="min"></span> <b id="${sr.k}Min">${NA}</b></span>` +
+                        "</div></div>" +
+                        sub +
+                        `<canvas id="${sr.k}Chart"></canvas></div>`
+                    );
+                }).join("");
+            }
+            buildSensorCards(); /* before charts: they look the canvases up */
+
+            /* One record per chart, keyed like SERIES; data/times/stroke are
+             * refreshed by renderCharts(). */
+            const charts = {};
+            SERIES.forEach((sr) => {
+                charts[sr.k] = {
+                    canvas: $(sr.k + "Chart"),
+                    unit: sr.unit,
+                    fmt: sr.fmt,
+                    scale: sr.scale,
+                };
+            });
             const M = {
                 l: 36,
                 r: 6,
@@ -2552,10 +2504,18 @@
                 const w = canvas.clientWidth,
                     h = canvas.clientHeight;
                 if (!w) return;
-                canvas.width = w * dpr;
-                canvas.height = h * dpr;
+                /* Resizing the backing store clears and reallocates it, so it
+                 * is only done when the size really changed — draw() runs on
+                 * every pointermove. setTransform (not scale) because the
+                 * transform now survives from the previous frame. */
+                const bw = Math.round(w * dpr),
+                    bh = Math.round(h * dpr);
+                if (canvas.width !== bw || canvas.height !== bh) {
+                    canvas.width = bw;
+                    canvas.height = bh;
+                }
                 const ctx = canvas.getContext("2d");
-                ctx.scale(dpr, dpr);
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
                 ctx.clearRect(0, 0, w, h);
                 ctx.font = "10px " + css("--font");
 
@@ -2736,7 +2696,7 @@
                 const last = segments[segments.length - 1];
                 const [li, lv] = last[last.length - 1];
                 ctx.beginPath();
-                ctx.arc(x(li), y(lv), 3, 0, 7);
+                ctx.arc(x(li), y(lv), 3, 0, 2 * Math.PI);
                 ctx.fillStyle = ch.stroke;
                 ctx.fill();
 
@@ -2751,7 +2711,7 @@
                     ctx.lineTo(hx, M.t + ph);
                     ctx.stroke();
                     ctx.beginPath();
-                    ctx.arc(hx, hy, 3.5, 0, 7);
+                    ctx.arc(hx, hy, 3.5, 0, 2 * Math.PI);
                     ctx.fillStyle = ch.stroke;
                     ctx.fill();
                     ctx.strokeStyle = css("--bg");
@@ -2782,13 +2742,10 @@
                     i = found;
                 }
                 ch.hover = i;
-                draw(ch);
+                drawSoon(ch);
 
                 const tip = $("tip");
-                const shown =
-                    ch.scale === "log"
-                        ? fmtLux(ch.data[i])
-                        : ch.data[i].toFixed(ch.dec);
+                const shown = ch.fmt(ch.data[i]);
                 tip.innerHTML =
                     `<b>${shown} ${ch.unit}</b>` +
                     `<span>${fmtTipTime(ch.times[i])}</span>`;
@@ -2803,8 +2760,18 @@
 
             function chartLeave(ch) {
                 ch.hover = null;
-                draw(ch);
+                drawSoon(ch);
                 $("tip").style.display = "none";
+            }
+
+            /* Pointer events arrive far more often than the screen refreshes;
+             * one redraw per frame per chart is enough. */
+            function drawSoon(ch) {
+                if (ch.raf) return;
+                ch.raf = requestAnimationFrame(() => {
+                    ch.raf = 0;
+                    draw(ch);
+                });
             }
 
             for (const k in charts) {
@@ -2844,50 +2811,33 @@
             function renderCharts() {
                 const s = windowSeries();
                 if (!s) return;
-
-                const tv = s.t.filter((v) => v != null),
-                    hv = s.h.filter((v) => v != null),
-                    cv = s.c.filter((v) => v != null),
-                    pv = s.p.filter((v) => v != null),
-                    lv = s.l.filter((v) => v != null);
-
-                /* min/max over the visible window, formatted like the card's
-                 * own reading */
-                const span = (id, vals, fmt) => {
-                    $(id + "Min").textContent = vals.length
-                        ? fmt(Math.min(...vals))
-                        : "--";
-                    $(id + "Max").textContent = vals.length
-                        ? fmt(Math.max(...vals))
-                        : "--";
-                };
-                span("t", tv, (v) => v.toFixed(2) + "°");
-                span("h", hv, (v) => v.toFixed(1) + "%");
-                span("c", cv, (v) => v.toFixed(0));
-                span("p", pv, (v) => v.toFixed(3));
-                span("l", lv, fmtLux);
-
-                trendArrow($("tTrend"), tv, (v) => v.toFixed(2) + "°");
-                trendArrow($("hTrend"), hv, (v) => v.toFixed(1) + "%");
-                trendArrow($("pTrend"), pv, (v) => v.toFixed(2));
-                trendArrow($("lTrend"), lv, fmtLux);
-
-                charts.t.data = s.t;
-                charts.h.data = s.h;
-                charts.c.data = s.c;
-                charts.p.data = s.p;
-                charts.l.data = s.l;
-                charts.t.stroke = css("--temp");
-                charts.h.stroke = css("--hum");
-                charts.p.stroke = css("--press");
-                charts.l.stroke = css("--lux");
-                charts.c.stroke = cv.length
-                    ? co2Level(cv[cv.length - 1]).color
-                    : css("--co2");
-                for (const k in charts) {
-                    charts[k].times = s.times;
-                    draw(charts[k]);
-                }
+                SERIES.forEach((sr) => {
+                    const ch = charts[sr.k];
+                    const data = s[sr.k];
+                    const vals = data.filter((v) => v != null);
+                    /* min/max over the visible window, formatted like the
+                     * card's own reading */
+                    const span = sr.span || sr.fmt;
+                    $(sr.k + "Min").textContent = vals.length
+                        ? span(Math.min(...vals))
+                        : NA;
+                    $(sr.k + "Max").textContent = vals.length
+                        ? span(Math.max(...vals))
+                        : NA;
+                    if (!sr.badge)
+                        trendArrow(
+                            $(sr.k + "Trend"),
+                            vals,
+                            sr.trendFmt || span,
+                        );
+                    ch.data = data;
+                    ch.times = s.times;
+                    ch.stroke =
+                        sr.colorOf && vals.length
+                            ? sr.colorOf(vals[vals.length - 1])
+                            : css(sr.color);
+                    draw(ch);
+                });
             }
 
             $("periodSeg").addEventListener("click", (e) => {
@@ -3062,14 +3012,13 @@
         </div>
         ${right}`;
                 if (row.saved) {
-                    el.querySelector(".del").addEventListener("click", (e) => {
+                    clickable(el.querySelector(".del"), (e) => {
                         e.stopPropagation();
                         delNet(row.ssid);
                     });
                 }
                 if (row.inScan) {
-                    el.style.cursor = "pointer";
-                    el.addEventListener("click", () =>
+                    clickable(el, () =>
                         row.connected
                             ? toast(t("alreadyConn") + row.ssid)
                             : openWifiModal(row),
@@ -3091,11 +3040,16 @@
             }
 
             async function delNet(ssid) {
-                await fetch("/api/networks", {
-                    method: "DELETE",
-                    body: JSON.stringify({ ssid }),
-                });
-                toast(t("netRemoved") + ssid);
+                try {
+                    const r = await fetch("/api/networks", {
+                        method: "DELETE",
+                        body: JSON.stringify({ ssid }),
+                    });
+                    if (!r.ok) throw new Error(await r.text());
+                    toast(t("netRemoved") + ssid);
+                } catch (e) {
+                    toast(t("netSaveFail") + e.message);
+                }
                 loadNets();
             }
 
@@ -3133,12 +3087,10 @@
                         (locations.length > 1
                             ? `<span class="del" title="${t("delete")}">✕</span>`
                             : "");
-                    chip.querySelector(".nm").addEventListener("click", () =>
-                        selectLoc(i),
-                    );
+                    clickable(chip.querySelector(".nm"), () => selectLoc(i));
                     const del = chip.querySelector(".del");
                     if (del)
-                        del.addEventListener("click", (e) => {
+                        clickable(del, (e) => {
                             e.stopPropagation();
                             delLoc(i);
                         });
@@ -3149,7 +3101,7 @@
                     add.className = "loc-chip add";
                     add.textContent = "＋";
                     add.title = t("locAdd");
-                    add.addEventListener("click", openLocModal);
+                    clickable(add, openLocModal);
                     bar.appendChild(add);
                 }
             }
@@ -3176,12 +3128,15 @@
                     return;
                 const name = locations[i].name;
                 try {
-                    await fetch("/api/locations", {
+                    const r = await fetch("/api/locations", {
                         method: "DELETE",
                         body: JSON.stringify({ index: i }),
                     });
-                } catch (e) {}
-                toast(t("locRemoved").replace("{name}", name));
+                    if (!r.ok) throw new Error(await r.text());
+                    toast(t("locRemoved").replace("{name}", name));
+                } catch (e) {
+                    toast(t("locAddFail") + e.message);
+                }
                 await loadLocations();
                 refresh();
             }
@@ -3247,7 +3202,7 @@
                         `<div class="sub">${esc(place)} · ${g.latitude.toFixed(
                             2,
                         )}, ${g.longitude.toFixed(2)}</div>`;
-                    el.addEventListener("click", () => addLoc(g));
+                    clickable(el, () => addLoc(g));
                     res.appendChild(el);
                 });
             }
@@ -3361,6 +3316,10 @@
                     });
                     if (!r.ok) throw new Error(await r.text());
                     toast(t("histResetDone"));
+                    /* every tier is wiped on the device, so the cached ones
+                     * must go too — otherwise switching the period would show
+                     * history that no longer exists */
+                    for (const p in hists) hists[p] = null;
                     loadHistory(period);
                 } catch (e) {
                     toast(t("histResetError") + e.message);
@@ -3369,14 +3328,28 @@
                 }
             });
 
+            /* Escape closes whichever modal is open. */
+            document.addEventListener("keydown", (e) => {
+                if (e.key !== "Escape") return;
+                document
+                    .querySelectorAll(".overlay.show")
+                    .forEach((o) => o.classList.remove("show"));
+            });
+
             /* ---------- main loop ---------- */
+            buildWeatherGrid(); /* before applyLang: it fills the labels */
             applyLang();
             refresh();
             setInterval(refresh, 1000);
             loadHistory(period);
             loadNets();
             loadLocations();
-            window.addEventListener("resize", renderCharts);
+            /* a resize fires in bursts; one redraw per frame is enough */
+            let resizeRaf = 0;
+            window.addEventListener("resize", () => {
+                cancelAnimationFrame(resizeRaf);
+                resizeRaf = requestAnimationFrame(renderCharts);
+            });
         </script>
     </body>
 </html>

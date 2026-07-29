@@ -264,6 +264,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
 
     veml7700_data_t veml = { .gain = "" };
     bool veml_ok = sensors_veml7700_get(&veml);
+    float veml_white_ratio = veml.lux > 0.0f ? veml.white_lux / veml.lux : 0.0f;
 
     weather_api_data_t weather;
     bool weather_ok = weather_api_get(&weather);
@@ -303,7 +304,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"tmp117\":{\"ok\":%s,\"temp\":%.2f},"
         "\"bmp581\":{\"ok\":%s,\"press\":%.3f,\"press_pa\":%.1f,\"temp\":%.2f},"
         "\"veml7700\":{\"ok\":%s,"
-        "\"lux\":%.1f,\"white\":%.1f,\"als_raw\":%u,\"white_raw\":%u,"
+        "\"lux\":%.1f,\"white_ratio\":%.2f,\"als_raw\":%u,\"white_raw\":%u,"
         "\"gain\":\"%s\",\"it\":%u}},"
         "\"weather\":{\"ok\":%s,\"temp\":%.1f,\"feels\":%.1f,"
         "\"tmin\":%.1f,\"tmax\":%.1f,"
@@ -333,7 +334,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         bmp581_ok ? "true" : "false",
         bmp581.press_hpa, bmp581.press_hpa * 100.0f, bmp581.temp_c,
         veml_ok ? "true" : "false",
-        veml.lux, veml.white_lux, veml.als_raw, veml.white_raw,
+        veml.lux, veml_white_ratio, veml.als_raw, veml.white_raw,
         veml.gain, veml.it_ms,
         weather_ok ? "true" : "false", weather.temp_c, weather.feels_c,
         weather.temp_min_c, weather.temp_max_c,

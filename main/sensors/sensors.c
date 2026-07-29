@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+#include "climate.h"
 #include "i2c_bus.h"
 
 /* Every sensor on the bus delivers its reading from one driver call, so a
@@ -29,11 +30,11 @@
 
 /* The SCD40's measurement depends on the ambient pressure, which it cannot
  * measure itself. The BMP581 can, so its reading is forwarded; the fallback is
- * the value at the sensor site (245 m above sea level), used until the BMP581
- * has a reading and whenever it reports something impossible. Resending on
- * every reading would put a write on the bus once a second for nothing —
- * a step of a couple of hPa is well below what the compensation notices. */
-#define SCD40_FALLBACK_HPA   985
+ * the standard atmospheric pressure at the configured site altitude (ISA
+ * model), used until the BMP581 has a reading and whenever it reports
+ * something impossible. Resending on every reading would put a write on the
+ * bus once a second for nothing — a step of a couple of hPa is well below
+ * what the compensation notices. */
 #define SCD40_PRESSURE_MIN   700
 #define SCD40_PRESSURE_MAX   1200
 #define SCD40_PRESSURE_STEP  2 /* hPa of drift worth another write */
@@ -122,7 +123,7 @@ static void scd40_sync_pressure(void)
         return;
     }
 
-    uint16_t hpa = SCD40_FALLBACK_HPA;
+    uint16_t hpa = (uint16_t)(climate_standard_pressure_hpa() + 0.5f);
     sensor_reading_t r;
     if (sensor_get(&s_sensors[SENSOR_BMP581], &r)) {
         int measured = (int)(r.bmp581.press_hpa + 0.5f);

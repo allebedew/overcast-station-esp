@@ -76,3 +76,8 @@ void climate_get(climate_t *out);
 
 int climate_altitude_m(void);
 void climate_set_altitude_m(int metres);
+
+/* Standard atmospheric pressure at the site altitude (ISA model) — what a
+ * barometer reads there on a standard day. Used as the SCD40's ambient
+ * pressure fallback when no BMP581 reading is available. */
+float climate_standard_pressure_hpa(void);
