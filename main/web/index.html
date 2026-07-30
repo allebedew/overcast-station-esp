@@ -1824,6 +1824,19 @@
              * `u` is a literal unit, `ui` an i18n key, `f` formats the value. */
             const SENSOR_DEVS = [
                 {
+                    key: "tmp117",
+                    name: "TMP117",
+                    sub: "sensTmp117Sub",
+                    metrics: [
+                        {
+                            k: "temp",
+                            l: "temperature",
+                            u: "°C",
+                            f: (v) => v.toFixed(2),
+                        },
+                    ],
+                },
+                {
                     key: "scd40",
                     name: "SCD40",
                     sub: "sensScd40Sub",
@@ -1845,19 +1858,6 @@
                             l: "humidity",
                             u: "%",
                             f: (v) => v.toFixed(1),
-                        },
-                    ],
-                },
-                {
-                    key: "tmp117",
-                    name: "TMP117",
-                    sub: "sensTmp117Sub",
-                    metrics: [
-                        {
-                            k: "temp",
-                            l: "temperature",
-                            u: "°C",
-                            f: (v) => v.toFixed(2),
                         },
                     ],
                 },

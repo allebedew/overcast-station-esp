@@ -21,68 +21,48 @@
 #include "weather_api.h"
 #include "wifi.h"
 
-/* 60 fps, paced by esp_timer: the FreeRTOS tick is 10 ms, too coarse for a
- * 16.7 ms frame. The rate is what the panel is polled at, not what it is
- * written at — readings change every few seconds and the transport drops
- * frames that would repaint the same characters. */
-#define FPS 60
-#define FRAME_US (1000000 / FPS)
+/* Polling rate, not write rate: apart from the backlight ramp nothing is
+ * animated frame by frame, and the transport drops frames that would repaint
+ * the same characters. */
+#define FPS       10
+#define FRAME_MS  (1000 / FPS)
 
-/* Rendering writes into a generous buffer and lets the transport cut the line
- * to the panel width: the decoded weather description is longer than the
- * display, and truncating it here would only duplicate what
- * lcd1602_rgb_set_line() already does. */
+/* Generous: the transport cuts each line to the panel width, so rendering does
+ * not have to. */
 #define RENDER_BUF 64
 
-/* Backlight default: a cyan-ish tint at full brightness. */
-#define DEFAULT_RGB 0x00AAFF
+#define DEFAULT_RGB 0x00AAFF /* cyan-ish, full brightness */
 
-/* Backlight brightness follows the room: the stored colour is what the panel
- * shows in a lit room, and it is scaled down as the VEML7700 reading falls.
- * At BL_LUX_BRIGHT and above the colour goes out unscaled; at BL_LUX_DARK and
- * below it sits at BL_MIN. The curve between them is logarithmic, like the
- * perception of brightness and like the range the room spans. */
+/* The stored colour is what a lit room gets; below BL_LUX_BRIGHT it is scaled
+ * down logarithmically to BL_MIN at BL_LUX_DARK. */
 #define BL_LUX_DARK   1.0f
 #define BL_LUX_BRIGHT 70.0f
 #define BL_MIN        10 /* never dark: an unreadable screen reads as a fault */
 
 /* log10f(BL_LUX_DARK + 1) and the span from there to log10f(BL_LUX_BRIGHT + 1),
- * precomputed — this runs per frame and the C6 has no FPU. */
+ * precomputed — the C6 has no FPU. */
 #define BL_LOG_DARK 0.30103f
 #define BL_LOG_SPAN 1.70329f
 
-/* "\xDF" is the degree sign in the panel's character ROM — the UTF-8 one
- * would take two bytes and show up as garbage. "\xFF" is the solid block at the
- * end of the same table, the one fully-lit cell it offers. */
+/* Scale units per frame — 255 / BL_SLEW frames for the full range. */
+#define BL_SLEW 4
+
+/* Degree sign and solid block in the panel's character ROM; the UTF-8 degree
+ * sign would take two bytes and show up as garbage. */
 #define DEG   "\xDF"
 #define BLOCK '\xFF'
 
-/* Both survive reboots, like the LED brightness. */
 #define SETTING_PAGE "screen_page"
 #define SETTING_RGB  "bl_rgb"
 
 typedef enum {
     PAGE_INDOOR,  /* what the station measures, plus the outdoor headline */
-    PAGE_PRECISE, /* the same air, read off the dedicated sensors */
+    PAGE_PRECISE, /* the same air at the sensors' full resolution */
     PAGE_OUTDOOR, /* the rest of the Open-Meteo reading */
     PAGE_SYSTEM,  /* clock and how the station itself is doing */
     PAGE_COUNT,
 } page_t;
 
-/* Two pages outside that rotation. They pre-empt whatever is selected because
- * while either applies the display has nothing better to say — during the boot
- * connect there are no readings yet, and during an upload the station is
- * seconds away from rebooting into another firmware. Neither is reachable with
- * the button or stored as the selected page: they come and go with the
- * condition, and the selected page is what returns afterwards. */
-typedef enum {
-    OVERRIDE_NONE,
-    OVERRIDE_OTA,  /* firmware upload in progress, with a progress bar */
-    OVERRIDE_WIFI, /* the first connection attempt after a restart */
-} override_t;
-
-/* The trailing dots on the Wi-Fi page cycle at this rate, so a connect that
- * takes a while looks like it is still trying rather than stuck. */
 #define DOTS_PERIOD_US 500000
 #define DOTS_MAX       3
 
@@ -90,24 +70,16 @@ static const char *TAG = "screen";
 
 static volatile int s_page; /* advanced from the button task */
 static int s_stored_page;   /* what NVS already holds, screen task only */
-static TaskHandle_t s_task;
 
-/* Whether one of the two pages above is showing. Written by the screen task,
- * read by the button task to know that a press has nothing to advance. */
+/* Screen task writes, button task reads: a press has nothing to advance while
+ * an override is up. */
 static volatile bool s_override_active;
 
-/* Written from the web handler, read by the screen task. */
-static volatile uint32_t s_rgb = DEFAULT_RGB;
+static volatile uint32_t s_rgb = DEFAULT_RGB; /* written from the web handler */
+static volatile uint8_t s_bl_scale = 255;     /* published for the API */
 
-/* The other way round: computed by the screen task, published for the API and
- * the system page. */
-static volatile uint8_t s_bl_scale = 255;
-
-/* A reading, or the dashes standing in for the sensor that did not produce
- * it. Both spellings of a field sit on one line this way, so a row's layout
- * can be read off the rendering function instead of a run of ifs above it.
- * Integer quantities pass through as doubles ("%4.0f" prints what "%4u"
- * would) — the display has no field where that costs anything. */
+/* A reading, or the dashes standing in for the sensor that did not produce it,
+ * so a row's layout can be read off the rendering function. */
 static void fmt_or(char *dst, size_t len, bool ok, const char *absent,
                    const char *fmt, double value)
 {
@@ -118,13 +90,8 @@ static void fmt_or(char *dst, size_t len, bool ok, const char *absent,
     }
 }
 
-/* Air inside on the top row, outside on the bottom:
- *   23.46° 45.3 1250
- *   12.3° Overcast          (description cut to the space left)
- * Sixteen characters take the reading resolution the rest of the firmware
- * uses but not the "%" after the humidity — of the two markers on this row
- * the degree sign is the one worth keeping, since the row below carries a
- * temperature too. */
+/*   23.46° 45% 1250
+ *   12.3°  Overcast         (description cut to the space left) */
 static void render_indoor(char *l0, char *l1)
 {
     climate_t c;
@@ -132,28 +99,22 @@ static void render_indoor(char *l0, char *l1)
 
     char temp[12], rh[12], co2[12];
     fmt_or(temp, sizeof(temp), c.temp_ok, "--.--" DEG, "%.2f" DEG, c.temp_c);
-    fmt_or(rh, sizeof(rh), c.rh_ok, " --%", "%3.0f%%", c.rh_pct);
+    fmt_or(rh, sizeof(rh), c.rh_ok, "--%", "%2.0f%%", c.rh_pct);
     fmt_or(co2, sizeof(co2), c.co2_ok, "----", "%4.0f", c.co2_ppm);
     snprintf(l0, RENDER_BUF, "%s %s %s", temp, rh, co2);
 
     weather_api_data_t w;
     if (weather_api_get(&w)) {
-        snprintf(l1, RENDER_BUF, "%.1f" DEG " %s",
+        snprintf(l1, RENDER_BUF, "%.1f" DEG "  %s",
                  w.temp_c, weather_api_code_str(w.weather_code));
     } else {
         snprintf(l1, RENDER_BUF, "--.-" DEG " ---");
     }
 }
 
-/* Every reading at the resolution the firmware standardised on, which is what
- * the headline page has no room for:
- *   23.46° 1013.250     (TMP117 °C, BMP581 hPa at sea level — 15 characters)
- *   1250 45.3% 999.9    (SCD40 CO₂ and humidity, VEML7700 lx — 16 exactly)
- * That leaves five columns for the illuminance, so the tenth of a lux
- * survives only below 1000 lx; brighter than that the row drops to whole lux
- * and then to kilolux. Nowhere else does it have to give way.
- * Each value is filled in on its own, so one absent sensor leaves the others
- * readable instead of blanking the row. */
+/* Every reading at the resolution the firmware standardised on:
+ *   23.46° 45.3 1250    (TMP117 °C, SCD40 humidity and CO₂)
+ *   1013.250  999.9x    (BMP581 hPa at sea level, VEML7700 lx — 16 exactly) */
 static void render_precise(char *l0, char *l1)
 {
     climate_t c;
@@ -161,16 +122,13 @@ static void render_precise(char *l0, char *l1)
 
     char temp[12], press[12], co2[12], rh[12];
     fmt_or(temp, sizeof(temp), c.temp_ok, "--.--" DEG, "%5.2f" DEG, c.temp_c);
-    /* Reduced to sea level, like everywhere else the pressure is shown. The
-     * eight columns still hold it: the reduction lands the reading back around
-     * a sea-level 1013 hPa whatever the altitude, so it stays four digits. */
     fmt_or(press, sizeof(press), c.press_ok, "----.---", "%-8.3f",
            c.press_msl_hpa);
     fmt_or(co2, sizeof(co2), c.co2_ok, "----", "%4.0f", c.co2_ppm);
     fmt_or(rh, sizeof(rh), c.rh_ok, "--.-", "%4.1f", c.rh_pct);
 
-    /* The illuminance keeps its own ladder: five columns cannot hold both a
-     * tenth of a lux and a five-digit reading. */
+    /* Five columns cannot hold both a tenth of a lux and a five-digit
+     * reading, so the illuminance keeps its own ladder. */
     char lux[10] = "-----x";
     if (c.lux_ok) {
         if (c.lux < 10) {
@@ -183,12 +141,11 @@ static void render_precise(char *l0, char *l1)
     }
 
     snprintf(l0, RENDER_BUF, "%s %s %s", temp, rh, co2);
-    snprintf(l1, RENDER_BUF, "%s   %s", press, lux);
+    snprintf(l1, RENDER_BUF, "%s  %s", press, lux);
 }
 
-/* Meteorological degrees to an 8-point compass label — the direction the wind
- * blows from, which is what the API reports. Each point covers 45°, so the
- * boundaries sit at 22.5° and the +22 rounds the reading into its sector. */
+/* Meteorological degrees to an 8-point label — each point covers 45°, so the
+ * +22 rounds the reading into its sector. */
 static const char *wind_dir(int deg)
 {
     static const char *const points[] = {
@@ -197,9 +154,8 @@ static const char *wind_dir(int deg)
     return points[((deg + 22) / 45) % 8];
 }
 
-/* Everything else Open-Meteo gives us, packed into 32 characters:
- *   12.3° 8..17°U3
- *   78% 1013 NW15 3   (humidity, hPa at sea level, wind from/km/h, WMO code) */
+/*   12.3° 8..17 C3    (current, today's min/max, WMO code)
+ *   78% 1013 NW15 U3  (humidity, hPa at sea level, wind from/km/h, UV) */
 static void render_outdoor(char *l0, char *l1)
 {
     weather_api_data_t w;
@@ -208,34 +164,28 @@ static void render_outdoor(char *l0, char *l1)
         l1[0] = '\0'; /* blank row */
         return;
     }
-    snprintf(l0, RENDER_BUF, "%.1f" DEG " %.0f..%.0f" DEG " U%.0f",
-             w.temp_c, w.temp_min_c, w.temp_max_c, w.uvi);
-    snprintf(l1, RENDER_BUF, "%.0f%% %.0f %s%.0f %d",
+    snprintf(l0, RENDER_BUF, "%.1f" DEG " %.0f..%.0f C%d",
+             w.temp_c, w.temp_min_c, w.temp_max_c, w.weather_code);
+    snprintf(l1, RENDER_BUF, "%.0f%% %.0f %s%.0f U%.0f",
              w.humidity_pct, w.pressure_msl_hpa, wind_dir(w.wind_dir_deg),
-             w.wind_kmh, w.weather_code);
+             w.wind_kmh, w.uvi);
 }
 
-/* The station itself rather than the air around it:
- *   17:27:40 28.07     (the colons blink, one second on, one second off)
+/*   17:27:40 28.07     (the colons blink, one second on, one second off)
  *   12% 184k BL184     (CPU load, free heap, backlight scale) */
 static void render_system(char *l0, char *l1)
 {
     if (timesync_is_synced()) {
-        /* The clock runs in UTC; the active location's offset (from
-         * Open-Meteo) turns it into wall-clock time, and without one it stays
-         * on UTC. */
+        /* The clock runs in UTC; the location's offset (from Open-Meteo) turns
+         * it into wall-clock time, and without one it stays on UTC. */
         struct timeval tv;
         gettimeofday(&tv, NULL);
         time_t now = tv.tv_sec + weather_api_utc_offset_s();
         struct tm tm;
         gmtime_r(&now, &tm);
 
-        /* The blink is this row's pendulum: colons through one whole second,
-         * blanks through the next. Parity is taken off the UTC second rather
-         * than the local one — the offset can be a half-hour, never an odd
-         * number of seconds, so both give the same swing. The year does not
-         * fit next to the seconds — sixteen characters go to the time and the
-         * day. */
+        /* Blink parity off the UTC second: an offset is never an odd number of
+         * seconds, so the local one would swing the same. */
         strftime(l0, RENDER_BUF,
                  tv.tv_sec % 2 == 0 ? "%H:%M:%S %d.%m" : "%H %M %S %d.%m",
                  &tm);
@@ -243,29 +193,15 @@ static void render_system(char *l0, char *l1)
         snprintf(l0, RENDER_BUF, "clock not set");
     }
 
-    /* The backlight scale has no other readout — there is no setting behind
-     * it and the web page shows the stored color, not the one on the panel.
-     * The worst case still fits: "100% 1024k BL255" is sixteen exactly. */
+    /* Worst case fits exactly: "100% 1024k BL255" is sixteen. */
     snprintf(l1, RENDER_BUF, "%2.d%% %uk BL%u", sysinfo_cpu_load_percent(),
              (unsigned)(esp_get_free_heap_size() / 1024), s_bl_scale);
 }
 
-static void render_page(int page, char *l0, char *l1)
-{
-    switch (page) {
-    case PAGE_INDOOR:  render_indoor(l0, l1); break;
-    case PAGE_PRECISE: render_precise(l0, l1); break;
-    case PAGE_OUTDOOR: render_outdoor(l0, l1); break;
-    default:           render_system(l0, l1); break;
-    }
-}
-
-/* The upload, with the row below given over to the bar:
- *   OTA update   67%
+/*   Updating...  67%
  *   ██████████------
- * The bar is one cell per 6.25 %, filled with the ROM's solid block; there are
- * no partial blocks in it and this transport defines no custom characters, so
- * that is the resolution. The track is spelled out with '-' rather than left
+ * One cell per 6.25 %: the ROM has no partial blocks and this transport
+ * defines no custom characters. The track is drawn with '-' rather than left
  * blank so a stalled upload still shows how far it got. */
 static void render_ota(char *l0, char *l1)
 {
@@ -273,7 +209,7 @@ static void render_ota(char *l0, char *l1)
     if (percent > 100) {
         percent = 100;
     }
-    snprintf(l0, RENDER_BUF, "OTA update  %3d%%", percent);
+    snprintf(l0, RENDER_BUF, "Updating... %3d%%", percent);
 
     int filled = percent * LCD1602_COLS / 100;
     for (int i = 0; i < LCD1602_COLS; i++) {
@@ -282,11 +218,8 @@ static void render_ota(char *l0, char *l1)
     l1[LCD1602_COLS] = '\0';
 }
 
-/* The connection attempt, with the network it is attempting on the row below:
- *   Wi-Fi connect..
- *   HomeNetwork
- * The SSID takes the whole row and the transport cuts it to the panel width —
- * a long name is still recognisable from its first sixteen characters. */
+/*   Wi-Fi connect..
+ *   HomeNetwork      (SSID cut to the panel width by the transport) */
 static void render_wifi(char *l0, char *l1, wifi_sta_state_t state,
                         const char *ssid)
 {
@@ -297,28 +230,38 @@ static void render_wifi(char *l0, char *l1, wifi_sta_state_t state,
     snprintf(l1, RENDER_BUF, "%s", ssid[0] ? ssid : "(no network)");
 }
 
-/* Which of the two applies, if either. Once the station has connected, or the
- * round-robin has given up and left the access point up, the Wi-Fi page steps
- * aside for good: from then on the readings are the more useful thing to show
- * and a dropped link is reported by the LED, not by taking over the display. */
-static override_t current_override(wifi_sta_state_t *state, char *ssid,
-                                   size_t len)
+/* What goes on the panel this frame. The OTA and Wi-Fi pages pre-empt the
+ * selected one while they apply; once the station has connected, or the
+ * round-robin has given up, the Wi-Fi page steps aside for good — a later drop
+ * is reported by the LED. */
+static void render_page(char *l0, char *l1)
 {
     static bool settled; /* screen task only */
 
     if (ota_is_active()) {
-        return OVERRIDE_OTA;
-    }
-    if (settled) {
-        return OVERRIDE_NONE;
+        s_override_active = true;
+        render_ota(l0, l1);
+        return;
     }
 
-    *state = wifi_sta_state(ssid, len);
-    if (*state == WIFI_STA_CONNECTING || *state == WIFI_STA_WAITING_RETRY) {
-        return OVERRIDE_WIFI;
+    if (!settled) {
+        char ssid[33] = "";
+        wifi_sta_state_t sta = wifi_sta_state(ssid, sizeof(ssid));
+        if (sta == WIFI_STA_CONNECTING || sta == WIFI_STA_WAITING_RETRY) {
+            s_override_active = true;
+            render_wifi(l0, l1, sta, ssid);
+            return;
+        }
+        settled = true;
     }
-    settled = true;
-    return OVERRIDE_NONE;
+
+    s_override_active = false;
+    switch (s_page) {
+    case PAGE_INDOOR:  render_indoor(l0, l1); break;
+    case PAGE_PRECISE: render_precise(l0, l1); break;
+    case PAGE_OUTDOOR: render_outdoor(l0, l1); break;
+    default:           render_system(l0, l1); break;
+    }
 }
 
 /* Scaling a channel to zero would drop it out of the mix and shift the hue, so
@@ -329,11 +272,10 @@ static uint8_t scale8(uint8_t c, uint8_t k)
     return (v == 0 && c != 0) ? 1 : v;
 }
 
-/* Backlight scale for the current illuminance, 0-255. Without a reading the
+/* Target scale for the current illuminance, 0-255. Without a reading the
  * colour is left alone: a dimmed screen is not the way to report a missing
- * sensor. The result is cached against the reading it came from — the VEML7700
- * produces at most ten a second and this is asked sixty times a second. */
-static uint8_t backlight_scale(float lux, bool lux_ok)
+ * sensor. Cached against the reading it came from to spare the log10f. */
+static uint8_t backlight_target(float lux, bool lux_ok)
 {
     static float cached_lux;
     static uint8_t cached_k = 255;
@@ -353,38 +295,35 @@ static uint8_t backlight_scale(float lux, bool lux_ok)
     return cached_k;
 }
 
-static void frame_tick(void *arg)
+/* The room steps around — a passing shadow, a cloud, a hand over the sensor —
+ * and a backlight that tracked it exactly would flicker. Walk towards the
+ * target instead, at most BL_SLEW per frame. */
+static uint8_t backlight_ramp(uint8_t target)
 {
-    xTaskNotifyGive(s_task); /* esp_timer task context, not an ISR */
+    static int k = 255;
+
+    int step = target - k;
+    if (step > BL_SLEW) {
+        step = BL_SLEW;
+    } else if (step < -BL_SLEW) {
+        step = -BL_SLEW;
+    }
+    k += step;
+    return (uint8_t)k;
 }
 
 static void screen_task(void *arg)
 {
     for (;;) {
-        /* Frames pile up only if a repaint overran the period; taking them
-         * all at once drops the backlog instead of running behind. */
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        vTaskDelay(pdMS_TO_TICKS(FRAME_MS));
 
-        /* Ahead of the rendering: the system page prints this. The scale only
-         * moves when the illuminance does, a few times a second at most, so
-         * the colour written below is identical across most frames and the
-         * transport drops it — same as it does for the text. */
         climate_t c;
         climate_get(&c);
-        uint8_t k = backlight_scale(c.lux, c.lux_ok);
-        s_bl_scale = k;
+        uint8_t k = backlight_ramp(backlight_target(c.lux, c.lux_ok));
+        s_bl_scale = k; /* ahead of the rendering: the system page prints it */
 
         char l0[RENDER_BUF] = "", l1[RENDER_BUF] = "";
-        char ssid[33] = "";
-        wifi_sta_state_t sta = WIFI_STA_IDLE;
-        override_t override = current_override(&sta, ssid, sizeof(ssid));
-        s_override_active = override != OVERRIDE_NONE;
-
-        switch (override) {
-        case OVERRIDE_OTA:  render_ota(l0, l1); break;
-        case OVERRIDE_WIFI: render_wifi(l0, l1, sta, ssid); break;
-        default:            render_page(s_page, l0, l1); break;
-        }
+        render_page(l0, l1);
 
         uint32_t rgb = s_rgb;
         lcd1602_rgb_set_line(0, l0);
@@ -404,10 +343,8 @@ static void screen_task(void *arg)
 
 void screen_16x2_next_page(void)
 {
-    /* The two conditional pages are not part of the rotation, so while one of
-     * them holds the display a press has nothing to advance — changing the
-     * selection out of sight would only surprise whoever pressed it once the
-     * page came back. */
+    /* Changing the selection out of sight would only surprise whoever pressed
+     * the button once the override went away. */
     if (s_override_active) {
         return;
     }
@@ -439,15 +376,7 @@ void screen_16x2_init(void)
     s_rgb = settings_get_u32(SETTING_RGB, DEFAULT_RGB) & 0xFFFFFF;
 
     lcd1602_rgb_init(); /* absent display is not an error */
-    xTaskCreate(screen_task, "screen", 3072, NULL, 2, &s_task);
-
-    const esp_timer_create_args_t timer_args = {
-        .callback = frame_tick,
-        .name = "screen_frame",
-    };
-    esp_timer_handle_t timer;
-    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(timer, FRAME_US));
+    xTaskCreate(screen_task, "screen", 3072, NULL, 2, NULL);
 
     ESP_LOGI(TAG, "Screen task started, %d pages (+2 conditional) at %d fps",
              PAGE_COUNT, FPS);

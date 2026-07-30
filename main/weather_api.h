@@ -39,8 +39,8 @@ bool weather_api_get(weather_api_data_t *out);
 
 /* The active location's UTC offset in seconds, 0 while there is no reading.
  * Separate from weather_api_get() because the clock on the display needs
- * nothing else from the fetch and copying the whole struct sixty times a
- * second — under the lock — is all it would get. */
+ * nothing else from the fetch and copying the whole struct on every frame —
+ * under the lock — is all it would get. */
 int weather_api_utc_offset_s(void);
 
 /* Human-readable (English) description of a WMO weather code, e.g. for the

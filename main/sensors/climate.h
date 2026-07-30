@@ -16,7 +16,7 @@
  *
  * Composition of the published snapshots — no task and no lock; the only
  * state it holds is the site altitude, cached from NVS because the sea-level
- * pressure below is recomputed on every read, sixty times a second while the
+ * pressure below is recomputed on every read, ten times a second while the
  * display is drawing.
  *
  * ---- Reading resolution ----
