@@ -59,9 +59,9 @@ static float pressure_ratio(int altitude_m)
  * sensor would be worse than assuming the standard profile (the column is
  * outdoors), and taking it from the weather API would make a local reading
  * stop working when the network does. */
-static float to_sea_level(float press_hpa, int altitude_m)
+float climate_to_sea_level(float press_hpa)
 {
-    return press_hpa / pressure_ratio(altitude_m);
+    return press_hpa / pressure_ratio(s_altitude_m);
 }
 
 /* The mirror direction: what a standard atmosphere reads at the site
@@ -97,7 +97,7 @@ void climate_get(climate_t *out)
     if (sensors_bmp581_get(&bmp581)) {
         out->press_ok = true;
         out->press_hpa = bmp581.press_hpa;
-        out->press_msl_hpa = to_sea_level(bmp581.press_hpa, s_altitude_m);
+        out->press_msl_hpa = climate_to_sea_level(bmp581.press_hpa);
     }
 
     veml7700_data_t veml7700;

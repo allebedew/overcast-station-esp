@@ -63,11 +63,10 @@
                 padding: 6px 2px 14px;
             }
             /* every control in the header row is the same height, so the
-             * period switch, the language switch, the gear and the online
-             * pill read as one strip */
+             * period switch, the language switch and the gear read as one
+             * strip */
             header .seg,
-            header .icon-btn,
-            header .conn {
+            header .icon-btn {
                 height: 34px;
                 box-sizing: border-box;
                 flex: none;
@@ -79,20 +78,13 @@
             .spacer {
                 flex: 1;
             }
-            .conn {
-                display: flex;
-                align-items: center;
-                gap: 6px;
-                font-size: 12px;
-                color: var(--text-dim);
-                background: var(--panel);
-                border: 1px solid var(--border);
-                padding: 5px 10px;
-                border-radius: 99px;
-            }
+            /* link state, in front of the title: green while the polling
+             * keeps succeeding, red once it goes stale, blinking either way */
             .dot {
-                width: 8px;
-                height: 8px;
+                flex: none;
+                width: 11px;
+                height: 11px;
+                margin-right: 2px;
                 border-radius: 50%;
                 background: var(--ok);
                 animation: pulse 2s infinite;
@@ -104,7 +96,6 @@
             }
             body.stale .dot {
                 background: var(--co2-bad);
-                animation: none;
             }
             body.stale .grid-sensors,
             body.stale .card.weather,
@@ -211,19 +202,6 @@
             .trend.flat {
                 color: var(--text-faint);
             }
-            /* A second, derived reading under the measured one — currently
-               only the sea-level pressure. Sized between the big number and
-               the chart: it is a reading, not a footnote. */
-            .sensor .subval {
-                margin-top: 3px;
-                font-size: 12.5px;
-                color: var(--text-dim);
-                font-variant-numeric: tabular-nums;
-            }
-            .sensor .subval b {
-                color: var(--text);
-                font-weight: 600;
-            }
             /* Min/max ride along the right edge of the big reading instead of
                taking a row of their own — that row was stolen from the chart. */
             .sensor .minmax {
@@ -288,15 +266,6 @@
                 text-transform: none;
                 letter-spacing: 0;
             }
-            .weather-cond {
-                margin: -2px 0 12px;
-                font-size: 13px;
-                font-weight: 500;
-                color: var(--text-dim);
-                /* reserve one line so the grid doesn't jump when the
-                 * conditions text appears/clears */
-                min-height: 1.3em;
-            }
             .weather-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
@@ -326,6 +295,18 @@
             .weather-metric .ol {
                 font-size: 11px;
                 color: var(--text-faint);
+            }
+            /* the conditions tile holds a phrase, not a reading: the 24px
+             * numeric size would only make it wrap in a narrow column */
+            .weather-metric.cond .ov {
+                font-size: 15px;
+                font-weight: 600;
+                line-height: 1.25;
+                letter-spacing: 0;
+                /* the numeric tiles keep a single line; this one takes the
+                 * slack of the equal-height row so its label stays at the
+                 * bottom edge like theirs */
+                margin-bottom: auto;
             }
             .weather-meta {
                 margin-top: 12px;
@@ -378,6 +359,20 @@
                 font-weight: 600;
                 letter-spacing: 0.03em;
             }
+            /* liveness indicator in front of the part number, replaces the
+             * former online/offline text badge. It sits in its own column of
+             * .sens-head so the part number and the description below it share
+             * one left edge, centred on the two lines together. */
+            .sens-dot {
+                flex: none;
+                width: 10px;
+                height: 10px;
+                border-radius: 50%;
+                background: var(--co2);
+            }
+            .sens-dev.off .sens-dot {
+                background: var(--co2-bad);
+            }
             .sens-sub {
                 font-size: 11px;
                 color: var(--text-faint);
@@ -386,9 +381,6 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
-            }
-            .sens-dev .badge {
-                flex: none;
             }
             .sens-metrics {
                 display: grid;
@@ -457,9 +449,19 @@
                 color: var(--accent);
                 font-weight: 600;
             }
+            /* the chip is there to be picked, not deleted: the cross stays
+             * faint until it is pointed at, and only then reads as destructive */
             .loc-chip .del {
+                color: var(--text-faint);
+                font-size: 10px;
+                opacity: 0.6;
+                transition:
+                    color 0.15s,
+                    opacity 0.15s;
+            }
+            .loc-chip .del:hover {
                 color: var(--co2-bad);
-                font-size: 12px;
+                opacity: 1;
             }
             .loc-chip.add {
                 color: var(--text-faint);
@@ -737,10 +739,20 @@
             .wifi-item .lock {
                 font-size: 11px;
             }
+            /* the row is there to be joined, not forgotten: the cross stays
+             * faint until it is pointed at, and only then reads as destructive */
             .wifi-item .del {
-                font-size: 13px;
-                color: var(--co2-bad);
+                font-size: 11px;
+                color: var(--text-faint);
+                opacity: 0.6;
                 padding: 0 4px;
+                transition:
+                    color 0.15s,
+                    opacity 0.15s;
+            }
+            .wifi-item .del:hover {
+                color: var(--co2-bad);
+                opacity: 1;
             }
             .rssi {
                 display: inline-flex;
@@ -997,6 +1009,7 @@
         <div class="wrap">
             <!-- HEADER -->
             <header>
+                <span class="dot" id="connDot"></span>
                 <h1 data-i18n="appName">Метеостанция</h1>
                 <div class="spacer"></div>
                 <div class="seg" id="periodSeg">
@@ -1033,9 +1046,6 @@
                         />
                     </svg>
                 </button>
-                <div class="conn">
-                    <span class="dot"></span><span id="connText">Онлайн</span>
-                </div>
             </header>
 
             <!-- SENSORS — one card per series, built from SERIES at startup;
@@ -1059,9 +1069,9 @@
                     <span class="weather-age" id="weatherAge"></span>
                 </h2>
                 <div class="loc-bar" id="locBar"></div>
-                <div class="weather-cond" id="weatherCond"></div>
-                <!-- built from WEATHER_TILES at startup; the full set of tiles
-                     is always laid out, data or not -->
+                <!-- built from WEATHER_TILES at startup, behind a tile holding
+                     the decoded conditions; the full set of tiles is always
+                     laid out, data or not -->
                 <div class="weather-grid" id="weatherGrid"></div>
                 <div class="weather-meta" id="weatherMeta"></div>
             </div>
@@ -1284,7 +1294,9 @@
                                   reduced from the configured altitude), `sensors` the
                                   chips on the bus
      GET  /api/history          - {period, co2[], temp[], rh[], press[], lux[]},
-                                  ?p=5m|1h|1d, null = gap in that series alone
+                                  ?p=5m|1h|1d, null = gap in that series alone.
+                                  press[] arrives already reduced to sea level
+                                  (stored absolute, reduced on the way out)
      POST /api/history/reset    - wipes all tiers (RAM + flash snapshots)
      GET  /api/scan             - [{ssid, bssid, ch, rssi, auth}] (one per BSSID)
      GET  /api/networks         - saved networks [{ssid, bssid?}] (bssid = pinned AP)
@@ -1338,14 +1350,14 @@
                     max: "макс",
                     noData: "Нет данных",
                     weatherTitle: "Погода на улице",
+                    weatherCondLabel: "Условия",
+                    weatherCondCode: "Код",
                     weatherFeels: "По ощущениям",
-                    weatherTmin: "Мин. за день",
                     weatherTmax: "Макс. за день",
-                    weatherMsl: "На ур. моря",
+                    weatherTmin: "Мин. за день",
+                    weatherSurface: "Местное",
                     weatherUvi: "УФ-индекс",
-                    weatherWind: "Ветер",
                     weatherGust: "Порывы",
-                    weatherDir: "Направление",
                     weatherClouds: "Облачность",
                     weatherPrecip: "Осадки",
                     weatherAlt: "выс.",
@@ -1364,12 +1376,9 @@
                     sensVemlSub: "Освещённость",
                     sensPress: "Давление",
                     sensLux: "Освещённость",
-                    atSeaLevel: "на уровне моря",
                     altitude: "Высота над уровнем моря",
                     altSaved: "Высота сохранена",
                     sensWhiteRatio: "Соотношение white/lux",
-                    sensAlsRaw: "ALS",
-                    sensWhiteRaw: "White",
                     sensGain: "Усиление",
                     sensIt: "Интегрирование",
                     uLux: "лк",
@@ -1519,14 +1528,14 @@
                     max: "max",
                     noData: "No data",
                     weatherTitle: "Outside weather",
+                    weatherCondLabel: "Conditions",
+                    weatherCondCode: "Code",
                     weatherFeels: "Feels like",
-                    weatherTmin: "Daily min",
                     weatherTmax: "Daily max",
-                    weatherMsl: "Sea level",
+                    weatherTmin: "Daily min",
+                    weatherSurface: "Surface",
                     weatherUvi: "UV index",
-                    weatherWind: "Wind",
                     weatherGust: "Gusts",
-                    weatherDir: "Direction",
                     weatherClouds: "Clouds",
                     weatherPrecip: "Precipitation",
                     weatherAlt: "alt.",
@@ -1545,12 +1554,9 @@
                     sensVemlSub: "Ambient light",
                     sensPress: "Pressure",
                     sensLux: "Illuminance",
-                    atSeaLevel: "at sea level",
                     altitude: "Altitude above sea level",
                     altSaved: "Altitude saved",
                     sensWhiteRatio: "White/lux ratio",
-                    sensAlsRaw: "ALS",
-                    sensWhiteRaw: "White",
                     sensGain: "Gain",
                     sensIt: "Integration",
                     uLux: "lx",
@@ -1584,12 +1590,12 @@
                         55: "Dense drizzle",
                         56: "Light freezing drizzle",
                         57: "Freezing drizzle",
-                        61: "Slight rain",
+                        61: "Light rain",
                         63: "Rain",
                         65: "Heavy rain",
                         66: "Light freezing rain",
                         67: "Freezing rain",
-                        71: "Slight snow",
+                        71: "Light snow",
                         73: "Snow",
                         75: "Heavy snow",
                         77: "Snow grains",
@@ -1891,18 +1897,6 @@
                             f: (v) => v.toFixed(2),
                         },
                         {
-                            k: "als_raw",
-                            l: "sensAlsRaw",
-                            f: (v) => String(v),
-                            aux: true,
-                        },
-                        {
-                            k: "white_raw",
-                            l: "sensWhiteRaw",
-                            f: (v) => String(v),
-                            aux: true,
-                        },
-                        {
                             k: "gain",
                             l: "sensGain",
                             f: (v) => "×" + v,
@@ -1974,11 +1968,13 @@
 
                     return (
                         `<div class="sens-dev${ok ? "" : " off"}">` +
-                        '<div class="sens-head"><div class="sens-id">' +
+                        '<div class="sens-head">' +
+                        `<span class="sens-dot" title="${
+                            ok ? t("sensOk") : t("sensOff")
+                        }"></span>` +
+                        '<div class="sens-id">' +
                         `<span class="sens-name">${dev.name}</span>` +
-                        `<span class="sens-sub">${t(dev.sub)}</span></div>` +
-                        `<span class="badge ${ok ? "good" : "off"}">` +
-                        `${ok ? t("sensOk") : t("sensOff")}</span></div>` +
+                        `<span class="sens-sub">${t(dev.sub)}</span></div></div>` +
                         `<div class="sens-metrics">${tiles}</div>` +
                         (aux ? `<div class="sens-aux">${aux}</div>` : "") +
                         "</div>"
@@ -1991,28 +1987,39 @@
              * is built once at startup and every tile stays in place for the
              * life of the page: an absent reading only changes the text to
              * NA, never the set of tiles. `u` is a literal unit, `ui` an i18n
-             * key, `uf` derives the unit from the value itself. */
+             * key, `uf` derives the unit from the values themselves. `k` names
+             * the tile and its DOM ids; the readings behind it are `src`, one
+             * field or several where a tile merges readings that are only ever
+             * read together — `f`, `uf` and `lf` then take them in that order,
+             * and a tile whose readings are not all there goes to NA as a
+             * whole. A merged tile stays the size of every other one by
+             * putting its second reading in the label: `lf` writes it there,
+             * over the static `l`, which is left as the wording to fall back
+             * on before the first reply. */
             const WEATHER_TILES = [
                 { k: "temp", l: "temperature", u: "°C", f: (v) => v.toFixed(1) },
                 { k: "feels", l: "weatherFeels", u: "°C", f: (v) => v.toFixed(1) },
-                { k: "tmin", l: "weatherTmin", u: "°C", f: (v) => v.toFixed(1) },
                 { k: "tmax", l: "weatherTmax", u: "°C", f: (v) => v.toFixed(1) },
+                { k: "tmin", l: "weatherTmin", u: "°C", f: (v) => v.toFixed(1) },
                 { k: "hum", l: "humidity", u: "%", f: (v) => v.toFixed(0) },
-                { k: "press", l: "sensPress", u: "hPa", f: (v) => v.toFixed(1) },
                 {
-                    k: "press_msl",
-                    l: "weatherMsl",
+                    k: "press",
+                    l: "weatherSurface",
+                    src: ["press_msl", "press"],
                     u: "hPa",
-                    f: (v) => v.toFixed(1),
+                    f: (msl) => msl.toFixed(1),
+                    lf: (msl, p) => `${t("weatherSurface")}: ${p.toFixed(1)}`,
                 },
                 { k: "uvi", l: "weatherUvi", f: (v) => v.toFixed(2) },
-                { k: "wind", l: "weatherWind", ui: "uKmh", f: (v) => v.toFixed(1) },
-                { k: "gust", l: "weatherGust", ui: "uKmh", f: (v) => v.toFixed(1) },
                 {
-                    k: "wind_dir",
-                    l: "weatherDir",
-                    f: windDir,
-                    uf: (v) => v + "°",
+                    k: "wind",
+                    l: "weatherGust",
+                    src: ["wind", "gust", "wind_dir"],
+                    ui: "uKmh",
+                    /* the direction leads the reading it belongs to, the way a
+                     * forecast reads it out: "W 4.8 km/h" */
+                    f: (w, g, dir) => `${windDir(dir)} ${w.toFixed(1)}`,
+                    lf: (w, g) => `${t("weatherGust")}: ${g.toFixed(1)}`,
                 },
                 { k: "clouds", l: "weatherClouds", u: "%", f: (v) => v.toFixed(0) },
                 {
@@ -2024,7 +2031,15 @@
             ];
 
             function buildWeatherGrid() {
-                $("weatherGrid").innerHTML = WEATHER_TILES.map((m) => {
+                /* the decoded conditions lead the grid as a tile of their own:
+                 * text where the others carry numbers, so it gets its own
+                 * smaller, wrapping value style */
+                const cond =
+                    '<div class="weather-metric cond">' +
+                    `<span class="ov" id="weatherCond">${NA}</span>` +
+                    '<span class="ol" id="weatherCondLabel" ' +
+                    'data-i18n="weatherCondLabel"></span></div>';
+                $("weatherGrid").innerHTML = cond + WEATHER_TILES.map((m) => {
                     const unit = m.uf
                         ? `<span class="ou" id="wxu_${m.k}"></span>`
                         : m.ui
@@ -2032,10 +2047,14 @@
                           : m.u
                             ? `<span class="ou">${m.u}</span>`
                             : "";
+                    /* a merged tile writes its own label, so it needs an id;
+                     * data-i18n stays for the wording shown until then */
+                    const id = m.lf ? ` id="wxl_${m.k}"` : "";
                     return (
                         '<div class="weather-metric"><div>' +
                         `<span class="ov" id="wx_${m.k}">${NA}</span>${unit}` +
-                        `</div><span class="ol" data-i18n="${m.l}"></span></div>`
+                        `</div><span class="ol"${id} data-i18n="${m.l}">` +
+                        "</span></div>"
                     );
                 }).join("");
             }
@@ -2045,20 +2064,28 @@
                 const live = (v) =>
                     ok && typeof v === "number" && Number.isFinite(v) ? v : null;
                 WEATHER_TILES.forEach((m) => {
-                    const v = live(w[m.k]);
-                    $("wx_" + m.k).textContent = num(v, m.f);
+                    const vals = (m.src || [m.k]).map((k) => live(w[k]));
+                    const have = vals.every((v) => v !== null);
+                    $("wx_" + m.k).textContent = have ? m.f(...vals) : NA;
                     if (m.uf)
-                        $("wxu_" + m.k).textContent = v === null ? "" : m.uf(v);
+                        $("wxu_" + m.k).textContent = have ? m.uf(...vals) : "";
+                    if (m.lf)
+                        $("wxl_" + m.k).textContent = have
+                            ? m.lf(...vals)
+                            : t(m.l);
                 });
 
+                /* the phrase is the reading; the bare WMO number goes to the
+                 * label, where it documents the phrase without competing
+                 * with it */
                 const code = live(w.code);
                 const wtext = code === null ? "" : t("wcode")[code] || "";
                 $("weatherCond").textContent =
-                    (code !== null && code >= 0
-                        ? wtext
-                            ? `${wtext} (${code})`
-                            : String(code)
-                        : wtext) || "—";
+                    wtext || (code !== null && code >= 0 ? String(code) : "—");
+                $("weatherCondLabel").textContent =
+                    code !== null && code >= 0
+                        ? `${t("weatherCondCode")}: ${code}`
+                        : t("weatherCondLabel");
 
                 $("weatherMeta").textContent = ok
                     ? `${t("weatherAlt")} ${num(live(w.elev), Math.round)} ` +
@@ -2123,15 +2150,8 @@
 
             function setStale(stale) {
                 document.body.classList.toggle("stale", stale);
-                if (stale) {
-                    const ago = lastOk
-                        ? Math.round((Date.now() - lastOk) / 1000)
-                        : null;
-                    $("connText").textContent =
-                        t("noLink") + (ago ? ` · ${ago} ${t("uS")}` : "");
-                } else {
-                    $("connText").textContent = t("online");
-                }
+                /* the dot carries the state; the wording only shows on hover */
+                $("connDot").title = t(stale ? "noLink" : "online");
             }
 
             /* Fetching and rendering are kept apart on purpose: only a failed
@@ -2182,11 +2202,6 @@
                 const cl = s.climate || {};
                 SERIES.forEach((sr) => {
                     $(sr.k + "Val").textContent = num(cl[sr.src], sr.fmt);
-                    if (sr.sub)
-                        $(sr.k + "SubVal").textContent = num(
-                            cl[sr.subSrc],
-                            sr.fmt,
-                        );
                 });
 
                 /* the one card that carries a level badge instead of a trend */
@@ -2206,9 +2221,10 @@
                 renderSensors(sn);
 
                 /* system card: Wi-Fi station and access point shown as
-                 * separate sections (in APSTA both can be up at once). Each
-                 * section always lists the same rows, an unconnected one
-                 * filled with NA, so the panel keeps its shape. */
+                 * separate sections (in APSTA both can be up at once). The
+                 * station section always lists the same rows, an unconnected
+                 * one filled with NA, so the panel keeps its shape; the AP
+                 * collapses to its state row when it is down. */
                 const sta = s.sta || {};
                 const ap = s.ap || {};
                 const on = (cond, v) => (cond ? v : NA);
@@ -2228,19 +2244,24 @@
                     ["MAC", on(sta.connected, sta.mac)],
                     { h: t("apMode") },
                     [t("state"), ap.active ? t("apOn") : t("apOff")],
-                    [t("network"), on(ap.active, ap.ssid)],
-                    [t("ipAddr"), on(ap.active, ap.ip)],
-                    [t("channel"), on(ap.active, ap.channel)],
-                    ["MAC", on(ap.active, ap.mac)],
-                    [t("clients"), on(ap.active, (ap.clients || []).length)],
                 ];
-                if (ap.active)
+                /* an AP that is down has nothing to describe — the state row
+                 * says it, the rest would only be a column of NA */
+                if (ap.active) {
+                    rows.push(
+                        [t("network"), ap.ssid],
+                        [t("ipAddr"), ap.ip],
+                        [t("channel"), ap.channel],
+                        ["MAC", ap.mac],
+                        [t("clients"), (ap.clients || []).length],
+                    );
                     (ap.clients || []).forEach((c, i) =>
                         rows.push([
                             `${t("client")} ${i + 1}`,
                             `${c.mac} · ${c.rssi} dBm`,
                         ]),
                     );
+                }
                 rows.push(
                     { h: t("device") },
                     [
@@ -2258,7 +2279,7 @@
                     ],
                     [
                         t("chipTemp"),
-                        num(sn.chip_temp, (v) => v.toFixed(1) + " °C"),
+                        num(sy.chip_temp, (v) => v.toFixed(1) + " °C"),
                     ],
                     [t("tasksConns"), `${txt(sy.tasks)}/${txt(sy.http_conns)}`],
                     ["NVS", `${txt(sy.nvs_used)}/${txt(sy.nvs_total)}`],
@@ -2376,13 +2397,15 @@
                 },
                 {
                     k: "p",
-                    src: "press",
+                    /* Sea level everywhere the pressure is read — that is the
+                     * value comparable with a forecast and with the outside
+                     * block. `hist` is already reduced by the endpoint, so the
+                     * chart, the min/max and the trend follow along. */
+                    src: "press_msl",
                     hist: "press",
                     title: "sensPress",
                     unit: "hPa",
                     color: "--press",
-                    sub: "atSeaLevel",
-                    subSrc: "press_msl",
                     fmt: (v) => v.toFixed(3),
                     /* a 3-decimal delta is noise; the reading itself is not */
                     trendFmt: (v) => v.toFixed(2),
@@ -2427,11 +2450,6 @@
                     const head = sr.badge
                         ? `<span class="badge off" id="${sr.k}Badge" data-i18n="noData"></span>`
                         : `<span class="trend flat" id="${sr.k}Trend">—</span>`;
-                    const sub = sr.sub
-                        ? '<div class="subval">' +
-                          `<span data-i18n="${sr.sub}"></span> ` +
-                          `<b id="${sr.k}SubVal">${NA}</b> ${sr.unit}</div>`
-                        : "";
                     return (
                         '<div class="card sensor"><h2>' +
                         `<span data-i18n="${sr.title}"></span>${head}</h2>` +
@@ -2442,7 +2460,6 @@
                         `<span><span data-i18n="max"></span> <b id="${sr.k}Max">${NA}</b></span>` +
                         `<span><span data-i18n="min"></span> <b id="${sr.k}Min">${NA}</b></span>` +
                         "</div></div>" +
-                        sub +
                         `<canvas id="${sr.k}Chart"></canvas></div>`
                     );
                 }).join("");

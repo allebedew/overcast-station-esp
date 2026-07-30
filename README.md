@@ -31,19 +31,25 @@ the alerts are still the only consumer left tied to the SCD40 alone.
   The trend arrow shows the change across the whole displayed period (first
   sample of the window vs the latest one); min/max sit to the right of the big
   reading rather than on a row of their own, so the chart keeps that height
-  — CO₂ carries a level badge instead of a trend arrow, and pressure carries a
-  second line under the reading with the same value reduced to sea level.
+  — CO₂ carries a level badge instead of a trend arrow, and pressure reads
+  **reduced to sea level** throughout: reading, chart, min/max and trend alike.
   Then a
   sensors card holding one equal-height nested card per I2C device — SCD40,
-  TMP117, BMP581, VEML7700 — each with an online/no-response badge and its
-  readings as tiles built like the weather ones (the VEML7700's raw counts,
-  gain and integration time sit on a footer line instead: they explain the lux
+  TMP117, BMP581, VEML7700 — each with a green/red liveness dot in front of
+  the part number (the state is spelled out in its tooltip) and its
+  readings as tiles built like the weather ones (the VEML7700's gain and
+  integration time sit on a footer line instead: they explain the lux
   values rather than being readings); an offline device keeps its card, dimmed,
   with placeholder values. Below them an
-  outside-weather card (Open-Meteo, refreshed hourly: a decoded conditions
-  line, one tile per parameter — temperature, feels-like, daily min/max,
-  humidity, surface & sea-level pressure, UV index, wind speed, gusts,
-  direction, cloud cover and total precipitation — and a meta line with the
+  outside-weather card (Open-Meteo, refreshed hourly: one tile per parameter,
+  led by a tile whose reading is the decoded conditions and whose label carries
+  the bare WMO code — temperature, feels-like, daily max, daily min,
+  humidity, surface & sea-level pressure, UV index, wind speed with gusts and
+  direction, cloud cover and total precipitation; readings that only make
+  sense together share a tile without growing it, one reading leading and the
+  other in the label: MSL pressure "1023.4 hPa" over "Местное: 998.8", wind
+  "W 4.8 km/h" over "Порывы: 18.0" — and a
+  meta line with the
   grid-cell elevation, the coordinates and the location's UTC offset; a chip row switches the
   displayed location and adds/removes them, resolving a typed city name to
   coordinates via in-browser Open-Meteo geocoding), plus a
@@ -63,13 +69,14 @@ the alerts are still the only consumer left tied to the SCD40 alone.
   with a color dot next to it previewing the current value; what is typed is
   sent to the device verbatim, and a malformed value is rejected with the
   field put back to the color the device is showing.
-  The header is a single row of equal-height controls — title, then the chart
-  period switch, the language switch, the gear and the connection pill.
+  The header is a single row — a blinking link dot and the title, then the
+  equal-height controls: the chart period switch, the language switch and the
+  gear.
   The system/settings/Wi-Fi cards are hidden by default behind that gear toggle
   (state persists in localStorage), so the page opens as a
   compact sensor dashboard.
-  Auto-refreshes every 1 s; the header connection pill turns red and the page
-  dims when the device is unreachable. Bilingual (RU/EN): all strings live in
+  Auto-refreshes every 1 s; the header dot turns from green to red (the state
+  in its tooltip) and the page dims when the device is unreachable. Bilingual (RU/EN): all strings live in
   an in-page dictionary, the header has a language switch, the choice persists
   in localStorage and defaults to the browser language.
   Every reading is a fixed slot: the sensor cards, the weather tiles and the
@@ -79,7 +86,7 @@ the alerts are still the only consumer left tied to the SCD40 alone.
   same with data and without it. Adding a metric is a table entry, not markup.
   Fetching and rendering sit in separate `try` blocks, so a failed request is
   the only thing that means "no link" — a rendering bug goes to the console
-  instead of turning the connection pill red.
+  instead of turning the header dot red.
 - **OTA** — push model: `./flash-ota.sh [host]` builds and uploads the binary
   to `POST /api/ota` (auth via `X-OTA-Key` header, key defined in `ota.c`).
   Two 4 MB app partitions + otadata; rollback is enabled — a new image must
@@ -202,7 +209,8 @@ the alerts are still the only consumer left tied to the SCD40 alone.
     to one decimal for as long as it does: a truncated number reads as a
     plausible wrong one
   - indoor precise — `23.46° 1013.250` / `1250 45.3% 999.9` (TMP117 °C and
-    BMP581 hPa; below them SCD40 CO₂ and humidity plus VEML7700 illuminance).
+    BMP581 hPa reduced to sea level; below them SCD40 CO₂ and humidity plus
+    VEML7700 illuminance).
     The unit suffixes are what the second row spends its characters on
     instead of digits. That leaves five columns for the illuminance, so its
     tenth of a lux survives below 1000 lx, then the row drops to whole lux and
@@ -263,13 +271,20 @@ the alerts are still the only consumer left tied to the SCD40 alone.
   than assuming the standard profile — the column is outdoors — and taking it
   from the weather API would make a local reading stop working when the network
   does. At altitude 0 the factor is exactly 1, so an unconfigured station
-  reports its measurement unchanged rather than something subtly wrong. The
-  reduced value is not stored in the history: at a fixed altitude it is the
-  measured pressure times a constant, so its curve would be the same one
-  shifted.
+  reports its measurement unchanged rather than something subtly wrong.
+
+  The reduced value is what every readout shows — the web card and its chart,
+  the LCD's precise page, the `press_msl` field — while the history rings keep
+  the pressure **as measured** and `/api/history` reduces it on the way out. At
+  a fixed altitude the reduction is a multiplication by a constant, so storing
+  it would only shift the same curve; storing the measurement instead means a
+  later correction to the altitude re-reduces the whole recorded history
+  correctly, rather than leaving a wrong reduction baked in.
 - **Site altitude** — metres above sea level, −500…9000, stored in NVS
   (`settings/altitude_m`, default 0) and set from the settings card on the web
-  page. Nothing else depends on it.
+  page. Everything the station shows as pressure passes through it, so a wrong
+  altitude shifts every pressure readout and chart (but never the stored
+  history).
 - **Reading resolution** — one per quantity, the same everywhere a value is
   shown or stored: the web page, the HTTP API, the charts, the history rings
   and the LCD. Written down once in `climate.h`, next to the quantities
@@ -338,8 +353,15 @@ the alerts are still the only consumer left tied to the SCD40 alone.
   No API key needed; the default `best_match` model picks the most accurate
   regional model for the coordinates (ICON / ECMWF over Europe). Only the
   active location is fetched; the full request URL is logged on every fetch.
-  A failed fetch drops the cached reading (`weather.ok` goes false, the card
-  empties — no stale values are shown) and is retried in 5 min.
+  Failures are told apart by how far the request got. One that never reached
+  the API (DNS, TLS, timeout) is retried after 15 s, then 30, 60, … up to
+  5 min — the deployment resolver drops queries often enough that the next
+  attempt usually succeeds, and waiting minutes for it left the card empty for
+  no reason. A reply that did arrive but was unusable (non-200, unexpected
+  JSON) waits the full 5 min, since retrying fast would not help. The cached
+  reading survives a failed fetch — its age is in `weather.age` — and is
+  dropped once it passes an hour, at which point `weather.ok` goes false and
+  the card empties rather than showing yesterday's weather.
   Exposed as the `weather` object in
   `/api/status` (incl. `name` / `active`) and shown in a
   dedicated "outside weather" card on the web page — both at the resolution
@@ -412,8 +434,8 @@ flat (`#include "screen_16x2.h"`, not `"ui/screen_16x2.h"`).
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (index.html, gzipped) |
-| `/api/status` | GET | full status JSON, grouped into objects: `sta` / `ap` (Wi-Fi), `climate`, `sensors`, `weather` (Open-Meteo), `system` (firmware, chip, heap, uptime, clock, plus `nvs_used`/`nvs_total` as counted once at boot — the count only moves when a setting is written, and walking the NVS pages on every poll is not worth it), `settings` (`led_brightness`, `backlight_rgb`, `backlight_scale` — read-only, what the ambient light is scaling that color by right now, 0-255 — and `altitude`); nothing is left at the top level. `climate` is the room — `temp`, `rh`, `co2`, `press`, `press_msl` (the same reading reduced to sea level from the configured altitude), `lux`, each a number or `null` when no sensor stands behind it. `sensors` is the hardware view: one object per I2C device, each with its own `ok` — `scd40` (`co2`, `temp`, `rh`), `tmp117` (`temp`), `bmp581` (`press` hPa, `press_pa`, `temp`), `veml7700` (`lux`, `white_ratio`, `als_raw`, `white_raw`, `gain`, `it`) — plus `chip_temp` (the SoC sensor, not on the bus) at the top of the group |
-| `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`) selects the ring; returns `{period: <s>, co2: [...], temp: [...], rh: [...], press: [...], lux: [...]}`. Each series is gated on its own quantity, so `null` is a gap in that series alone |
+| `/api/status` | GET | full status JSON, grouped into objects: `sta` / `ap` (Wi-Fi), `climate`, `sensors`, `weather` (Open-Meteo), `system` (firmware, chip incl. `chip_temp` from the SoC sensor, heap, uptime, clock, plus `nvs_used`/`nvs_total` as counted once at boot — the count only moves when a setting is written, and walking the NVS pages on every poll is not worth it), `settings` (`led_brightness`, `backlight_rgb`, `backlight_scale` — read-only, what the ambient light is scaling that color by right now, 0-255 — and `altitude`); nothing is left at the top level. `climate` is the room — `temp`, `rh`, `co2`, `press`, `press_msl` (the same reading reduced to sea level from the configured altitude), `lux`, each a number or `null` when no sensor stands behind it. `sensors` is the hardware view: one object per I2C device, each with its own `ok` — `scd40` (`co2`, `temp`, `rh`), `tmp117` (`temp`), `bmp581` (`press` hPa, `press_pa`, `temp`), `veml7700` (`lux`, `white_ratio`, `gain`, `it`) — the bus only, the SoC's own `chip_temp` lives in `system` |
+| `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`) selects the ring; returns `{period: <s>, co2: [...], temp: [...], rh: [...], press: [...], lux: [...]}`. Each series is gated on its own quantity, so `null` is a gap in that series alone. `press` comes out reduced to sea level — the rings store it as measured and the reduction is applied per point on serialisation |
 | `/api/history/reset` | POST | wipe all history tiers (RAM rings and the `/data/hist_1h.bin` / `/data/history.bin` flash snapshots); sampling keeps running and refills from empty |
 | `/api/scan` | GET | scan for Wi-Fi networks, returns `[{ssid, bssid, ch, rssi, auth}]` (one entry per BSSID — same SSID may repeat across APs) |
 | `/api/networks` | GET | list of saved networks `[{ssid, bssid?}]` (bssid present only when the network is pinned to an AP) |
@@ -438,6 +460,9 @@ idf.py build flash monitor   # first time (partition table changed) — by cable
 Deliberate config deviations live in `sdkconfig.defaults` (16 MB flash size,
 custom partition table, rollback, run-time stats for CPU load, -Os, and
 `LWIP_MAX_SOCKETS=16` so httpd + mDNS + SNTP don't starve the outbound TLS
-clients of sockets); `sdkconfig` is generated and not tracked. `partitions.csv`: nvs 24K, otadata 8K, phy 4K, ota_0/ota_1
+clients of sockets, and a `1.1.1.1` DNS fallback server for when the
+DHCP-supplied resolver leaves a query unanswered); `sdkconfig` is generated
+and not tracked — delete it after changing the defaults, or the old value
+wins. `partitions.csv`: nvs 24K, otadata 8K, phy 4K, ota_0/ota_1
 4M each, storage (LittleFS) 6M pinned to the end of flash at 0xA00000 so
 future app-slot growth does not move the data.

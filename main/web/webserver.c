@@ -299,12 +299,12 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"climate\":{"
         "\"temp\":%s,\"rh\":%s,\"co2\":%s,"
         "\"press\":%s,\"press_msl\":%s,\"lux\":%s},"
-        "\"sensors\":{\"chip_temp\":%.1f,"
+        "\"sensors\":{"
         "\"scd40\":{\"ok\":%s,\"co2\":%u,\"temp\":%.1f,\"rh\":%.1f},"
         "\"tmp117\":{\"ok\":%s,\"temp\":%.2f},"
         "\"bmp581\":{\"ok\":%s,\"press\":%.3f,\"press_pa\":%.1f,\"temp\":%.2f},"
         "\"veml7700\":{\"ok\":%s,"
-        "\"lux\":%.1f,\"white_ratio\":%.2f,\"als_raw\":%u,\"white_raw\":%u,"
+        "\"lux\":%.1f,\"white_ratio\":%.2f,"
         "\"gain\":\"%s\",\"it\":%u}},"
         "\"weather\":{\"ok\":%s,\"temp\":%.1f,\"feels\":%.1f,"
         "\"tmin\":%.1f,\"tmax\":%.1f,"
@@ -318,7 +318,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"system\":{"
         "\"uptime\":%lld,\"time\":\"%s\",\"time_synced\":%s,"
         "\"app_version\":\"%s\",\"build\":\"%s %s\",\"idf_ver\":\"%s\","
-        "\"chip_rev\":\"v%d.%d\",\"cpu_mhz\":%d,\"flash_mb\":%lu,"
+        "\"chip_rev\":\"v%d.%d\",\"chip_temp\":%.1f,"
+        "\"cpu_mhz\":%d,\"flash_mb\":%lu,"
         "\"reset_reason\":\"%s\",\"cpu_load\":%d,\"tasks\":%u,"
         "\"http_conns\":%d,"
         "\"heap_free\":%u,\"heap_min\":%u,\"heap_total\":%u,\"heap_largest\":%u,"
@@ -328,13 +329,12 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"altitude\":%d}}",
         sta_json, ap_json,
         cl_temp, cl_rh, cl_co2, cl_press, cl_msl, cl_lux,
-        sysinfo_chip_temp_c(),
         air_ok ? "true" : "false", air.co2_ppm, air.temp_c, air.rh_pct,
         tmp117_ok ? "true" : "false", tmp117.temp_c,
         bmp581_ok ? "true" : "false",
         bmp581.press_hpa, bmp581.press_hpa * 100.0f, bmp581.temp_c,
         veml_ok ? "true" : "false",
-        veml.lux, veml_white_ratio, veml.als_raw, veml.white_raw,
+        veml.lux, veml_white_ratio,
         veml.gain, veml.it_ms,
         weather_ok ? "true" : "false", weather.temp_c, weather.feels_c,
         weather.temp_min_c, weather.temp_max_c,
@@ -350,6 +350,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         timesync_is_synced() ? "true" : "false",
         sys->app_version, sys->build_date, sys->build_time, sys->idf_ver,
         sys->chip_rev_major, sys->chip_rev_minor,
+        sysinfo_chip_temp_c(),
         sys->cpu_mhz,
         (unsigned long)sys->flash_mb,
         sysinfo_reset_reason_str(), run.cpu_load_pct,
@@ -422,7 +423,12 @@ static esp_err_t history_get_handler(httpd_req_t *req)
                     snprintf(val, sizeof(val), "%.1f", p.rh_dpct / 10.0);
                     break;
                 case HISTORY_HAS_PRESS:
-                    snprintf(val, sizeof(val), "%.3f", p.press_mhpa / 1000.0);
+                    /* Stored as measured, served reduced to sea level — the
+                     * charts show the same quantity the cards do. Keeping the
+                     * ring absolute means a later correction to the site
+                     * altitude re-reduces the whole history correctly. */
+                    snprintf(val, sizeof(val), "%.3f",
+                             climate_to_sea_level(p.press_mhpa / 1000.0f));
                     break;
                 default:
                     snprintf(val, sizeof(val), "%.1f", p.lux);

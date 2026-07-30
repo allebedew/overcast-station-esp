@@ -1,6 +1,7 @@
 #include "weather_api.h"
 
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -34,6 +35,8 @@
 
 #define WEATHER_API_UPDATE_INTERVAL_MS (15 * 60 * 1000)
 #define WEATHER_API_RETRY_INTERVAL_MS  (5 * 60 * 1000)  /* retry sooner after a failure */
+#define WEATHER_API_FIRST_RETRY_MS     15000            /* first retry after a network failure */
+#define WEATHER_API_MAX_AGE_MS         (60 * 60 * 1000) /* a reading older than this is dropped */
 #define WEATHER_API_NO_NET_DELAY_MS    10000            /* wait for the link, then re-check */
 #define WEATHER_API_HTTP_TIMEOUT_MS    10000
 #define WEATHER_API_MAX_RESPONSE       2048             /* current-only reply is well under 1 KB */
@@ -141,7 +144,15 @@ static bool parse(const char *json)
     return ok;
 }
 
-static bool fetch(const weather_location_t *loc)
+/* Why a fetch ended, because the two failures deserve different waits: a
+ * request that never reached the API says nothing about the API. */
+typedef enum {
+    FETCH_OK,
+    FETCH_TRANSIENT,  /* never got there: DNS, TLS, timeout, no route */
+    FETCH_REJECTED,   /* the reply arrived and was unusable */
+} fetch_result_t;
+
+static fetch_result_t fetch(const weather_location_t *loc)
 {
     static char buf[WEATHER_API_MAX_RESPONSE];
     resp_ctx_t ctx = { .buf = buf, .len = 0, .cap = sizeof(buf) };
@@ -168,7 +179,7 @@ static bool fetch(const weather_location_t *loc)
     };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) {
-        return false;
+        return FETCH_TRANSIENT;
     }
     esp_err_t err = esp_http_client_perform(client);
     int status = esp_http_client_get_status_code(client);
@@ -176,15 +187,25 @@ static bool fetch(const weather_location_t *loc)
 
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "fetch failed: %s", esp_err_to_name(err));
-        return false;
+        return FETCH_TRANSIENT;
     }
     if (status != 200) {
         ESP_LOGE(TAG, "API returned HTTP %d", status);
-        return false;
+        return FETCH_REJECTED;
     }
     /* http_event keeps len < cap, so this NUL is always in bounds */
     ctx.buf[ctx.len] = '\0';
-    return parse(ctx.buf);
+    return parse(ctx.buf) ? FETCH_OK : FETCH_REJECTED;
+}
+
+/* Milliseconds since the last successful fetch, UINT32_MAX if there was none. */
+static uint32_t age_ms(void)
+{
+    taskENTER_CRITICAL(&s_lock);
+    bool valid = s_valid;
+    int64_t updated = s_updated_us;
+    taskEXIT_CRITICAL(&s_lock);
+    return valid ? (uint32_t)((esp_timer_get_time() - updated) / 1000) : UINT32_MAX;
 }
 
 /* Drops the cached reading, so nothing stale is reported as current. */
@@ -199,6 +220,8 @@ static TaskHandle_t s_task;
 
 static void weather_api_task(void *arg)
 {
+    uint32_t retry_ms = WEATHER_API_FIRST_RETRY_MS;
+
     for (;;) {
         weather_location_t loc;
         bool have = weather_store_get_active_location(&loc);
@@ -206,13 +229,33 @@ static void weather_api_task(void *arg)
         if (!have || !wifi_is_connected()) {
             /* no location selected yet, or waiting for the link */
             wait_ms = WEATHER_API_NO_NET_DELAY_MS;
-        } else if (fetch(&loc)) {
-            wait_ms = WEATHER_API_UPDATE_INTERVAL_MS;
         } else {
-            /* A failed fetch expires the reading rather than keeping the old
-             * one on screen: better no weather than yesterday's weather. */
-            invalidate();
-            wait_ms = WEATHER_API_RETRY_INTERVAL_MS;
+            switch (fetch(&loc)) {
+            case FETCH_OK:
+                wait_ms = WEATHER_API_UPDATE_INTERVAL_MS;
+                retry_ms = WEATHER_API_FIRST_RETRY_MS;
+                break;
+            case FETCH_TRANSIENT:
+                /* A resolver that drops a query usually answers the next one,
+                 * so come back in seconds rather than minutes; the wait then
+                 * doubles, so a real outage settles at the slow rate instead
+                 * of hammering the link. */
+                wait_ms = retry_ms;
+                retry_ms = retry_ms < WEATHER_API_RETRY_INTERVAL_MS / 2
+                               ? retry_ms * 2
+                               : WEATHER_API_RETRY_INTERVAL_MS;
+                break;
+            default: /* FETCH_REJECTED — the API answered, retrying fast won't help */
+                wait_ms = WEATHER_API_RETRY_INTERVAL_MS;
+                retry_ms = WEATHER_API_FIRST_RETRY_MS;
+                break;
+            }
+            /* A reading outlives a failed fetch — its age travels with it in
+             * the API and on screen — but only up to a point: past that it is
+             * yesterday's weather and better shown as nothing. */
+            if (age_ms() > WEATHER_API_MAX_AGE_MS) {
+                invalidate();
+            }
         }
         /* A notification from weather_api_refresh() cuts the wait short so a
          * location change is picked up right away. */
@@ -259,12 +302,6 @@ int weather_api_utc_offset_s(void)
 
 const char *weather_api_code_str(int code)
 {
-    /* WMO weather interpretation codes (WW) as documented by Open-Meteo, in
-     * the wording the web UI settled on — shorter than the standard's own,
-     * which matters on a 16-column panel. The API carries the code, not the
-     * text, so the web UI has this table too (`wcode` in index.html, one per
-     * language): the English one is a copy of this and the two are meant to
-     * stay word for word identical. */
     switch (code) {
     case 0:  return "Clear sky";
     case 1:  return "Mainly clear";
@@ -277,12 +314,12 @@ const char *weather_api_code_str(int code)
     case 55: return "Dense drizzle";
     case 56: return "Light freezing drizzle";
     case 57: return "Freezing drizzle";
-    case 61: return "Slight rain";
+    case 61: return "Light rain";
     case 63: return "Rain";
     case 65: return "Heavy rain";
     case 66: return "Light freezing rain";
     case 67: return "Freezing rain";
-    case 71: return "Slight snow";
+    case 71: return "Light snow";
     case 73: return "Snow";
     case 75: return "Heavy snow";
     case 77: return "Snow grains";

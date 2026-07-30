@@ -77,6 +77,12 @@ void climate_get(climate_t *out);
 int climate_altitude_m(void);
 void climate_set_altitude_m(int metres);
 
+/* Reduces a pressure measured at the site to sea level, from the configured
+ * altitude — the same transform climate_get() applies to press_msl_hpa.
+ * Exposed for the stored history, which keeps the pressure as measured and is
+ * reduced only on its way out. At altitude 0 it returns its argument. */
+float climate_to_sea_level(float press_hpa);
+
 /* Standard atmospheric pressure at the site altitude (ISA model) — what a
  * barometer reads there on a standard day. Used as the SCD40's ambient
  * pressure fallback when no BMP581 reading is available. */

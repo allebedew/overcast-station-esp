@@ -41,7 +41,10 @@ typedef enum {
  * storing. */
 typedef struct {
     float lux;
-    int32_t press_mhpa;  /* 0.001 hPa */
+    int32_t press_mhpa;  /* 0.001 hPa, as measured at the site — everything
+                          * that displays it reduces to sea level first, so a
+                          * later correction to the altitude re-reduces the
+                          * whole recorded history */
     uint16_t co2_ppm;
     int16_t temp_cx100;  /* 0.01 °C */
     uint16_t rh_dpct;    /* 0.1 % */

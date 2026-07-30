@@ -25,3 +25,10 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # mDNS and SNTP already fill it, so outbound TLS clients (telegram, weather_api)
 # could fail with "Failed to create socket / sock < 0". 16 is the LWIP max.
 CONFIG_LWIP_MAX_SOCKETS=16
+
+# The DHCP-supplied resolver on the deployment network drops queries often
+# enough that a single getaddrinfo() fails (EAI_FAIL, 202) with the link up
+# and healthy. LWIP walks its server list when a query goes unanswered, so
+# give it a public one to fall back to; the DHCP servers are still tried first.
+CONFIG_LWIP_FALLBACK_DNS_SERVER_SUPPORT=y
+CONFIG_LWIP_FALLBACK_DNS_SERVER_ADDRESS="1.1.1.1"

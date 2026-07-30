@@ -122,7 +122,7 @@ static void render_indoor(char *l0, char *l1)
 
 /* Every reading at the resolution the firmware standardised on, which is what
  * the headline page has no room for:
- *   23.46° 1013.250     (TMP117 °C, BMP581 hPa — 15 characters)
+ *   23.46° 1013.250     (TMP117 °C, BMP581 hPa at sea level — 15 characters)
  *   1250 45.3% 999.9    (SCD40 CO₂ and humidity, VEML7700 lx — 16 exactly)
  * That leaves five columns for the illuminance, so the tenth of a lux
  * survives only below 1000 lx; brighter than that the row drops to whole lux
@@ -136,7 +136,11 @@ static void render_precise(char *l0, char *l1)
 
     char temp[12], press[12], co2[12], rh[12];
     fmt_or(temp, sizeof(temp), c.temp_ok, "--.--" DEG, "%5.2f" DEG, c.temp_c);
-    fmt_or(press, sizeof(press), c.press_ok, "----.---", "%-8.3f", c.press_hpa);
+    /* Reduced to sea level, like everywhere else the pressure is shown. The
+     * eight columns still hold it: the reduction lands the reading back around
+     * a sea-level 1013 hPa whatever the altitude, so it stays four digits. */
+    fmt_or(press, sizeof(press), c.press_ok, "----.---", "%-8.3f",
+           c.press_msl_hpa);
     fmt_or(co2, sizeof(co2), c.co2_ok, "----", "%4.0f", c.co2_ppm);
     fmt_or(rh, sizeof(rh), c.rh_ok, "--.-", "%4.1f", c.rh_pct);
 
