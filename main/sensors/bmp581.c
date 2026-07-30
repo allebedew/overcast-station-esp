@@ -58,10 +58,11 @@ static const uint8_t BMP581_ADDRS[] = { 0x47, 0x46 };
  * that bit the filter runs but nothing sees its output.
  *
  * DSP_IIR: set_iir_t bits 2:0, set_iir_p bits 5:3, coefficient codes
- * 0 = bypass, 1 = 1, 2 = 3, 3 = 7, ... Coefficient 3 at 4 Hz gives a time
- * constant near a second: enough to settle the last displayed digit, short
- * enough that a door opening still shows up immediately. Temperature is left
- * unfiltered — it is read from the TMP117 anyway.
+ * 0 = bypass, 1 = 1, 2 = 3, 3 = 7, 4 = 15, ... The filter counts samples, not
+ * seconds, so the coefficient goes with the ODR below: 15 at 15 Hz gives a
+ * time constant near a second — enough to settle the last displayed digit,
+ * short enough that a door opening still shows up immediately. Temperature is
+ * left unfiltered — it is read from the TMP117 anyway.
  *
  * Both registers are written while the sensor is still in standby; the DSP
  * configuration is not meant to change during normal mode. */
@@ -69,23 +70,25 @@ static const uint8_t BMP581_ADDRS[] = { 0x47, 0x46 };
 #define BMP581_SHDW_SEL_IIR_P (1 << 5)
 #define BMP581_DSP_CONFIG     (BMP581_COMP_PT_EN | BMP581_SHDW_SEL_IIR_P)
 #define BMP581_IIR_T_BYPASS   0x00
-#define BMP581_IIR_P_COEF_3   (0x02 << 3)
-#define BMP581_DSP_IIR        (BMP581_IIR_T_BYPASS | BMP581_IIR_P_COEF_3)
+#define BMP581_IIR_P_COEF_15  (0x04 << 3)
+#define BMP581_DSP_IIR        (BMP581_IIR_T_BYPASS | BMP581_IIR_P_COEF_15)
 
 /* ODR_CONFIG: pwr_mode bits 1:0, odr bits 6:2, deep_dis bit 7.
- * Normal mode at 4 Hz (odr code 0x19); deep standby must be disabled or the
+ * Normal mode at 15 Hz (odr code 0x16); deep standby must be disabled or the
  * sensor drops out of normal mode at low ODR.
  *
- * The station reads this sensor once a second. Running the sensor at exactly
- * that rate would leave the two clocks free-running against each other, so a
- * poll would sometimes fetch the sample it already had and sometimes skip one;
- * four conversions per poll removes the question, and at this oversampling
- * they cost a few ms each out of every 250. */
+ * The station reads this sensor at 4 Hz. Running the sensor at exactly that
+ * rate would leave the two clocks free-running against each other, so a poll
+ * would sometimes fetch the sample it already had and sometimes skip one;
+ * nearly four conversions per poll removes the question. The oversampling
+ * above puts the conversion at a few tens of ms, which is what keeps this
+ * below the ~25 Hz the part manages at x16 — going faster would have it
+ * silently drop the oversampling instead (the OSR_EFF check below). */
 #define BMP581_PWR_STANDBY 0x00
 #define BMP581_PWR_NORMAL  0x01
-#define BMP581_ODR_4HZ     (0x19 << 2)
+#define BMP581_ODR_15HZ    (0x16 << 2)
 #define BMP581_DEEP_DIS    (1 << 7)
-#define BMP581_ODR_CONFIG (BMP581_PWR_NORMAL | BMP581_ODR_4HZ | BMP581_DEEP_DIS)
+#define BMP581_ODR_CONFIG (BMP581_PWR_NORMAL | BMP581_ODR_15HZ | BMP581_DEEP_DIS)
 
 /* Leaving deep standby is a write to ODR_CONFIG with deep_dis set; do that
  * first, still in standby, before configuring anything. */

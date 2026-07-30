@@ -14,10 +14,12 @@
 
 #include "lcd1602_rgb.h"
 #include "climate.h"
+#include "ota.h"
 #include "settings.h"
 #include "sysinfo.h"
 #include "timesync.h"
 #include "weather_api.h"
+#include "wifi.h"
 
 /* 60 fps, paced by esp_timer: the FreeRTOS tick is 10 ms, too coarse for a
  * 16.7 ms frame. The rate is what the panel is polled at, not what it is
@@ -41,8 +43,8 @@
  * below it sits at BL_MIN. The curve between them is logarithmic, like the
  * perception of brightness and like the range the room spans. */
 #define BL_LUX_DARK   1.0f
-#define BL_LUX_BRIGHT 100.0f
-#define BL_MIN        16 /* never dark: an unreadable screen reads as a fault */
+#define BL_LUX_BRIGHT 70.0f
+#define BL_MIN        10 /* never dark: an unreadable screen reads as a fault */
 
 /* log10f(BL_LUX_DARK + 1) and the span from there to log10f(BL_LUX_BRIGHT + 1),
  * precomputed — this runs per frame and the C6 has no FPU. */
@@ -50,8 +52,10 @@
 #define BL_LOG_SPAN 1.70329f
 
 /* "\xDF" is the degree sign in the panel's character ROM — the UTF-8 one
- * would take two bytes and show up as garbage. */
-#define DEG "\xDF"
+ * would take two bytes and show up as garbage. "\xFF" is the solid block at the
+ * end of the same table, the one fully-lit cell it offers. */
+#define DEG   "\xDF"
+#define BLOCK '\xFF'
 
 /* Both survive reboots, like the LED brightness. */
 #define SETTING_PAGE "screen_page"
@@ -65,11 +69,32 @@ typedef enum {
     PAGE_COUNT,
 } page_t;
 
+/* Two pages outside that rotation. They pre-empt whatever is selected because
+ * while either applies the display has nothing better to say — during the boot
+ * connect there are no readings yet, and during an upload the station is
+ * seconds away from rebooting into another firmware. Neither is reachable with
+ * the button or stored as the selected page: they come and go with the
+ * condition, and the selected page is what returns afterwards. */
+typedef enum {
+    OVERRIDE_NONE,
+    OVERRIDE_OTA,  /* firmware upload in progress, with a progress bar */
+    OVERRIDE_WIFI, /* the first connection attempt after a restart */
+} override_t;
+
+/* The trailing dots on the Wi-Fi page cycle at this rate, so a connect that
+ * takes a while looks like it is still trying rather than stuck. */
+#define DOTS_PERIOD_US 500000
+#define DOTS_MAX       3
+
 static const char *TAG = "screen";
 
 static volatile int s_page; /* advanced from the button task */
 static int s_stored_page;   /* what NVS already holds, screen task only */
 static TaskHandle_t s_task;
+
+/* Whether one of the two pages above is showing. Written by the screen task,
+ * read by the button task to know that a press has nothing to advance. */
+static volatile bool s_override_active;
 
 /* Written from the web handler, read by the screen task. */
 static volatile uint32_t s_rgb = DEFAULT_RGB;
@@ -148,12 +173,12 @@ static void render_precise(char *l0, char *l1)
      * tenth of a lux and a five-digit reading. */
     char lux[10] = "-----x";
     if (c.lux_ok) {
-        if (c.lux < 999.95f) {
+        if (c.lux < 10) {
             snprintf(lux, sizeof(lux), "%5.1fx", c.lux);
-        } else if (c.lux < 9999.5f) {
+        } else if (c.lux < 1000) {
             snprintf(lux, sizeof(lux), "%5.0fx", c.lux);
         } else {
-            snprintf(lux, sizeof(lux), "%4.0fkx", c.lux / 1000.0f);
+            snprintf(lux, sizeof(lux), "%4.1fkx", c.lux / 1000.0f);
         }
     }
 
@@ -225,6 +250,77 @@ static void render_system(char *l0, char *l1)
              (unsigned)(esp_get_free_heap_size() / 1024), s_bl_scale);
 }
 
+static void render_page(int page, char *l0, char *l1)
+{
+    switch (page) {
+    case PAGE_INDOOR:  render_indoor(l0, l1); break;
+    case PAGE_PRECISE: render_precise(l0, l1); break;
+    case PAGE_OUTDOOR: render_outdoor(l0, l1); break;
+    default:           render_system(l0, l1); break;
+    }
+}
+
+/* The upload, with the row below given over to the bar:
+ *   OTA update   67%
+ *   ██████████------
+ * The bar is one cell per 6.25 %, filled with the ROM's solid block; there are
+ * no partial blocks in it and this transport defines no custom characters, so
+ * that is the resolution. The track is spelled out with '-' rather than left
+ * blank so a stalled upload still shows how far it got. */
+static void render_ota(char *l0, char *l1)
+{
+    int percent = ota_progress_percent();
+    if (percent > 100) {
+        percent = 100;
+    }
+    snprintf(l0, RENDER_BUF, "OTA update  %3d%%", percent);
+
+    int filled = percent * LCD1602_COLS / 100;
+    for (int i = 0; i < LCD1602_COLS; i++) {
+        l1[i] = i < filled ? BLOCK : ' ';
+    }
+    l1[LCD1602_COLS] = '\0';
+}
+
+/* The connection attempt, with the network it is attempting on the row below:
+ *   Wi-Fi connect..
+ *   HomeNetwork
+ * The SSID takes the whole row and the transport cuts it to the panel width —
+ * a long name is still recognisable from its first sixteen characters. */
+static void render_wifi(char *l0, char *l1, wifi_sta_state_t state,
+                        const char *ssid)
+{
+    int dots = (int)(esp_timer_get_time() / DOTS_PERIOD_US) % (DOTS_MAX + 1);
+    const char *base = state == WIFI_STA_WAITING_RETRY ? "Wi-Fi retry"
+                                                       : "Wi-Fi connect";
+    snprintf(l0, RENDER_BUF, "%s%.*s", base, dots, "...");
+    snprintf(l1, RENDER_BUF, "%s", ssid[0] ? ssid : "(no network)");
+}
+
+/* Which of the two applies, if either. Once the station has connected, or the
+ * round-robin has given up and left the access point up, the Wi-Fi page steps
+ * aside for good: from then on the readings are the more useful thing to show
+ * and a dropped link is reported by the LED, not by taking over the display. */
+static override_t current_override(wifi_sta_state_t *state, char *ssid,
+                                   size_t len)
+{
+    static bool settled; /* screen task only */
+
+    if (ota_is_active()) {
+        return OVERRIDE_OTA;
+    }
+    if (settled) {
+        return OVERRIDE_NONE;
+    }
+
+    *state = wifi_sta_state(ssid, len);
+    if (*state == WIFI_STA_CONNECTING || *state == WIFI_STA_WAITING_RETRY) {
+        return OVERRIDE_WIFI;
+    }
+    settled = true;
+    return OVERRIDE_NONE;
+}
+
 /* Scaling a channel to zero would drop it out of the mix and shift the hue, so
  * a channel that was lit stays lit. */
 static uint8_t scale8(uint8_t c, uint8_t k)
@@ -235,8 +331,8 @@ static uint8_t scale8(uint8_t c, uint8_t k)
 
 /* Backlight scale for the current illuminance, 0-255. Without a reading the
  * colour is left alone: a dimmed screen is not the way to report a missing
- * sensor. The result is cached against the reading it came from — the
- * VEML7700 produces one a second and this is asked sixty times a second. */
+ * sensor. The result is cached against the reading it came from — the VEML7700
+ * produces at most ten a second and this is asked sixty times a second. */
 static uint8_t backlight_scale(float lux, bool lux_ok)
 {
     static float cached_lux;
@@ -270,20 +366,24 @@ static void screen_task(void *arg)
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
         /* Ahead of the rendering: the system page prints this. The scale only
-         * moves when the illuminance does, once a second, so the colour
-         * written below is identical frame to frame and the transport drops
-         * it — same as it does for the text. */
+         * moves when the illuminance does, a few times a second at most, so
+         * the colour written below is identical across most frames and the
+         * transport drops it — same as it does for the text. */
         climate_t c;
         climate_get(&c);
         uint8_t k = backlight_scale(c.lux, c.lux_ok);
         s_bl_scale = k;
 
         char l0[RENDER_BUF] = "", l1[RENDER_BUF] = "";
-        switch (s_page) {
-        case PAGE_INDOOR:  render_indoor(l0, l1); break;
-        case PAGE_PRECISE: render_precise(l0, l1); break;
-        case PAGE_OUTDOOR: render_outdoor(l0, l1); break;
-        default:           render_system(l0, l1); break;
+        char ssid[33] = "";
+        wifi_sta_state_t sta = WIFI_STA_IDLE;
+        override_t override = current_override(&sta, ssid, sizeof(ssid));
+        s_override_active = override != OVERRIDE_NONE;
+
+        switch (override) {
+        case OVERRIDE_OTA:  render_ota(l0, l1); break;
+        case OVERRIDE_WIFI: render_wifi(l0, l1, sta, ssid); break;
+        default:            render_page(s_page, l0, l1); break;
         }
 
         uint32_t rgb = s_rgb;
@@ -304,6 +404,13 @@ static void screen_task(void *arg)
 
 void screen_16x2_next_page(void)
 {
+    /* The two conditional pages are not part of the rotation, so while one of
+     * them holds the display a press has nothing to advance — changing the
+     * selection out of sight would only surprise whoever pressed it once the
+     * page came back. */
+    if (s_override_active) {
+        return;
+    }
     s_page = (s_page + 1) % PAGE_COUNT;
 }
 
@@ -342,5 +449,6 @@ void screen_16x2_init(void)
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(timer, FRAME_US));
 
-    ESP_LOGI(TAG, "Screen task started, %d pages at %d fps", PAGE_COUNT, FPS);
+    ESP_LOGI(TAG, "Screen task started, %d pages (+2 conditional) at %d fps",
+             PAGE_COUNT, FPS);
 }

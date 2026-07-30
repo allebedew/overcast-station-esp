@@ -15,18 +15,27 @@
  * SENSOR_TICK_MS and each sensor comes up at its own period; the hot-plug
  * state machine below is shared — probe until the device answers, then read,
  * and MAX_ERRORS consecutive failures drop it back to probing. */
-#define SENSOR_TICK_MS  100
+
+/* The tick is the granularity of every period below — a period lands on the
+ * first tick at or after it — so they are all multiples of it. One FreeRTOS
+ * tick, which is as fine as vTaskDelay() goes; that also puts the 8 Hz ceiling
+ * the light sensor is held to at 130 ms rather than the round 125, which is not
+ * on this grid. */
+#define SENSOR_TICK_MS  10
 #define PROBE_PERIOD_MS 5000 /* how often to look for an absent sensor */
 #define MAX_ERRORS      3    /* consecutive failures before "offline" */
 
-/* TMP117 at 2 Hz: fast enough to follow the room, slow enough to keep the
- * reading off the display's last digit. The others produce a new result no
- * faster than once a second (the SCD40 once every five), so polling them
- * harder would only re-read the same value. */
+/* Each sensor is read at the rate it can actually produce new results, so a
+ * poll fetches a fresh sample rather than the previous one again: the TMP117
+ * and the BMP581 are configured below their poll rate on purpose (see their
+ * drivers), the VEML7700 is capped at 8 Hz here and gates itself on the
+ * integration time in force below that, and the SCD40's 5 s cycle is fixed in
+ * the part — polling it at 1 Hz is how its phase is found again after a
+ * restart, not how often it has something new. */
 #define SCD40_PERIOD_MS    1000
-#define TMP117_PERIOD_MS   500
-#define BMP581_PERIOD_MS   1000
-#define VEML7700_PERIOD_MS 1000
+#define TMP117_PERIOD_MS   250
+#define BMP581_PERIOD_MS   250
+#define VEML7700_PERIOD_MS 130
 
 /* The SCD40's measurement depends on the ambient pressure, which it cannot
  * measure itself. The BMP581 can, so its reading is forwarded; the fallback is

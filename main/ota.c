@@ -18,9 +18,18 @@ static const char *TAG = "ota";
 
 static volatile bool s_ota_active;
 
+/* Progress for the display, published as a percentage rather than as the two
+ * byte counts: one volatile read cannot be caught between them. */
+static volatile int s_ota_percent;
+
 bool ota_is_active(void)
 {
     return s_ota_active;
+}
+
+int ota_progress_percent(void)
+{
+    return s_ota_percent;
 }
 
 static void reboot_cb(void *arg)
@@ -60,7 +69,11 @@ esp_err_t ota_post_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "OTA start: %u bytes -> %s",
              (unsigned)req->content_len, target->label);
 
-    /* purple blink while uploading; cleared on error (the LED task polls this) */
+    /* purple blink while uploading, and the OTA page on the display; both
+     * cleared on error (the LED and screen tasks poll this). The progress is
+     * set first, so a task that sees the flag never reads a stale percentage
+     * from the previous attempt. */
+    s_ota_percent = 0;
     s_ota_active = true;
 
     esp_ota_handle_t ota;
@@ -91,6 +104,7 @@ esp_err_t ota_post_handler(httpd_req_t *req)
             break;
         }
         received += r;
+        s_ota_percent = 100 * received / req->content_len;
         int decile = 10 * received / req->content_len;
         if (decile != last_decile) {
             last_decile = decile;

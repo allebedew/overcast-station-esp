@@ -81,7 +81,13 @@ static const char *TAG = "veml7700";
 static i2c_master_dev_handle_t s_dev;
 static int s_range = RANGE_START;
 
-/* Not before this (µs, esp_timer clock) is the data register trustworthy. */
+/* Not before this (µs, esp_timer clock) does the data register hold a sample
+ * that has not been read yet: one integration after the last reading, two after
+ * a configuration change. Together with the poll period this sets the rate the
+ * readings come at: the sensitive end of the table (800 ms integration) is
+ * limited here, to 1.25 Hz, and the bright end (25 ms) by the poll period, to
+ * the 8 Hz the station holds this sensor to. Either way a poll that arrives
+ * early is turned away instead of re-reading a sample already published. */
 static int64_t s_ready_at_us;
 
 /* Where start() gave up, so the warning below can name the step. */
@@ -177,11 +183,14 @@ esp_err_t veml7700_read(veml7700_data_t *out)
     if (!s_dev) {
         return ESP_ERR_INVALID_STATE;
     }
-    /* Reading before the first integration under the current settings has
-     * finished would return the leftovers of the previous ones — near zero
-     * right after power-up, which used to look like darkness and send the
-     * driver climbing the table for no reason. */
-    if (esp_timer_get_time() < s_ready_at_us) {
+    /* Reading before the current integration has finished returns the sample
+     * the last call already published, or — right after a configuration change —
+     * the leftovers of the previous settings, near zero after power-up, which
+     * used to look like darkness and send the driver climbing the table for no
+     * reason. The check costs no bus traffic, so being polled faster than the
+     * integration time is free. */
+    int64_t now = esp_timer_get_time();
+    if (now < s_ready_at_us) {
         return ESP_ERR_NOT_FINISHED;
     }
 
@@ -210,6 +219,7 @@ esp_err_t veml7700_read(veml7700_data_t *out)
     }
 
     const veml7700_range_t *r = &RANGES[s_range];
+    s_ready_at_us = now + (int64_t)r->it_ms * 1000;
     out->als_raw = als;
     out->white_raw = white;
     out->lux = correct_lux(als * r->lx_per_count);

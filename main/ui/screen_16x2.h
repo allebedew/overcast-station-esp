@@ -8,6 +8,10 @@
  * dedicated sensors' full resolution, the full outdoor reading, and the clock
  * over the station's own vitals.
  *
+ * Two more pages sit outside that rotation and pre-empt whichever is selected
+ * for as long as they apply: the first Wi-Fi connection after a restart, and a
+ * firmware upload with its progress bar. The button cannot reach them.
+ *
  * Everything here is shaped by the two-rows-of-sixteen-characters budget —
  * hence the name. A larger display will want its own layout module rather
  * than a rewrite of this one. */
@@ -17,8 +21,9 @@
  * appears. */
 void screen_16x2_init(void);
 
-/* Shows the next page. Wired to a short press of the BOOT button; safe to
- * call from any task. */
+/* Shows the next page, or does nothing while one of the two conditional pages
+ * is up. Wired to a short press of the BOOT button; safe to call from any
+ * task. */
 void screen_16x2_next_page(void);
 
 /* Backlight color as 0xRRGGBB. The device stores and applies it as-is —

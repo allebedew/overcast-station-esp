@@ -8,6 +8,10 @@
  * show the purple "OTA in progress" pattern). */
 bool ota_is_active(void);
 
+/* How far the upload has got, 0-100, for the display's progress bar. Only
+ * meaningful while ota_is_active(); 0 otherwise. */
+int ota_progress_percent(void);
+
 /* Обработчик POST /api/ota: принимает бинарник прошивки в теле запроса,
  * пишет его в свободный OTA-раздел и перезагружает устройство.
  * Требует заголовок X-OTA-Key (см. OTA_KEY в ota.c и flash-ota.sh). */

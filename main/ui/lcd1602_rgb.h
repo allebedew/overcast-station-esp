@@ -12,7 +12,8 @@
  * until a larger one arrives, and only this file should have to go.
  *
  * Text is ASCII: the character ROM has no Cyrillic, so bytes outside
- * 0x20..0x7E are replaced with '?'.
+ * 0x20..0x7E are replaced with '?' — except the two ROM characters worth
+ * having, the degree sign ("\xDF") and the solid block ("\xFF").
  *
  * Not thread-safe — call from a single task. Sharing the bus with the sensors
  * is: every sequence that must not be interrupted is bracketed by the bus lock

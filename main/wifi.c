@@ -31,6 +31,15 @@ bool wifi_is_connected(void)
     return s_sta_state == WIFI_STA_CONNECTED;
 }
 
+wifi_sta_state_t wifi_sta_state(char *ssid, size_t len)
+{
+    /* The SSID is written by the connect path and read here without a lock: a
+     * torn read would show one frame of a wrong name on the display, and the
+     * alternative is a lock held on every frame for that. */
+    strlcpy(ssid, s_current_ssid, len);
+    return s_sta_state;
+}
+
 static int ap_client_count(void)
 {
     wifi_sta_list_t sta_list;

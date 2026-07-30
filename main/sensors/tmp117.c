@@ -21,14 +21,14 @@ static const uint8_t TMP117_ADDRS[] = { 0x48, 0x49, 0x4A, 0x4B };
 
 /* Config fields: MOD bits 11:10, CONV bits 9:7, AVG bits 6:5.
  *
- * Continuous conversion, 8 averaged samples, 125 ms cycle. The station reads
- * this sensor twice a second, and the cycle is picked to sit comfortably under
- * that: four results are produced per poll, so every poll finds a fresh one
- * whatever jitter the scheduler adds, and averaging eight samples takes the
- * noise down by roughly a factor of three — which is what the display's second
- * decimal needs in order to stop dancing. Converting at the shortest cycle
- * (15.5 ms, no averaging) instead would throw away 31 of every 32 results and
- * show the noisier single sample.
+ * Continuous conversion, 8 averaged samples, 125 ms cycle — the fastest cycle
+ * this averaging allows. The station reads this sensor at 4 Hz, so two results
+ * are produced per poll and every poll finds a fresh one whatever jitter the
+ * scheduler adds, while averaging eight samples takes the noise down by roughly
+ * a factor of three — which is what the display's second decimal needs in order
+ * to stop dancing. Reading faster would mean giving up that averaging: the
+ * shortest cycle (15.5 ms, single sample) reaches 64 Hz but shows the noise the
+ * averaging is here to remove.
  *
  * Written explicitly in any case, so a warm restart cannot leave the sensor in
  * shutdown or one-shot mode. */

@@ -27,9 +27,13 @@
 #define CMD_SET_DDRAM  0x80
 #define DDRAM_ROW1     0x40 /* second row starts here, rows are not contiguous */
 
-/* The character ROM holds katakana and symbols above ASCII; of those only the
- * degree sign is worth passing through, written as "\xDF" in a string. */
+/* The character ROM holds katakana and symbols above ASCII; of those two are
+ * worth passing through, written as "\xDF" and "\xFF" in a string — the degree
+ * sign, and the solid block at the very end of the table, which is the only
+ * fully-lit cell the ROM has and so the only way to draw a bar without
+ * defining custom characters. */
 #define DEGREE_SIGN 0xDF
+#define FULL_BLOCK  0xFF
 
 #define CLEAR_DELAY_MS 2 /* clear/home are the slow commands (~1.5 ms) */
 #define RETRY_PERIOD_MS 5000 /* how often to look for an absent module */
@@ -266,7 +270,9 @@ esp_err_t lcd1602_rgb_set_line(int row, const char *text)
     int len = 0;
     while (len < LCD1602_COLS && text[len] != '\0') {
         unsigned char c = (unsigned char)text[len];
-        line[len] = (c >= 0x20 && c <= 0x7E) || c == DEGREE_SIGN ? c : '?';
+        bool ok = (c >= 0x20 && c <= 0x7E) || c == DEGREE_SIGN ||
+                  c == FULL_BLOCK;
+        line[len] = ok ? c : '?';
         len++;
     }
     memset(&line[len], ' ', LCD1602_COLS - len);

@@ -104,7 +104,7 @@ the alerts are still the only consumer left tied to the SCD40 alone.
     dips off briefly on every HTTP request
 - **I2C sensors** — everything on the bus (SDA GPIO2 / SCL GPIO3) lives in
   `main/sensors/`: the bus itself, one transport file per device, and a single
-  polling task in `sensors.c` that ticks at 100 ms and brings each sensor up at
+  polling task in `sensors.c` that ticks at 10 ms and brings each sensor up at
   its own period through one shared hot-plug state machine — probe until the
   device answers, then read; 3 consecutive failures drop it back to probing
   every 5 s. Each device appears in `/api/status` as its own object carrying
@@ -119,7 +119,7 @@ the alerts are still the only consumer left tied to the SCD40 alone.
   helper and a caller bracketing a longer sequence compose. Waits that the
   *device* needs are deliberately left outside it — a start sequence with a
   half-second settling step in it returns `ESP_ERR_NOT_FINISHED` and resumes at
-  the next 100 ms tick, with the bus free meanwhile. That retry is deliberately
+  the next 10 ms tick, with the bus free meanwhile. That retry is deliberately
   the tick and not the sensor's own period: a sequence of several steps would
   otherwise cost a full period each, which is what used to put seconds between
   a torch on the VEML7700 and the reading on the display.
@@ -147,24 +147,30 @@ the alerts are still the only consumer left tied to the SCD40 alone.
     700–1200 hPa, or no BMP581 at all, falls back to 985 hPa — the value at the
     site, 245 m above sea level.
   - **TMP117** (`0x48`–`0x4B`, address auto-detected) — ±0.1 °C temperature,
-    **read at 2 Hz**, running continuous conversion with 8 averaged samples and
-    a 125 ms cycle. That is four results per poll: every poll finds a fresh one
-    whatever jitter the scheduler adds, and the averaging takes the noise down
-    by roughly a factor of three, which is what the display's second decimal
-    needs. (Converting at the shortest cycle, 15.5 ms with averaging off, would
-    throw away 31 of every 32 results and show the noisier single sample.) The
+    **read at 4 Hz**, running continuous conversion with 8 averaged samples and
+    a 125 ms cycle — the fastest cycle that averaging allows. That is two
+    results per poll: every poll finds a fresh one whatever jitter the scheduler
+    adds, and the averaging takes the noise down by roughly a factor of three,
+    which is what the display's second decimal needs. (Reading faster means
+    giving up the averaging: the shortest cycle, 15.5 ms single-sample, reaches
+    64 Hz but shows the noise the averaging is there to remove.) The
     device ID (`0x117`) is verified at start, so a foreign chip on one of those
     addresses is skipped rather than misread.
   - **BMP581** (`0x47` or `0x46`; the register-compatible BMP580 works too) —
-    pressure and temperature, read once a second, normal mode at **4 Hz**,
-    oversampling x16 on pressure and x2 on temperature. Four conversions per
-    poll: running the sensor at the polling rate instead would leave the two
+    pressure and temperature, **read at 4 Hz**, normal mode at **15 Hz**,
+    oversampling x16 on pressure and x2 on temperature. Nearly four conversions
+    per poll: running the sensor at the polling rate instead would leave the two
     clocks free-running against each other, so a poll would sometimes refetch
-    the sample it already had and sometimes skip one. The pressure IIR filter
-    is on at coefficient 3 (`DSP_IIR`), with `shdw_sel_iir_p` set so the
-    filtered value is what the data registers hold — at 4 Hz that is a time
-    constant near a second, enough to settle the last displayed digit, which
-    otherwise sits below the sensor's noise floor. Temperature is left
+    the sample it already had and sometimes skip one. The oversampling puts the
+    conversion at a few tens of ms, which is what keeps the ODR below the ~25 Hz
+    the part manages at x16 — asking for more would have it silently drop the
+    oversampling instead (`OSR_EFF` bit 7 is checked and warned about). The
+    pressure IIR filter is on at coefficient 15 (`DSP_IIR`), with
+    `shdw_sel_iir_p` set so the filtered value is what the data registers hold.
+    The filter counts samples, not seconds, so the coefficient goes with the
+    ODR: 15 at 15 Hz is a time constant near a second, enough to settle the last
+    displayed digit, which otherwise sits below the sensor's noise floor.
+    Temperature is left
     unfiltered. The soft reset at the start of the setup drops the part into
     deep standby, where it NACKs everything, so the next step pokes ODR_CONFIG
     (with `deep_dis` set, still in standby) every 2 ms until it answers — that
@@ -172,7 +178,14 @@ the alerts are still the only consumer left tied to the SCD40 alone.
     readings come from one 6-byte burst at `0x1D`: temperature XLSB/LSB/MSB
     (`0x1D`-`0x1F`), then pressure XLSB/LSB/MSB (`0x20`-`0x22`), little-endian,
     24-bit, `temp / 65536` °C and `press / 64` Pa.
-  - **VEML7700** (`0x10`, fixed) — ambient light, read once a second. The
+  - **VEML7700** (`0x10`, fixed) — ambient light, held to **8 Hz** and slower
+    than that wherever the integration time says so: 130 ms between polls at the
+    bright end of the table (25 ms integration) down to **1.25 Hz** on the most
+    sensitive step (800 ms), the driver returning `ESP_ERR_NOT_FINISHED` in
+    between rather than re-reading a sample it has already published — the check
+    costs no bus traffic, so being polled early is free. (130 rather than 125 ms
+    because a period lands on the first task tick at or after it, and 125 is not
+    a multiple of the 10 ms FreeRTOS tick.) The
     usable range spans six decades, so the driver auto-ranges over a nine-step
     gain / integration-time table (x1/8 @ 25 ms … x2 @ 800 ms). The needed step
     is computed from the measured level, so a reading far outside the current
@@ -220,13 +233,34 @@ the alerts are still the only consumer left tied to the SCD40 alone.
   - outdoor detail — `12.3° 8..17°U3` / `78% 1013 NW15 3` (current temperature,
     today's min/max, UV index; humidity %, sea-level pressure hPa, wind as an
     8-point compass label + km/h, WMO code)
-
   - system — `17:27:40 28.07` / `12% 184k BL184` (time in the active
     location's timezone with the colons blinking on a two-second swing — one
     second lit, one second blank — day and month — the year does not fit alongside the seconds; below
     them CPU load over the last second, free heap in KiB and the backlight
     scale the illuminance is currently producing, which has no other readout
     on the device itself)
+
+  Two further pages sit outside that rotation and take the display over for as
+  long as their condition holds, whatever is selected; the button cannot reach
+  them and neither is ever stored as the selection, so the chosen page is what
+  comes back afterwards. While one of them is up a click does nothing at all —
+  advancing the selection out of sight would only surprise whoever pressed it.
+  - Wi-Fi connect — `Wi-Fi connect...` / `HomeNetwork` (the trailing dots cycle
+    every 500 ms so a slow attempt does not look stuck; `Wi-Fi retry...` during
+    the pause between attempts, and the row below is the network being tried).
+    Only the **first** connection after a restart: there are no readings to show
+    at that point anyway. Once the station associates — or the round-robin gives
+    up and the access point comes up — the page steps aside for good, and a link
+    lost later is reported by the LED rather than by taking over the display,
+    the readings being the more useful thing to show by then
+  - OTA update — `OTA update  67%` / `██████████------` (the bottom row is the
+    progress bar, one cell per 6.25 % of the image, fed by
+    `ota_progress_percent()`). Filled with the character ROM's solid block
+    (`0xFF`, the one fully-lit cell it has); there are no partial blocks in it
+    and the transport defines no custom characters, so that is the resolution.
+    The track is spelled out with `-` rather than left blank, so a stalled
+    upload still shows how far it got. It stays at 100 % until the device reboots into the new
+    firmware, and disappears on a failed upload along with the LED pattern
 
   The backlight color is stored as plain RGB (NVS `bl_rgb`, default `00AAFF`);
   the device knows nothing about hue or color models. What reaches the panel is
@@ -244,14 +278,15 @@ the alerts are still the only consumer left tied to the SCD40 alone.
   the panel looks; the scale itself is on the display's system page and in
   `settings.backlight_scale`. Recomputing costs a `log10f` — the C6 has no FPU
   — so the result is cached against the reading it came from: sixty frames a
-  second ask, and the sensor answers once a second.
+  second ask, and the sensor answers at most eight times a second.
   Redrawn at 60 fps, paced by an `esp_timer` (the 10 ms FreeRTOS tick is too
   coarse for a 16.7 ms frame); that is the polling rate — the transport skips
   frames that would repaint identical characters, so the actual bus traffic
   follows how often the readings change. Missing data shows as
   `no sensor data` / `no weather data`. Hot-plug: an absent display is
   re-probed every 5 s. Text is ASCII-only — the character ROM has no Cyrillic,
-  so other bytes show as `?`.
+  so other bytes show as `?`, the two exceptions being the ROM's degree sign
+  (`\xDF`) and solid block (`\xFF`).
 - **Climate** — the room as opposed to the chips. One source per quantity and
   **no fallbacks**: temperature is the TMP117's and nothing else, humidity and
   CO₂ the SCD40's, pressure the BMP581's, illuminance the VEML7700's. The
@@ -403,12 +438,12 @@ flat (`#include "screen_16x2.h"`, not `"ui/screen_16x2.h"`).
 
 | Module | Role |
 |---|---|
-| `wifi.c` | connection state machine; STA state and AP state are separate fields of one snapshot from `wifi_get_info()` (polled by the LED task), with `wifi_is_connected()` as the shorthand and `wifi_ap_enable()` to toggle the AP; also names the link for the UI — `wifi_authmode_str()`, `wifi_sta_phy_str()` |
+| `wifi.c` | connection state machine; STA state and AP state are separate fields of one snapshot from `wifi_get_info()` (polled by the LED task), with `wifi_is_connected()` as the shorthand, `wifi_sta_state()` as the radio-free variant the display polls per frame, and `wifi_ap_enable()` to toggle the AP; also names the link for the UI — `wifi_authmode_str()`, `wifi_sta_phy_str()` |
 | `wifi_store.c` | saved credentials in NVS (namespace `wifi_creds`), mutex-protected |
 | `web/webserver.c` | esp_http_server + mDNS; routes live in one table and all handlers go through a wrapper that logs the request (except `/api/status` — polled every 1 s) and blinks the LED; static buffers are safe (single httpd task) and replies are assembled through a bounded appender that truncates and logs instead of running past the buffer |
-| `ota.c` | `POST /api/ota` handler + rollback confirmation |
+| `ota.c` | `POST /api/ota` handler + rollback confirmation; publishes `ota_is_active()` for the LED and `ota_progress_percent()` for the display's progress bar |
 | `ui/led.c` | LED task; polls wifi/sensors/ota each tick and picks the pattern, brightness (persisted) |
-| `button.c` | BOOT button via espressif/button: click → next display page, 1.5 s hold → AP toggle |
+| `button.c` | BOOT button via espressif/button: click → next display page (ignored while a conditional page holds the display), 1.5 s hold → AP toggle |
 | `sensors/sensors.c` | one task polling all four sensors, each at its own period, through a shared hot-plug state machine; owns the published snapshots and the cross-sensor wiring (SCD40 readings into `history.c`, BMP581 pressure into the SCD40's compensation) |
 | `sensors/i2c_bus.c` | the I2C master bus and the recursive lock that arbitrates it, for sensors and display alike; `i2c_bus_scan()` logs every responding address, run once at startup |
 | `sensors/i2c_dev.c` | the register access the drivers were each repeating: attach, probe, raw transfers, u8/u16 register reads and writes in both byte orders |
@@ -417,7 +452,7 @@ flat (`#include "screen_16x2.h"`, not `"ui/screen_16x2.h"`).
 | `sensors/bmp581.c` | BMP581/BMP580 transport: address auto-detection (`0x47`/`0x46`), chip-ID check, soft reset, DSP/IIR + OSR/ODR setup, 6-byte burst read |
 | `sensors/veml7700.c` | VEML7700 transport: little-endian command registers, the auto-ranging gain / integration-time table with its settle deadline, lux conversion with the >1000 lx correction |
 | `sysinfo.c` | how the station itself is doing, in two shapes: a snapshot of what cannot change until the next boot (firmware and IDF version, build stamp, chip revision, CPU clock, flash size, NVS fill) read once at start-up, and the live counters (uptime, CPU load, task count, four heap figures) sampled per call. Owns the SoC's own temperature sensor — not on the bus and measuring the die rather than the room, so it is reported with the health readings — the reset reason, and the start-up task-list dump. The CPU load is measured in one 1 s window shared by every caller, so the display and `/api/status` read the same figure and neither one's polling rate distorts the other's |
-| `ui/screen_16x2.c` | what the display shows: three pages advanced by the button (selection persisted), 60 fps frame timer, backlight as a stored RGB value dimmed to the ambient light. Sized for 16x2 — a bigger display gets its own layout module |
+| `ui/screen_16x2.c` | what the display shows: four pages advanced by the button (selection persisted) plus two conditional ones outside the rotation (Wi-Fi connect, OTA progress) that pre-empt it, 60 fps frame timer, backlight as a stored RGB value dimmed to the ambient light. Sized for 16x2 — a bigger display gets its own layout module |
 | `ui/lcd1602_rgb.c` | transport for the DFR0464 panel: character output, backlight registers, revision detection, hot-plug recovery. Takes the bus and its lock from `i2c_bus.c` like the sensors do. The only file tied to this particular display |
 | `timesync.c` | SNTP client; `timesync_is_synced()` flag and `timesync_format()` for the clock shown in the UI (dashes of the same shape until the clock is set) |
 | `sensors/climate.c` | the room-level view over the devices: one source per quantity, no fallbacks, absent where there is no sensor. Composition of the snapshots from `sensors.c`, plus the reduction of the measured pressure to sea level; owns the site-altitude setting (cached from NVS — the reduction runs on every read). Its header also carries the firmware-wide reading resolutions |

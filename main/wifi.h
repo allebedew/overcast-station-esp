@@ -53,6 +53,11 @@ void wifi_get_info(wifi_info_t *out);
 /* Shorthand for the common case: station associated and holding an IP. */
 bool wifi_is_connected(void);
 
+/* The station side alone: the state, and into ssid the network of the current
+ * attempt or link ("" before the first one). Unlike wifi_get_info() this asks
+ * the radio nothing, so the display can call it every frame. */
+wifi_sta_state_t wifi_sta_state(char *ssid, size_t len);
+
 /* Blocking air scan (~2-3 s). Returns the number of APs found (one entry
  * per BSSID, so the same SSID may repeat across access points) or -1 on
  * error. */
