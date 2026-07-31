@@ -25,6 +25,7 @@
                 --co2-bad: #ff6b6b;
                 --press: #a78bfa;
                 --lux: #ffc94d;
+                --dew: #38d9c0;
                 --ok: #3fb950;
                 --radius: 12px;
                 --font:
@@ -105,8 +106,7 @@
             }
 
             /* ============ GRID ============ */
-            /* Five cards on a six-column grid: three across on the first row,
-             * the remaining two sharing the second at half width each. */
+            /* Six cards on a six-column grid: three across, two rows. */
             .grid-sensors {
                 display: grid;
                 grid-template-columns: repeat(6, 1fr);
@@ -114,9 +114,6 @@
             }
             .grid-sensors > .card {
                 grid-column: span 2;
-            }
-            .grid-sensors > .card:nth-child(n + 4) {
-                grid-column: span 3;
             }
             .grid-bottom {
                 display: grid;
@@ -129,8 +126,7 @@
                 .grid-sensors {
                     grid-template-columns: repeat(2, 1fr);
                 }
-                .grid-sensors > .card,
-                .grid-sensors > .card:nth-child(n + 4) {
+                .grid-sensors > .card {
                     grid-column: span 1;
                 }
                 .grid-bottom {
@@ -2093,6 +2089,16 @@
              * make the same value read differently here and in the API. */
             const fmtLux = (v) => v.toFixed(1);
 
+            /* Magnus-Tetens, WMO coefficients — the formula scd40.c uses, on
+             * the page's own inputs. RH is clamped off zero: log(0) is -inf. */
+            function dewPoint(tC, rhPct) {
+                const b = 17.62,
+                    c = 243.12;
+                const rh = Math.max(rhPct, 1);
+                const gamma = Math.log(rh / 100) + (b * tC) / (c + tC);
+                return (c * gamma) / (b - gamma);
+            }
+
             function co2Level(ppm) {
                 if (ppm < 800)
                     return {
@@ -2176,7 +2182,8 @@
                  * it can never disagree. */
                 const cl = s.climate || {};
                 SERIES.forEach((sr) => {
-                    $(sr.k + "Val").textContent = num(cl[sr.src], sr.fmt);
+                    const v = sr.calc ? sr.calc(cl) : cl[sr.src];
+                    $(sr.k + "Val").textContent = num(v, sr.fmt);
                 });
 
                 /* the one card that carries a level badge instead of a trend */
@@ -2334,7 +2341,10 @@
              * names the field in /api/status `climate`, `hist` the array in
              * /api/history. `span`/`trendFmt` fall back to `fmt`.
              * `scale: "log"` is for illuminance only — a linear axis over six
-             * decades leaves everything below noon flat on the baseline. */
+             * decades leaves everything below noon flat on the baseline.
+             * A series computed in the page replaces the two with `calc`
+             * (from the `climate` object) and `derive` (from the history
+             * reply). */
             const SERIES = [
                 {
                     k: "t",
@@ -2355,6 +2365,31 @@
                     color: "--hum",
                     fmt: (v) => v.toFixed(1),
                     span: (v) => v.toFixed(1) + "%",
+                },
+                {
+                    /* Derived here rather than in the firmware: the TMP117
+                     * temperature and the SCD40 humidity, the same pair the
+                     * cards above show. The SCD40 card carries the device's
+                     * own dew point instead, off its own warmer temperature —
+                     * the two read a few tenths apart. */
+                    k: "d",
+                    calc: (cl) =>
+                        typeof cl.temp === "number" && typeof cl.rh === "number"
+                            ? dewPoint(cl.temp, cl.rh)
+                            : null,
+                    derive: (hd) => {
+                        const rh = hd.rh || [];
+                        return (hd.temp || []).map((v, i) =>
+                            v != null && rh[i] != null
+                                ? dewPoint(v, rh[i])
+                                : null,
+                        );
+                    },
+                    title: "sensDew",
+                    unit: "°C",
+                    color: "--dew",
+                    fmt: (v) => v.toFixed(1),
+                    span: (v) => v.toFixed(1) + "°",
                 },
                 {
                     k: "c",
@@ -2411,7 +2446,13 @@
                         (_, i) => now - (n - 1 - i) * step,
                     ),
                 };
-                SERIES.forEach((sr) => (out[sr.k] = padTo(hd[sr.hist], n)));
+                SERIES.forEach(
+                    (sr) =>
+                        (out[sr.k] = padTo(
+                            sr.derive ? sr.derive(hd) : hd[sr.hist],
+                            n,
+                        )),
+                );
                 return out;
             }
 

@@ -16,15 +16,17 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   AP ↔ STA reconnect, short click browses the display pages.
 - **Web UI** — single page embedded in the firmware (gzipped at build time),
   `http://weather.local` (mDNS), polled every 1 s, bilingual RU/EN from an
-  in-page dictionary. Five sensor cards (temperature, humidity, CO₂, pressure,
-  illuminance) with trend, min/max and a sparkline; a card per I2C device with
-  a liveness dot; an outside-weather card with a location chip row (a typed
+  in-page dictionary. Six sensor cards (temperature, humidity, dew point, CO₂,
+  pressure, illuminance) with trend, min/max and a sparkline; a card per I2C
+  device with a liveness dot; an outside-weather card with a location chip row (a typed
   city name is geocoded in-browser, so adding one needs internet on the
   client); system, settings and Wi-Fi cards behind the header gear. Settings:
   LED brightness, backlight color, site altitude, SCD40 FRC, history reset.
   Every reading is a fixed slot generated from the tables at the top of the
   script (`SERIES`, `WEATHER_TILES`, `SENSOR_DEVS`) and renders as `--` when
-  absent — adding a metric is a table entry, not markup. The altitude field is
+  absent — adding a metric is a table entry, not markup, and a `SERIES` entry
+  with `calc`/`derive` instead of `src`/`hist` is computed in the page from the
+  other series rather than read from the device. The altitude field is
   written back from the device only once per page load, so the poll cannot
   overwrite typing.
 - **OTA** — push model: `./flash-ota.sh [host]` builds and uploads to
@@ -125,9 +127,11 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   the way out — so a later altitude correction re-reduces the whole history.
   The **dew point** (Magnus-Tetens) is the one derived quantity, from the
   SCD40's own temperature and humidity — its warm offset cancels there, and the
-  driver computes it. Follows the humidity. Not in the history, so it gets no
-  main card — those are card-and-chart pairs; it shows on the SCD40 card and on
-  the precise LCD page in place of the humidity.
+  driver computes it. Follows the humidity. Shown on the SCD40 card and on the
+  precise LCD page in place of the humidity. It is not in the history, so its
+  main card is the one exception to the card-and-chart rule: the page computes
+  that column itself, from the recorded TMP117 temperature and SCD40 humidity,
+  and it reads a few tenths off the device's own figure on the SCD40 card.
 - **Site altitude** — metres above sea level, −500…9000, NVS
   `settings/altitude_m` (default 0). A wrong altitude shifts every pressure
   readout and chart, never the stored history.
