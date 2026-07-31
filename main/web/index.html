@@ -346,23 +346,13 @@
                 gap: 8px;
                 margin-bottom: 9px;
             }
-            /* part number over description, two lines, so the description
-             * gets the full card width instead of the leftovers */
-            .sens-id {
-                display: flex;
-                flex-direction: column;
-                gap: 1px;
-                min-width: 0;
-            }
             .sens-name {
                 font-size: 12px;
                 font-weight: 600;
                 letter-spacing: 0.03em;
             }
             /* liveness indicator in front of the part number, replaces the
-             * former online/offline text badge. It sits in its own column of
-             * .sens-head so the part number and the description below it share
-             * one left edge, centred on the two lines together. */
+             * former online/offline text badge. */
             .sens-dot {
                 flex: none;
                 width: 10px;
@@ -372,15 +362,6 @@
             }
             .sens-dev.off .sens-dot {
                 background: var(--co2-bad);
-            }
-            .sens-sub {
-                font-size: 11px;
-                color: var(--text-faint);
-                /* the part number carries the identity, so the description is
-                 * what gives way when the card gets narrow */
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
             }
             .sens-metrics {
                 display: grid;
@@ -1370,10 +1351,6 @@
                     sensOk: "Работает",
                     sensOff: "Нет ответа",
                     co2: "CO₂",
-                    sensScd40Sub: "CO₂, температура, влажность и точка росы",
-                    sensTmp117Sub: "Температура",
-                    sensBmp581Sub: "Давление и температура",
-                    sensVemlSub: "Освещённость",
                     sensDew: "Точка росы",
                     sensPress: "Давление",
                     sensLux: "Освещённость",
@@ -1549,10 +1526,6 @@
                     sensOk: "Online",
                     sensOff: "No response",
                     co2: "CO₂",
-                    sensScd40Sub: "CO₂, temperature, humidity and dew point",
-                    sensTmp117Sub: "Temperature",
-                    sensBmp581Sub: "Pressure and temperature",
-                    sensVemlSub: "Ambient light",
                     sensDew: "Dew point",
                     sensPress: "Pressure",
                     sensLux: "Illuminance",
@@ -1828,7 +1801,6 @@
                 {
                     key: "tmp117",
                     name: "TMP117",
-                    sub: "sensTmp117Sub",
                     metrics: [
                         {
                             k: "temp",
@@ -1841,7 +1813,6 @@
                 {
                     key: "scd40",
                     name: "SCD40",
-                    sub: "sensScd40Sub",
                     metrics: [
                         {
                             k: "co2",
@@ -1872,7 +1843,6 @@
                 {
                     key: "bmp581",
                     name: "BMP581",
-                    sub: "sensBmp581Sub",
                     metrics: [
                         {
                             k: "press",
@@ -1891,7 +1861,6 @@
                 {
                     key: "veml7700",
                     name: "VEML7700",
-                    sub: "sensVemlSub",
                     metrics: [
                         {
                             k: "lux",
@@ -1980,9 +1949,7 @@
                         `<span class="sens-dot" title="${
                             ok ? t("sensOk") : t("sensOff")
                         }"></span>` +
-                        '<div class="sens-id">' +
-                        `<span class="sens-name">${dev.name}</span>` +
-                        `<span class="sens-sub">${t(dev.sub)}</span></div></div>` +
+                        `<span class="sens-name">${dev.name}</span></div>` +
                         `<div class="sens-metrics">${tiles}</div>` +
                         (aux ? `<div class="sens-aux">${aux}</div>` : "") +
                         "</div>"
