@@ -1,5 +1,7 @@
 #include "scd40.h"
 
+#include <math.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -167,6 +169,17 @@ esp_err_t scd40_start(void)
     return ESP_OK;
 }
 
+/* Magnus-Tetens, WMO coefficients. RH is clamped off zero: logf(0) is -inf. */
+static float dew_point_c(float t_c, float rh_pct)
+{
+    const float b = 17.62f, c = 243.12f;
+    if (rh_pct < 1.0f) {
+        rh_pct = 1.0f;
+    }
+    float gamma = logf(rh_pct / 100.0f) + b * t_c / (c + t_c);
+    return c * gamma / (b - gamma);
+}
+
 esp_err_t scd40_read(scd40_data_t *out)
 {
     int64_t now = esp_timer_get_time();
@@ -192,6 +205,7 @@ esp_err_t scd40_read(scd40_data_t *out)
     out->co2_ppm = raw[0];
     out->temp_c = -45.0f + 175.0f * raw[1] / 65535.0f;
     out->rh_pct = 100.0f * raw[2] / 65535.0f;
+    out->dew_c = dew_point_c(out->temp_c, out->rh_pct);
 
     s_next_check_us = now + (int64_t)SCD40_QUIET_MS * 1000;
     return ESP_OK;

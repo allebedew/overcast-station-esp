@@ -106,19 +106,19 @@ static void render_indoor(char *l0, char *l1)
     }
 }
 
-/*   23.46° 45.3 1250    (TMP117 °C, SCD40 humidity and CO₂)
+/*   23.46° 16.8 1250    (TMP117 °C, dew point, SCD40 CO₂)
  *   1013.250  999.9x    (BMP581 hPa at sea level, VEML7700 lx — 16 exactly) */
 static void render_precise(char *l0, char *l1)
 {
     climate_t c;
     climate_get(&c);
 
-    char temp[12], press[12], co2[12], rh[12];
+    char temp[12], press[12], co2[12], dew[12];
     fmt_or(temp, sizeof(temp), c.temp_ok, "--.--" DEG, "%5.2f" DEG, c.temp_c);
     fmt_or(press, sizeof(press), c.press_ok, "----.---", "%-8.3f",
            c.press_msl_hpa);
     fmt_or(co2, sizeof(co2), c.co2_ok, "----", "%4.0f", c.co2_ppm);
-    fmt_or(rh, sizeof(rh), c.rh_ok, "--.-", "%4.1f", c.rh_pct);
+    fmt_or(dew, sizeof(dew), c.rh_ok, "--.-", "%4.1f", c.dew_c);
 
     /* Five columns hold either a tenth of a lux or a five-digit reading. */
     char lux[10] = "-----x";
@@ -132,7 +132,7 @@ static void render_precise(char *l0, char *l1)
         }
     }
 
-    snprintf(l0, RENDER_BUF, "%s %s %s", temp, rh, co2);
+    snprintf(l0, RENDER_BUF, "%s %s %s", temp, dew, co2);
     snprintf(l1, RENDER_BUF, "%s  %s", press, lux);
 }
 

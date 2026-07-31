@@ -84,12 +84,13 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   | Page | Rows |
   |---|---|
   | indoor + headline | `23.46° 45% 1250` / `12.3°  Overcast` |
-  | indoor precise | `23.46° 45.3 1250` / `1013.250  999.9x` |
+  | indoor precise | `23.46° 16.8 1250` / `1013.250  999.9x` |
   | outdoor detail | `12.3° 8..17 C3` / `78% 1013 NW15 U3` |
   | system | `17:27:40 28.07` / `12% 184k BL184` |
 
-  Sixteen characters are the whole constraint: the humidity loses its decimal
-  on the headline page, and the illuminance keeps a tenth of a lux only below
+  Sixteen characters are the whole constraint: the humidity is whole percent on
+  the headline page and gives up its slot to the dew point on the precise one,
+  and the illuminance keeps a tenth of a lux only below
   1000 lx, then drops to whole lux and to kilolux — the one place in the
   firmware that shows fewer digits than the standard resolution.
 
@@ -122,6 +123,10 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   altitude 0 the factor is exactly 1). Every readout shows the reduced value,
   the rings store the pressure **as measured** and `/api/history` reduces on
   the way out — so a later altitude correction re-reduces the whole history.
+  The **dew point** (Magnus-Tetens) is the one derived quantity, from the
+  SCD40's own temperature and humidity — its warm offset cancels there, and the
+  driver computes it. Follows the humidity; not in the history. Shown on the
+  SCD40 card and on the precise LCD page in place of the humidity.
 - **Site altitude** — metres above sea level, −500…9000, NVS
   `settings/altitude_m` (default 0). A wrong altitude shifts every pressure
   readout and chart, never the stored history.
@@ -137,6 +142,7 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   | pressure | 0.001 hPa | BMP581 | `%.3f` |
   | CO₂ | 1 ppm | SCD40 | `%u` |
   | humidity | 0.1 % | SCD40 | `%.1f` |
+  | dew point | 0.1 °C | SCD40 | `%.1f` |
   | illuminance | 0.1 lx | VEML7700 | `%.1f` |
 
 - **History & charts** — five quantities in three rings: 5 min of 1 s samples
@@ -188,6 +194,9 @@ header, grouped by what they face: `main/sensors/` talks to the I2C bus,
 `main/ui/` drives the station's own hardware, `main/web/` serves HTTP
 (including the page itself, `web/index.html`). Every subdirectory is in the
 component's `INCLUDE_DIRS`, so includes stay flat (`#include "screen_16x2.h"`).
+A quantity derived from one device's own readings and shown on that device's
+card belongs in that device's module, not in the caller — dew point in
+`scd40.c`, white/ALS ratio in `veml7700.c`.
 
 | Module | Role |
 |---|---|
@@ -200,10 +209,10 @@ component's `INCLUDE_DIRS`, so includes stay flat (`#include "screen_16x2.h"`).
 | `sensors/sensors.c` | one task polling all four sensors at their own periods through a shared hot-plug state machine; owns the snapshots and the cross-sensor wiring (BMP581 pressure → SCD40 compensation) |
 | `sensors/i2c_bus.c` | the I2C master bus and the recursive lock arbitrating it, for sensors and display alike |
 | `sensors/i2c_dev.c` | shared register access: attach, probe, raw transfers, u8/u16 reads and writes |
-| `sensors/scd40.c` | Sensirion command protocol with CRC-8, phased start, pressure compensation, FRC |
+| `sensors/scd40.c` | Sensirion command protocol with CRC-8, phased start, pressure compensation, FRC, dew point |
 | `sensors/tmp117.c` | address auto-detection, device-ID check, config, temperature register |
 | `sensors/bmp581.c` | address auto-detection, chip-ID check, soft reset out of deep standby, DSP/IIR + OSR/ODR setup, 6-byte burst read |
-| `sensors/veml7700.c` | command registers, auto-ranging table with its settle deadline, lux conversion with the >1000 lx correction |
+| `sensors/veml7700.c` | command registers, auto-ranging table with its settle deadline, lux conversion with the >1000 lx correction, white/ALS ratio |
 | `sysinfo.c` | the station's own health: a boot-time snapshot of what cannot change plus live counters, the SoC temperature sensor, reset reason. CPU load is measured in one 1 s window shared by all callers |
 | `ui/screen_16x2.c` | four button-advanced pages plus two conditional ones that pre-empt them, 10 fps loop, backlight dimmed to the ambient light. Sized for 16x2 |
 | `ui/lcd1602_rgb.c` | DFR0464 transport: character output, backlight registers, revision detection, hot-plug recovery. The only file tied to this display |
@@ -222,7 +231,7 @@ component's `INCLUDE_DIRS`, so includes stay flat (`#include "screen_16x2.h"`).
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (gzipped) |
-| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`), `weather`, `system`, `settings` (`led_brightness`, `backlight_rgb`, read-only `backlight_scale`, `altitude`) |
+| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `dew`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`), `weather`, `system`, `settings` (`led_brightness`, `backlight_rgb`, read-only `backlight_scale`, `altitude`) |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`); `{period, co2, temp, rh, press, lux}`, each series gated on its own quantity so `null` is a gap in that series alone. `press` comes out reduced to sea level |
 | `/api/history/reset` | POST | wipe all tiers, RAM rings and flash snapshots |
 | `/api/scan` | GET | Wi-Fi scan, `[{ssid, bssid, ch, rssi, auth}]`, one entry per BSSID |

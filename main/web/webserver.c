@@ -249,7 +249,6 @@ static esp_err_t status_get_handler(httpd_req_t *req)
 
     veml7700_data_t veml = { .gain = "" };
     bool veml_ok = sensors_veml7700_get(&veml);
-    float veml_white_ratio = veml.lux > 0.0f ? veml.white_lux / veml.lux : 0.0f;
 
     weather_api_data_t weather;
     bool weather_ok = weather_api_get(&weather);
@@ -266,9 +265,11 @@ static esp_err_t status_get_handler(httpd_req_t *req)
      * card and its chart always come from the same sensor. */
     climate_t cl;
     climate_get(&cl);
-    char cl_temp[12], cl_rh[12], cl_co2[12], cl_press[12], cl_msl[12], cl_lux[16];
+    char cl_temp[12], cl_rh[12], cl_dew[12], cl_co2[12], cl_press[12],
+        cl_msl[12], cl_lux[16];
     json_num(cl_temp, sizeof(cl_temp), cl.temp_ok, "%.2f", cl.temp_c);
     json_num(cl_rh, sizeof(cl_rh), cl.rh_ok, "%.1f", cl.rh_pct);
+    json_num(cl_dew, sizeof(cl_dew), cl.rh_ok, "%.1f", cl.dew_c);
     json_num(cl_co2, sizeof(cl_co2), cl.co2_ok, "%.0f", (double)cl.co2_ppm);
     json_num(cl_press, sizeof(cl_press), cl.press_ok, "%.3f", cl.press_hpa);
     json_num(cl_msl, sizeof(cl_msl), cl.press_ok, "%.3f", cl.press_msl_hpa);
@@ -280,10 +281,11 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     jbuf_printf(&j,
         "{%s,%s,"
         "\"climate\":{"
-        "\"temp\":%s,\"rh\":%s,\"co2\":%s,"
+        "\"temp\":%s,\"rh\":%s,\"dew\":%s,\"co2\":%s,"
         "\"press\":%s,\"press_msl\":%s,\"lux\":%s},"
         "\"sensors\":{"
-        "\"scd40\":{\"ok\":%s,\"co2\":%u,\"temp\":%.1f,\"rh\":%.1f},"
+        "\"scd40\":{\"ok\":%s,\"co2\":%u,\"temp\":%.1f,\"rh\":%.1f,"
+        "\"dew\":%.1f},"
         "\"tmp117\":{\"ok\":%s,\"temp\":%.2f},"
         "\"bmp581\":{\"ok\":%s,\"press\":%.3f,\"press_pa\":%.1f,\"temp\":%.2f},"
         "\"veml7700\":{\"ok\":%s,"
@@ -311,13 +313,14 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"backlight_rgb\":\"%06X\",\"backlight_scale\":%u,"
         "\"altitude\":%d}}",
         sta_json, ap_json,
-        cl_temp, cl_rh, cl_co2, cl_press, cl_msl, cl_lux,
+        cl_temp, cl_rh, cl_dew, cl_co2, cl_press, cl_msl, cl_lux,
         air_ok ? "true" : "false", air.co2_ppm, air.temp_c, air.rh_pct,
+        air.dew_c,
         tmp117_ok ? "true" : "false", tmp117.temp_c,
         bmp581_ok ? "true" : "false",
         bmp581.press_hpa, bmp581.press_hpa * 100.0f, bmp581.temp_c,
         veml_ok ? "true" : "false",
-        veml.lux, veml_white_ratio,
+        veml.lux, veml.white_ratio,
         veml.gain, veml.it_ms,
         weather_ok ? "true" : "false", weather.temp_c, weather.feels_c,
         weather.temp_min_c, weather.temp_max_c,

@@ -205,6 +205,7 @@ esp_err_t veml7700_read(veml7700_data_t *out)
     out->white_raw = white;
     out->lux = correct_lux(als * r->lx_per_count);
     out->white_lux = correct_lux(white * r->lx_per_count);
+    out->white_ratio = out->lux > 0.0f ? out->white_lux / out->lux : 0.0f;
     out->gain = r->gain_str;
     out->it_ms = r->it_ms;
     return ESP_OK;

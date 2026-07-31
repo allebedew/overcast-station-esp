@@ -6,14 +6,17 @@
 #include "esp_err.h"
 
 /* Sensirion SCD40 — photoacoustic CO2 sensor with temperature and humidity.
- * Transport only: the 16-bit command protocol with its CRC-8, the start
- * sequence and the two commands the rest of the firmware can trigger.
+ * The 16-bit command protocol with its CRC-8, the start sequence, the two
+ * commands the rest of the firmware can trigger, and the dew point, which is
+ * derived from this part's own pair and shown on its card.
  * Polling, hot-plug and the published snapshot live in sensors.c. */
 
 typedef struct {
     uint16_t co2_ppm;
     float temp_c;
     float rh_pct;
+    float dew_c; /* derived from temp_c and rh_pct: the chip's warm offset
+                  * cancels, its RH being relative to that same reading */
 } scd40_data_t;
 
 /* Attaches the device handle; no bus traffic. */

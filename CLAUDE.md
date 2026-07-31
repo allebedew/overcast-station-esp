@@ -7,14 +7,21 @@
 - **Comment sparingly.** Only what cannot be read off the code: a non-obvious
   *why*, a magic constant, a hardware quirk, a concurrency rule, a display
   layout the arithmetic depends on. No restating what the next line does, no
-  essays, no comment on a self-explanatory name. One or two lines each; prefer
-  a clearer name over a comment explaining an unclear one.
+  essays, no comment on a self-explanatory name. One or two lines each, three
+  at the outside; prefer a clearer name over a comment explaining an unclear
+  one. Write it terse the first time — the justification for a decision,
+  the alternatives weighed, the accuracy budget belong in the conversation,
+  not in the source.
 - README.md is the context-recovery document. When a change touches anything
   described there (features, LED colors, Wi-Fi logic, module table, HTTP API
   table, partition layout, build/flash commands), update README in the same
   session. Keep it short and factual — tables and short bullets over prose,
   no narration of design reasoning that the code already carries. Editing an
-  existing section means rewriting it, not appending to it.
+  existing section means rewriting it, not appending to it. A new feature is
+  usually a row in a table or a clause in an existing bullet, not a paragraph
+  of its own.
+- A value derived from a single device's own readings and shown on that
+  device's card belongs in that device's module, not in whoever displays it.
 - **Do not build after a change** unless there is a strong reason to — a build
   takes minutes and the user usually builds and flashes from their own
   terminal. Finish the edits and say what was changed instead. Strong reasons:

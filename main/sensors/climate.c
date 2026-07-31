@@ -77,14 +77,15 @@ void climate_get(climate_t *out)
         out->temp_c = tmp117.temp_c;
     }
 
-    /* One reading, so CO2 and humidity appear and disappear together; the
-     * SCD40's own temperature is deliberately unused. */
+    /* One reading, so CO2, humidity and dew point appear and disappear
+     * together; the SCD40's own temperature is deliberately unused. */
     scd40_data_t air;
     if (sensors_scd40_get(&air)) {
         out->co2_ok = true;
         out->co2_ppm = air.co2_ppm;
         out->rh_ok = true;
         out->rh_pct = air.rh_pct;
+        out->dew_c = air.dew_c;
     }
 
     /* Same for the BMP581's temperature: the part is here for the pressure. */

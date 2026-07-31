@@ -22,6 +22,7 @@
  *     pressure     0.001 hPa  BMP581      "%.3f"
  *     CO2          1 ppm      SCD40       "%u"
  *     humidity     0.1 %      SCD40       "%.1f"
+ *     dew point    0.1 °C     SCD40       "%.1f"
  *     illuminance  0.1 lx     VEML7700    "%.1f"
  *
  * These are resolutions, not accuracies; they exist so a reading reads the same
@@ -34,6 +35,7 @@ typedef struct {
 
     bool rh_ok;
     float rh_pct; /* SCD40 */
+    float dew_c;  /* SCD40, derived there; valid whenever rh_ok is */
 
     bool co2_ok;
     uint16_t co2_ppm; /* SCD40 */

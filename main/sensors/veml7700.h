@@ -14,6 +14,8 @@ typedef struct {
     float white_lux; /* white channel, same scaling — an estimate: the channel
                       * has its own spectral response and no lux calibration,
                       * so als_raw/white_raw are the honest numbers */
+    float white_ratio; /* white_lux / lux, 0 in the dark: how far the light is
+                        * from the lux curve the ALS channel assumes */
     uint16_t als_raw;
     uint16_t white_raw;
     const char *gain; /* "1/8" | "1/4" | "1" | "2" */
