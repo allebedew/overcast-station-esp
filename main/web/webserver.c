@@ -265,11 +265,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
      * card and its chart always come from the same sensor. */
     climate_t cl;
     climate_get(&cl);
-    char cl_temp[12], cl_rh[12], cl_dew[12], cl_co2[12], cl_press[12],
-        cl_msl[12], cl_lux[16];
+    char cl_temp[12], cl_rh[12], cl_co2[12], cl_press[12], cl_msl[12], cl_lux[16];
     json_num(cl_temp, sizeof(cl_temp), cl.temp_ok, "%.2f", cl.temp_c);
     json_num(cl_rh, sizeof(cl_rh), cl.rh_ok, "%.1f", cl.rh_pct);
-    json_num(cl_dew, sizeof(cl_dew), cl.rh_ok, "%.1f", cl.dew_c);
     json_num(cl_co2, sizeof(cl_co2), cl.co2_ok, "%.0f", (double)cl.co2_ppm);
     json_num(cl_press, sizeof(cl_press), cl.press_ok, "%.3f", cl.press_hpa);
     json_num(cl_msl, sizeof(cl_msl), cl.press_ok, "%.3f", cl.press_msl_hpa);
@@ -281,7 +279,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     jbuf_printf(&j,
         "{%s,%s,"
         "\"climate\":{"
-        "\"temp\":%s,\"rh\":%s,\"dew\":%s,\"co2\":%s,"
+        "\"temp\":%s,\"rh\":%s,\"co2\":%s,"
         "\"press\":%s,\"press_msl\":%s,\"lux\":%s},"
         "\"sensors\":{"
         "\"scd40\":{\"ok\":%s,\"co2\":%u,\"temp\":%.1f,\"rh\":%.1f,"
@@ -313,7 +311,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"backlight_rgb\":\"%06X\",\"backlight_scale\":%u,"
         "\"altitude\":%d}}",
         sta_json, ap_json,
-        cl_temp, cl_rh, cl_dew, cl_co2, cl_press, cl_msl, cl_lux,
+        cl_temp, cl_rh, cl_co2, cl_press, cl_msl, cl_lux,
         air_ok ? "true" : "false", air.co2_ppm, air.temp_c, air.rh_pct,
         air.dew_c,
         tmp117_ok ? "true" : "false", tmp117.temp_c,

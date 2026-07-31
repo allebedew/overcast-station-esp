@@ -125,8 +125,9 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   the way out — so a later altitude correction re-reduces the whole history.
   The **dew point** (Magnus-Tetens) is the one derived quantity, from the
   SCD40's own temperature and humidity — its warm offset cancels there, and the
-  driver computes it. Follows the humidity; not in the history. Shown on the
-  SCD40 card and on the precise LCD page in place of the humidity.
+  driver computes it. Follows the humidity. Not in the history, so it gets no
+  main card — those are card-and-chart pairs; it shows on the SCD40 card and on
+  the precise LCD page in place of the humidity.
 - **Site altitude** — metres above sea level, −500…9000, NVS
   `settings/altitude_m` (default 0). A wrong altitude shifts every pressure
   readout and chart, never the stored history.
@@ -231,7 +232,7 @@ card belongs in that device's module, not in the caller — dew point in
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (gzipped) |
-| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `dew`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`), `weather`, `system`, `settings` (`led_brightness`, `backlight_rgb`, read-only `backlight_scale`, `altitude`) |
+| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`), `weather`, `system`, `settings` (`led_brightness`, `backlight_rgb`, read-only `backlight_scale`, `altitude`) |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`); `{period, co2, temp, rh, press, lux}`, each series gated on its own quantity so `null` is a gap in that series alone. `press` comes out reduced to sea level |
 | `/api/history/reset` | POST | wipe all tiers, RAM rings and flash snapshots |
 | `/api/scan` | GET | Wi-Fi scan, `[{ssid, bssid, ch, rssi, auth}]`, one entry per BSSID |
