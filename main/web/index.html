@@ -218,9 +218,16 @@
                 font-weight: 600;
                 margin-left: 4px;
             }
+            /* Column so a footer can sit on the bottom edge; the grid row is as
+               tall as the tallest card and the chart must not absorb that. */
+            .card.sensor {
+                display: flex;
+                flex-direction: column;
+            }
             .sensor canvas {
                 width: 100%;
                 height: 112px;
+                flex: none;
                 margin-top: 8px;
                 display: block;
                 touch-action: pan-y;
@@ -228,6 +235,7 @@
             }
             .badge {
                 font-size: 10.5px;
+                white-space: nowrap;
                 padding: 2px 8px;
                 border-radius: 99px;
                 font-weight: 600;
@@ -247,6 +255,43 @@
             }
             .badge.off {
                 background: rgba(91, 102, 117, 0.18);
+                color: var(--text-faint);
+            }
+            /* One line under the chart: the forecast wording on the pressure
+               card. Ellipsised rather than wrapped — the card height is shared
+               with every other sensor card in the grid. */
+            .cardfoot {
+                margin-top: auto;
+                padding-top: 12px;
+                /* into the card's own bottom padding: the line reads as part of
+                   the lower edge rather than as another row of content */
+                margin-bottom: -7px;
+                font-size: 11.5px;
+                font-weight: 600;
+                color: var(--text);
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            /* Bullet in the badge's colour, so the grade the arrow carries is
+               repeated where the wording is. */
+            .cardfoot::before {
+                content: "• ";
+                /* larger than the text it marks, nudged back onto its baseline */
+                font-size: 2em;
+                line-height: 1;
+                vertical-align: -0.13em;
+            }
+            .cardfoot.good::before {
+                color: var(--co2);
+            }
+            .cardfoot.warn::before {
+                color: var(--co2-warn);
+            }
+            .cardfoot.bad::before {
+                color: var(--co2-bad);
+            }
+            .cardfoot.pending {
                 color: var(--text-faint);
             }
 
@@ -1400,6 +1445,36 @@
                         96: "Гроза с градом",
                         99: "Гроза с сильным градом",
                     },
+                    zcode: [
+                        "Устойчивая ясная погода",
+                        "Ясная погода",
+                        "Проясняется",
+                        "Ясно, становится неустойчиво",
+                        "Ясно, возможны ливни",
+                        "Довольно ясно, улучшение",
+                        "Довольно ясно, ливни в начале",
+                        "Довольно ясно, позже ливни",
+                        "Ливни в начале, улучшение",
+                        "Переменно, улучшение",
+                        "Довольно ясно, вероятны ливни",
+                        "Довольно неустойчиво, позже прояснение",
+                        "Неустойчиво, вероятно улучшение",
+                        "Ливни с прояснениями",
+                        "Ливни, погода портится",
+                        "Переменно, местами дождь",
+                        "Неустойчиво, краткие прояснения",
+                        "Неустойчиво, позже дождь",
+                        "Неустойчиво, временами дождь",
+                        "Очень неустойчиво, временами лучше",
+                        "Временами дождь, позже хуже",
+                        "Временами дождь, погода резко портится",
+                        "Частые дожди",
+                        "Очень неустойчиво, дождь",
+                        "Штормовая погода, возможно улучшение",
+                        "Шторм, сильный дождь",
+                    ],
+                    per3h: "за 3 ч",
+                    noTrend: "Тренд давления ещё набирается",
                     system: "Система",
                     loading: "Загрузка…",
                     wifiNetworks: "Wi-Fi сети",
@@ -1579,6 +1654,40 @@
                         96: "Thunderstorm, hail",
                         99: "Thunderstorm, heavy hail",
                     },
+                    /* The Zambretti wordings, in the order forecast.c lists
+                       them (code 0 = A). Same rule as wcode: the firmware
+                       carries the English for Telegram and the panel, so an
+                       edit here belongs there too. */
+                    zcode: [
+                        "Settled fine weather",
+                        "Fine weather",
+                        "Becoming fine",
+                        "Fine, becoming less settled",
+                        "Fine, possibly showers",
+                        "Fairly fine, improving",
+                        "Fairly fine, possibly showers early",
+                        "Fairly fine, showers later",
+                        "Showery early, improving",
+                        "Changeable, improving",
+                        "Fairly fine, showers likely",
+                        "Rather unsettled, clearing later",
+                        "Unsettled, probably improving",
+                        "Showery, bright intervals",
+                        "Showery, becoming unsettled",
+                        "Changeable, some rain",
+                        "Unsettled, short fine intervals",
+                        "Unsettled, rain later",
+                        "Unsettled, rain at times",
+                        "Very unsettled, finer at times",
+                        "Rain at times, worse later",
+                        "Rain at times, becoming very unsettled",
+                        "Rain at frequent intervals",
+                        "Very unsettled, rain",
+                        "Stormy, possibly improving",
+                        "Stormy, much rain",
+                    ],
+                    per3h: "over 3 h",
+                    noTrend: "Pressure trend still building up",
                     system: "System",
                     loading: "Loading…",
                     wifiNetworks: "Wi-Fi networks",
@@ -2119,6 +2228,21 @@
                 };
             }
 
+            /* The barometric tendency as the pressure card's badge. The arrow
+               carries the grade the device assigned: one head slow, two fast,
+               three rapid, a dash for steady. */
+            function trendBadge(f) {
+                if (!f) return null;
+                const n = Math.abs(f.trend);
+                const d = Math.abs(f.delta_3h).toFixed(1);
+                return {
+                    cls: n >= 3 ? "bad" : n >= 2 ? "warn" : "good",
+                    text: n
+                        ? `${(f.trend > 0 ? "↑" : "↓").repeat(n)} ${d} hPa ${t("per3h")}`
+                        : `→ ${d} hPa ${t("per3h")}`,
+                };
+            }
+
             /* ---------- status polling ---------- */
             let lastOk = null;
             let lastStatus = null;
@@ -2186,18 +2310,23 @@
                     $(sr.k + "Val").textContent = num(v, sr.fmt);
                 });
 
-                /* the one card that carries a level badge instead of a trend */
-                const bs = SERIES.find((sr) => sr.badge);
-                const b = $(bs.k + "Badge");
-                const bv = cl[bs.src];
-                if (typeof bv === "number" && Number.isFinite(bv)) {
-                    const l = co2Level(bv);
-                    b.className = "badge " + l.cls;
-                    b.textContent = l.text;
-                } else {
-                    b.className = "badge off";
-                    b.textContent = t("noData");
-                }
+                /* Cards whose badge replaces the window trend arrow: the CO₂
+                 * level and the pressure tendency. The callback returns
+                 * {cls, text}, or null while the value is missing. */
+                SERIES.filter((sr) => sr.badge).forEach((sr) => {
+                    const b = $(sr.k + "Badge");
+                    const info = sr.badge(cl, s);
+                    b.className = "badge " + (info ? info.cls : "off");
+                    b.textContent = info ? info.text : t("noData");
+                });
+                /* The footer waits for its value dimmed, then reads as text
+                 * bulleted in the same grade colour as the badge above. */
+                SERIES.filter((sr) => sr.footer).forEach((sr) => {
+                    const info = sr.footer(cl, s);
+                    const el = $(sr.k + "Foot");
+                    el.className = "cardfoot " + (info ? info.cls : "pending");
+                    el.textContent = info ? info.text : t("noTrend");
+                });
 
                 renderWeather(s.weather || {});
                 renderSensors(sn);
@@ -2402,7 +2531,8 @@
                     colorOf: (v) => co2Level(v).color,
                     /* the level badge sits where the other cards put the
                      * trend arrow */
-                    badge: true,
+                    badge: (cl) =>
+                        typeof cl.co2 === "number" ? co2Level(cl.co2) : null,
                     fmt: (v) => v.toFixed(0),
                 },
                 {
@@ -2417,8 +2547,18 @@
                     unit: "hPa",
                     color: "--press",
                     fmt: (v) => v.toFixed(3),
-                    /* a 3-decimal delta is noise; the reading itself is not */
-                    trendFmt: (v) => v.toFixed(2),
+                    /* The tendency comes from the device, not from the chart
+                     * window: three hours by definition, so it must not follow
+                     * the 5 m / 1 h / 1 d segment. The arrow repeats with the
+                     * grade — one head slow, three rapid. */
+                    badge: (cl, s) => trendBadge(s.forecast),
+                    footer: (cl, s) =>
+                        s.forecast
+                            ? {
+                                  text: t("zcode")[s.forecast.code],
+                                  cls: trendBadge(s.forecast).cls,
+                              }
+                            : null,
                 },
                 {
                     k: "l",
@@ -2476,7 +2616,11 @@
                         `<span><span data-i18n="max"></span> <b id="${sr.k}Max">${NA}</b></span>` +
                         `<span><span data-i18n="min"></span> <b id="${sr.k}Min">${NA}</b></span>` +
                         "</div></div>" +
-                        `<canvas id="${sr.k}Chart"></canvas></div>`
+                        `<canvas id="${sr.k}Chart"></canvas>` +
+                        (sr.footer
+                            ? `<div class="cardfoot pending" id="${sr.k}Foot"></div>`
+                            : "") +
+                        "</div>"
                     );
                 }).join("");
             }

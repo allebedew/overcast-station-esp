@@ -16,6 +16,7 @@
 #include "cJSON.h"
 #include "mdns.h"
 #include "climate.h"
+#include "forecast.h"
 #include "history.h"
 #include "led.h"
 #include "ota.h"
@@ -273,6 +274,16 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     json_num(cl_msl, sizeof(cl_msl), cl.press_ok, "%.3f", cl.press_msl_hpa);
     json_num(cl_lux, sizeof(cl_lux), cl.lux_ok, "%.1f", cl.lux);
 
+    /* Absent as a whole until three hours of pressure are on record. */
+    forecast_t fc;
+    forecast_get(&fc);
+    char fc_json[64] = "null";
+    if (fc.ok) {
+        snprintf(fc_json, sizeof(fc_json),
+                 "{\"trend\":%d,\"delta_3h\":%.2f,\"code\":%u}", fc.trend,
+                 fc.delta_3h_hpa, fc.code);
+    }
+
     static char json[3072];
     jbuf_t j;
     jbuf_init(&j, json, sizeof(json));
@@ -281,6 +292,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"climate\":{"
         "\"temp\":%s,\"rh\":%s,\"co2\":%s,"
         "\"press\":%s,\"press_msl\":%s,\"lux\":%s},"
+        "\"forecast\":%s,"
         "\"sensors\":{"
         "\"scd40\":{\"ok\":%s,\"co2\":%u,\"temp\":%.1f,\"rh\":%.1f,"
         "\"dew\":%.1f},"
@@ -312,6 +324,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"altitude\":%d}}",
         sta_json, ap_json,
         cl_temp, cl_rh, cl_co2, cl_press, cl_msl, cl_lux,
+        fc_json,
         air_ok ? "true" : "false", air.co2_ppm, air.temp_c, air.rh_pct,
         air.dew_c,
         tmp117_ok ? "true" : "false", tmp117.temp_c,

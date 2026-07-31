@@ -1,6 +1,7 @@
 idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             "settings.c" "sysinfo.c" "ota.c"
                             "timesync.c" "telegram.c" "alerts.c" "history.c"
+                            "forecast.c"
                             "storage.c" "weather_api.c" "weather_store.c"
                             # what the station shows: the status LED, the
                             # display's layouts and the panel's transport

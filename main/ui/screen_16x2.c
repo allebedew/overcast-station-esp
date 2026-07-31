@@ -14,6 +14,7 @@
 
 #include "lcd1602_rgb.h"
 #include "climate.h"
+#include "forecast.h"
 #include "ota.h"
 #include "settings.h"
 #include "sysinfo.h"
@@ -54,8 +55,9 @@
 typedef enum {
     PAGE_INDOOR,  /* what the station measures, plus the outdoor headline */
     PAGE_PRECISE, /* the same air at the sensors' full resolution */
-    PAGE_OUTDOOR, /* the rest of the Open-Meteo reading */
-    PAGE_SYSTEM,  /* clock and how the station itself is doing */
+    PAGE_OUTDOOR,  /* the rest of the Open-Meteo reading */
+    PAGE_FORECAST, /* what the station's own barometer expects */
+    PAGE_SYSTEM,   /* clock and how the station itself is doing */
     PAGE_COUNT,
 } page_t;
 
@@ -162,6 +164,32 @@ static void render_outdoor(char *l0, char *l1)
              w.wind_kmh, w.uvi);
 }
 
+/*   1013.2 hPa v2.1  (sea level, tendency over 3 h; the ROM has no arrows)
+ *   Chgable, rain     (the Zambretti wording, shortened to the panel) */
+static void render_forecast(char *l0, char *l1)
+{
+    climate_t c;
+    climate_get(&c);
+    forecast_t f;
+    forecast_get(&f);
+
+    char press[12];
+    fmt_or(press, sizeof(press), c.press_ok, "----.-", "%6.1f",
+           c.press_msl_hpa);
+
+    if (!f.ok) {
+        snprintf(l0, RENDER_BUF, "%s hPa  --", press);
+        snprintf(l1, RENDER_BUF, "no 3h trend yet");
+        return;
+    }
+
+    float delta = f.delta_3h_hpa;
+    char dir = f.trend > 0 ? '^' : f.trend < 0 ? 'v' : '=';
+    snprintf(l0, RENDER_BUF, "%s hPa %c%.1f", press, dir,
+             delta < 0 ? -delta : delta);
+    snprintf(l1, RENDER_BUF, "%s", forecast_code_short(f.code));
+}
+
 /*   17:27:40 28.07    (the colons blink, one second on, one second off)
  *   12% 184k BL184     (CPU load, free heap, backlight scale) */
 static void render_system(char *l0, char *l1)
@@ -240,10 +268,11 @@ static void render_page(char *l0, char *l1)
 
     s_override_active = false;
     switch (s_page) {
-    case PAGE_INDOOR:  render_indoor(l0, l1); break;
-    case PAGE_PRECISE: render_precise(l0, l1); break;
-    case PAGE_OUTDOOR: render_outdoor(l0, l1); break;
-    default:           render_system(l0, l1); break;
+    case PAGE_INDOOR:   render_indoor(l0, l1); break;
+    case PAGE_PRECISE:  render_precise(l0, l1); break;
+    case PAGE_OUTDOOR:  render_outdoor(l0, l1); break;
+    case PAGE_FORECAST: render_forecast(l0, l1); break;
+    default:            render_system(l0, l1); break;
     }
 }
 
