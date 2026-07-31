@@ -20,7 +20,7 @@
 
 void app_main(void)
 {
-    /* NVS нужен модулям ниже (яркость LED, список сетей Wi-Fi) */
+    /* Needed by the modules below (LED brightness, saved Wi-Fi networks). */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -37,9 +37,7 @@ void app_main(void)
     history_init();
     sysinfo_init();
 
-    /* The bus comes up before anything that talks on it — the sensors here,
-     * the display further down — and logs a scan while the log is still
-     * quiet. */
+    /* Before anything that talks on it, and while the log is still quiet. */
     i2c_bus_init();
     sensors_init();
 
@@ -49,17 +47,15 @@ void app_main(void)
     weather_store_init();
     weather_api_init();
 
-    /* Kept after the data modules so the display can go straight to showing
-     * their readings. */
+    /* After the data modules, so the display starts on real readings. */
     screen_16x2_init();
 
-    /* Last: the request handlers read from every module above, so the server
-     * must not accept a request before those are initialised. */
+    /* Last: the handlers read from every module above. */
     webserver_start();
 
-    /* инициализация прошла — фиксируем прошивку, отменяя OTA-откат */
+    /* Init went through — mark the image valid, cancelling the OTA rollback. */
     ota_confirm_running_image();
 
     sysinfo_log_tasks();
-    /* app_main завершается — работают задачи led и wifi */
+    /* app_main returns; the led and wifi tasks carry on. */
 }

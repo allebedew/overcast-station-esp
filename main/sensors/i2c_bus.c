@@ -8,9 +8,8 @@
 #define I2C_SDA_GPIO 2
 #define I2C_SCL_GPIO 3
 
-/* Bus scan: 7-bit address space minus the reserved ranges (0x00-0x07,
- * 0x78-0x7F). A missing device NACKs immediately, so a short timeout
- * keeps a full sweep well under a second. */
+/* 7-bit address space minus the reserved ranges. A missing device NACKs at
+ * once, so a short timeout keeps a full sweep under a second. */
 #define I2C_SCAN_FIRST_ADDR 0x08
 #define I2C_SCAN_LAST_ADDR  0x77
 #define I2C_SCAN_TIMEOUT_MS 20
@@ -35,7 +34,7 @@ void i2c_bus_unlock(void)
     xSemaphoreGiveRecursive(s_lock);
 }
 
-/* Names for the addresses we expect to see, to make the log self-explanatory. */
+/* Names for the expected addresses, so the scan log reads by itself. */
 static const char *known_device(uint8_t addr)
 {
     switch (addr) {
@@ -56,8 +55,7 @@ int i2c_bus_scan(void)
 {
     int found = 0;
 
-    /* The driver logs an error for every address that NACKs, which is the
-     * normal case here — mute it for the duration of the sweep. */
+    /* The driver logs an error per NACK, which is the normal case here. */
     esp_log_level_set("i2c.master", ESP_LOG_NONE);
 
     i2c_bus_lock();
@@ -89,7 +87,7 @@ void i2c_bus_init(void)
         .scl_io_num = I2C_SCL_GPIO,
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true, /* breakout has its own, belt & braces */
+        .flags.enable_internal_pullup = true, /* the breakout has its own too */
     };
     ESP_ERROR_CHECK(i2c_new_master_bus(&cfg, &s_bus));
 
@@ -97,5 +95,5 @@ void i2c_bus_init(void)
     ESP_ERROR_CHECK(s_lock ? ESP_OK : ESP_ERR_NO_MEM);
 
     ESP_LOGI(TAG, "I2C bus ready on GPIO%d/%d", I2C_SDA_GPIO, I2C_SCL_GPIO);
-    i2c_bus_scan(); /* before any polling task starts, so the log stays readable */
+    i2c_bus_scan(); /* before the polling tasks, so the log stays readable */
 }

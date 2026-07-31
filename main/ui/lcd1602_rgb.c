@@ -13,9 +13,8 @@
 #define I2C_SPEED_HZ   100000
 #define I2C_TIMEOUT_MS 100
 
-/* Every transfer starts with a control byte: bit 7 clear means "the rest of
- * this transfer is payload of the same kind", bit 6 selects the HD44780 RS
- * line (0 = command, 1 = data). So a whole row goes out in one transfer. */
+/* Control byte: bit 7 clear = the rest of the transfer is payload of the same
+ * kind, bit 6 = HD44780 RS line. So a whole row goes out in one transfer. */
 #define CTRL_CMD  0x80
 #define CTRL_DATA 0x40
 
@@ -27,22 +26,18 @@
 #define CMD_SET_DDRAM  0x80
 #define DDRAM_ROW1     0x40 /* second row starts here, rows are not contiguous */
 
-/* The character ROM holds katakana and symbols above ASCII; of those two are
- * worth passing through, written as "\xDF" and "\xFF" in a string — the degree
- * sign, and the solid block at the very end of the table, which is the only
- * fully-lit cell the ROM has and so the only way to draw a bar without
- * defining custom characters. */
+/* Above ASCII the ROM holds katakana and symbols; two are passed through — the
+ * degree sign, and the solid block, the only fully-lit cell it has. */
 #define DEGREE_SIGN 0xDF
 #define FULL_BLOCK  0xFF
 
 #define CLEAR_DELAY_MS 2 /* clear/home are the slow commands (~1.5 ms) */
 #define RETRY_PERIOD_MS 5000 /* how often to look for an absent module */
 
-/* The backlight driver differs between board revisions: four chips are in the
- * wild, each with its own address, PWM register per channel and wake-up
- * sequence (values taken from DFRobot_RGBLCD1602). We probe for all of them,
- * which also covers boards that ship with a chip we have not seen yet — those
- * simply end up without color. None of these collide with the SCD40 at 0x62. */
+/* Four backlight chips are in the wild across board revisions, each with its
+ * own address, PWM registers and wake-up sequence (values from
+ * DFRobot_RGBLCD1602). All are probed; an unknown one just ends up without
+ * colour. None collide with the SCD40 at 0x62. */
 #define BL_INIT_MAX 5
 
 typedef struct {
@@ -70,16 +65,14 @@ static const backlight_t *s_bl_type;
 static bool s_present;
 static int64_t s_retry_at_us;
 
-/* What the panel is currently showing, so unchanged content costs no bus
- * traffic. Invalidated on every (re)attach to force a full repaint. */
+/* What the panel is showing, so unchanged content costs no bus traffic. */
 static char s_shadow[LCD1602_ROWS][LCD1602_COLS];
 static uint8_t s_color[3] = { 255, 255, 255 };
 static bool s_color_valid;
 
-/* Every transfer takes the bus lock; the sequences that must not be broken up
- * take it again around the whole group, which the recursive lock allows. The
- * waits below are deliberately left outside it — they are the controller's
- * settling time, not the bus's. */
+/* Every transfer takes the bus lock; unbreakable sequences take it again around
+ * the whole group (the lock is recursive). Waits stay outside it — they are the
+ * controller's settling time, not the bus's. */
 static esp_err_t lcd_write(uint8_t ctrl, const uint8_t *payload, int len)
 {
     uint8_t buf[1 + LCD1602_COLS];
@@ -126,8 +119,8 @@ static void fail(esp_err_t err)
     s_retry_at_us = esp_timer_get_time() + RETRY_PERIOD_MS * 1000LL;
 }
 
-/* Power-on sequence from the AIP31068L datasheet: the function set has to be
- * repeated three times before the controller is guaranteed to be listening. */
+/* AIP31068L datasheet: the function set must be repeated three times before
+ * the controller is guaranteed to be listening. */
 static esp_err_t lcd_reset(void)
 {
     vTaskDelay(pdMS_TO_TICKS(50)); /* ≥40 ms after power-up */
@@ -154,8 +147,7 @@ static esp_err_t lcd_reset(void)
     return err;
 }
 
-/* Finds the backlight chip and wakes it up. Failure is not fatal: a display
- * with an unknown backlight driver still shows text. */
+/* Failure is not fatal: a display with an unknown backlight still shows text. */
 static void backlight_attach(void)
 {
     if (s_bl == NULL) {
@@ -264,8 +256,7 @@ esp_err_t lcd1602_rgb_set_line(int row, const char *text)
         return ESP_ERR_INVALID_STATE;
     }
 
-    /* Pad to the full width so leftovers from a longer previous line are
-     * overwritten, and keep to the printable ASCII the character ROM has. */
+    /* Pad to the full width to overwrite leftovers from a longer line. */
     char line[LCD1602_COLS];
     int len = 0;
     while (len < LCD1602_COLS && text[len] != '\0') {
@@ -281,8 +272,8 @@ esp_err_t lcd1602_rgb_set_line(int row, const char *text)
         return ESP_OK;
     }
 
-    /* The cursor address and the characters that follow it are one operation:
-     * anything else on the bus in between would land the row somewhere else. */
+    /* Cursor address and characters are one operation — anything in between
+     * would land the row somewhere else. */
     i2c_bus_lock();
     esp_err_t err = lcd_cmd(CMD_SET_DDRAM | (row == 0 ? 0 : DDRAM_ROW1));
     if (err == ESP_OK) {

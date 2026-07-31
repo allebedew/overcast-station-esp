@@ -8,8 +8,7 @@
 
 static const char *TAG = "timesync";
 
-/* Set once from the SNTP callback, read from other tasks; a bool
- * read/write is atomic here, no locking needed. */
+/* Set from the SNTP callback, read elsewhere; a bool access is atomic here. */
 static volatile bool s_synced;
 
 static void on_time_sync(struct timeval *tv)

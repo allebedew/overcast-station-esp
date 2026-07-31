@@ -4,8 +4,7 @@
 #include <stdint.h>
 #include "esp_err.h"
 
-/* Хранилище сохранённых Wi-Fi сетей (NVS, неймспейс "wifi_creds").
- * Все функции потокобезопасны. */
+/* Saved Wi-Fi networks (NVS namespace "wifi_creds"). Thread-safe. */
 
 #define WIFI_MAX_NETWORKS 5
 

@@ -20,12 +20,9 @@ static temperature_sensor_handle_t s_temp_sensor;
 
 static sysinfo_static_t s_static;
 
-/* The idle and total run-time counters are global, so the load is measured
- * once for everyone: the display asks 60 times a second and the HTTP API
- * whenever a browser polls, and both get the figure from the same window.
- * Measuring per caller would give each of them a window of its own polling
- * rate — and with two browsers open, windows that interleave and cut each
- * other short. */
+/* The run-time counters are global, so the load is measured once for everyone.
+ * Per-caller windows would follow each caller's polling rate, and two open
+ * browsers would cut each other's windows short. */
 static portMUX_TYPE s_cpu_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_prev_idle, s_prev_total;
 static int64_t s_next_us;
@@ -64,9 +61,7 @@ void sysinfo_init(void)
     ESP_ERROR_CHECK(temperature_sensor_install(&cfg, &s_temp_sensor));
     ESP_ERROR_CHECK(temperature_sensor_enable(s_temp_sensor));
 
-    /* Anchor the first window here: without this the first reading would
-     * average everything since boot, which is not what "load right now"
-     * means. */
+    /* Anchor the first window, or the first reading averages all of boot. */
     s_prev_idle = ulTaskGetIdleRunTimeCounter();
     s_prev_total = (uint32_t)esp_timer_get_time();
     s_next_us = esp_timer_get_time() + SYSINFO_CPU_WINDOW_US;
@@ -81,8 +76,7 @@ float sysinfo_chip_temp_c(void)
     return temp;
 }
 
-/* The counters are 32-bit microseconds; the ~71-minute wrap comes out right
- * in the uint32_t subtraction. */
+/* 32-bit microseconds; the ~71-minute wrap comes out right in the subtraction. */
 int sysinfo_cpu_load_percent(void)
 {
     int64_t now = esp_timer_get_time();
@@ -127,11 +121,8 @@ void sysinfo_get_runtime(sysinfo_runtime_t *out)
 void sysinfo_log_tasks(void)
 {
     /* vTaskList() writes without bounds checking, so the buffer is sized from
-     * the task count rather than fixed: a line is the name padded to
-     * configMAX_TASK_NAME_LEN plus state, priority, free stack and number,
-     * around forty bytes. A fixed 1 KB used to be enough and stopped being so
-     * as tasks were added. The slack covers tasks started between the count
-     * and the walk. */
+     * the task count: ~40 bytes a line, plus slack for tasks started between
+     * the count and the walk. */
     size_t len = (uxTaskGetNumberOfTasks() + 4) * (configMAX_TASK_NAME_LEN + 32);
     char *task_list = malloc(len);
     if (task_list == NULL) {
@@ -139,8 +130,8 @@ void sysinfo_log_tasks(void)
         return;
     }
 
-    /* Empty on its own allocation failure inside uxTaskGetSystemState(), which
-     * it does not report — say so rather than log a bare header. */
+    /* Empty when uxTaskGetSystemState() failed to allocate, which it does not
+     * report otherwise. */
     task_list[0] = '\0';
     vTaskList(task_list);
     if (task_list[0] == '\0') {

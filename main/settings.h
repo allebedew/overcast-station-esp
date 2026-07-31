@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-/* Хелперы над NVS-неймспейсом "settings". */
+/* Helpers over the "settings" NVS namespace. */
 
 uint8_t settings_get_u8(const char *key, uint8_t def);
 

@@ -27,22 +27,21 @@ typedef struct {
 
 void weather_api_init(void);
 
-/* Wakes the fetch task to refresh immediately and drops the cached reading
- * (so it isn't shown for the newly selected location). Call after the active
+/* Drops the cached reading and refreshes immediately. Call after the active
  * location changes. */
 void weather_api_refresh(void);
 
-/* Latest fetched conditions. Returns false until the first successful fetch,
- * and again after a failed one — a reading is only reported while it comes
- * from the most recent attempt (*out is left as the last known values). */
+/* Latest conditions. False until the first successful fetch and again after a
+ * failed one; *out is left as the last known values. */
 bool weather_api_get(weather_api_data_t *out);
 
-/* The active location's UTC offset in seconds, 0 while there is no reading.
- * Separate from weather_api_get() because the clock on the display needs
- * nothing else from the fetch and copying the whole struct on every frame —
- * under the lock — is all it would get. */
+/* The active location's UTC offset, 0 while there is no reading. Separate from
+ * weather_api_get() so the display clock need not copy the struct per frame. */
 int weather_api_utc_offset_s(void);
 
-/* Human-readable (English) description of a WMO weather code, e.g. for the
- * on-device display. Never NULL; returns "Unknown" for unmapped codes. */
+/* English description of a WMO weather code. Never NULL. */
 const char *weather_api_code_str(int weather_code);
+
+/* The same in 10 characters — all the 16x2 row leaves next to the temperature.
+ * Intensity becomes a '-' / '+' suffix. Never NULL. */
+const char *weather_api_code_short(int weather_code);

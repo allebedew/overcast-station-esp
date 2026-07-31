@@ -21,20 +21,16 @@
 #define SCD40_CMD_SET_ASC      0x2416
 #define SCD40_CMD_PERSIST      0x3615 /* writes the settings to EEPROM */
 
-/* Datasheet: a read command needs ≥1 ms to execute before the result can be
- * clocked out. Busy-waited — the FreeRTOS tick is 10 ms, so
- * pdMS_TO_TICKS() of a couple of ms rounds down to zero and does not delay;
- * sleeping a whole tick instead would hold the bus lock 10 ms, stalling the
- * other sensors and the display behind it. */
+/* Datasheet: a read command needs ≥1 ms before the result can be clocked out.
+ * Busy-waited — a vTaskDelay() would round to a whole 10 ms tick and hold the
+ * bus lock for it. */
 #define SCD40_CMD_DELAY_US  2000
 #define SCD40_STOP_DELAY_MS 500 /* datasheet: stop takes up to 500 ms */
 #define SCD40_FRC_DELAY_MS  400 /* datasheet: FRC takes 400 ms */
 
-/* A fresh result appears every 5 s. Once one has been caught the phase is
- * known, so the next check is skipped until shortly before the following one
- * is due; before that the poll has to hunt for the phase a second at a time.
- * The cost of the quiet window is detection latency: an unplugged sensor is
- * noticed a few seconds later than it would be otherwise. */
+/* A fresh result appears every 5 s. Once one is caught the phase is known and
+ * checks are skipped until shortly before the next is due; the cost is that an
+ * unplugged sensor goes unnoticed for those seconds. */
 #define SCD40_QUIET_MS 4500
 
 static const char *TAG = "scd40";
@@ -107,12 +103,10 @@ void scd40_init(void)
     ESP_ERROR_CHECK(i2c_dev_attach(&s_dev, SCD40_ADDR));
 }
 
-/* ASC assumes the sensor sees outdoor air (~400 ppm) as its weekly minimum.
- * A room that is never aired down to that level does not meet the assumption,
- * and ASC then slowly drags the calibration off; this station calibrates by
- * hand instead, through the FRC button on the web page. Disabling it costs an
- * EEPROM write, so the setting is read first and only cleared when it is
- * actually on — that is once in the sensor's life, not once per boot. */
+/* ASC assumes the sensor sees ~400 ppm outdoor air as its weekly minimum; a
+ * room that is never aired that far drags the calibration off, so this station
+ * uses the FRC button instead. Cleared only when actually on — disabling costs
+ * an EEPROM write, once in the sensor's life rather than once per boot. */
 static esp_err_t disable_asc(bool *written)
 {
     uint16_t enabled;
@@ -142,8 +136,8 @@ esp_err_t scd40_start(void)
         if (!i2c_dev_present(SCD40_ADDR)) {
             return ESP_ERR_NOT_FOUND;
         }
-        /* the sensor may still be measuring after an ESP reboot, and every
-         * command below needs it idle — stop first, then let it settle */
+        /* after an ESP reboot the sensor may still be measuring, and every
+         * command below needs it idle */
         cmd(SCD40_CMD_STOP);
         s_phase = START_ASC;
         return ESP_ERR_NOT_FINISHED;
@@ -160,10 +154,10 @@ esp_err_t scd40_start(void)
         if (persisting) {
             return ESP_ERR_NOT_FINISHED; /* the EEPROM write takes 800 ms */
         }
-        /* nothing was written, so no wait is owed — carry straight on */
+        /* nothing written, so no wait is owed */
     }
 
-    s_phase = START_STOP; /* whatever happens next, a later start begins anew */
+    s_phase = START_STOP; /* a later start begins anew */
     esp_err_t err = cmd(SCD40_CMD_START);
     if (err != ESP_OK) {
         return err;
@@ -210,9 +204,8 @@ esp_err_t scd40_set_pressure(uint16_t hpa)
 
 esp_err_t scd40_calibrate(uint16_t target_ppm, int *correction_ppm)
 {
-    /* The whole sequence has to stay atomic on the bus, waits included, so
-     * this blocks everything else on it for about a second. It runs from a
-     * web request, once, on purpose. */
+    /* Atomic on the bus, waits included: blocks everything else for about a
+     * second. Runs from a web request, once, on purpose. */
     esp_err_t err = cmd(SCD40_CMD_STOP);
     vTaskDelay(pdMS_TO_TICKS(SCD40_STOP_DELAY_MS));
 

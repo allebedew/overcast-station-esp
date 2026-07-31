@@ -5,8 +5,8 @@
 #include <stdint.h>
 #include "esp_err.h"
 
-/* State of the station (client) side only. The access point is tracked
- * separately in wifi_info_t: the two are independent axes. */
+/* Station (client) side only; the access point is an independent axis tracked
+ * in wifi_info_t. */
 typedef enum {
     WIFI_STA_IDLE,          /* not trying to connect (e.g. AP is up) */
     WIFI_STA_CONNECTING,    /* association attempt in progress */
@@ -34,17 +34,15 @@ typedef struct {
     int     ap_clients;    /* clients on our SoftAP; 0 when it is down */
 } wifi_info_t;
 
-/* Brings up the radio and starts connecting (STA), returning immediately.
- * Saved networks are tried round-robin; once the attempts are exhausted the
- * device brings up its own access point. */
+/* Brings up the radio and returns immediately. Saved networks are tried
+ * round-robin; once exhausted, the device brings up its own access point. */
 esp_err_t wifi_connect(void);
 
 /* Turns the access point on or off. Turning it on stops the station attempts;
  * turning it off returns to station mode and restarts the round-robin. */
 void wifi_ap_enable(bool on);
 
-/* Re-reads the saved networks and restarts the round-robin from the first one.
- * Also drops the access point if it was up. */
+/* Re-reads the saved networks, restarts the round-robin and drops the AP. */
 void wifi_reconnect(void);
 
 /* Fills out with a consistent snapshot of both interfaces. */
@@ -53,22 +51,17 @@ void wifi_get_info(wifi_info_t *out);
 /* Shorthand for the common case: station associated and holding an IP. */
 bool wifi_is_connected(void);
 
-/* The station side alone: the state, and into ssid the network of the current
- * attempt or link ("" before the first one). Unlike wifi_get_info() this asks
- * the radio nothing, so the display can call it every frame. */
+/* Station side alone; ssid gets the current attempt or link ("" before the
+ * first). Asks the radio nothing, so the display can call it every frame. */
 wifi_sta_state_t wifi_sta_state(char *ssid, size_t len);
 
-/* Blocking air scan (~2-3 s). Returns the number of APs found (one entry
- * per BSSID, so the same SSID may repeat across access points) or -1 on
- * error. */
+/* Blocking air scan (~2-3 s). Returns the number of APs found — one entry per
+ * BSSID, so an SSID may repeat — or -1 on error. */
 int wifi_scan(wifi_scan_ap_t *out, int max_count);
 
-/* Name of an authentication mode ("WPA2", "WPA2/WPA3", ...) for the value
- * carried in wifi_scan_ap_t::authmode. Never NULL; "?" for anything
- * unrecognised. */
+/* Name of a wifi_scan_ap_t::authmode value. Never NULL. */
 const char *wifi_authmode_str(int authmode);
 
-/* The 802.11 generation of the current station link, as a label for the UI
- * ("Wi-Fi 6 (802.11ax)"). Reports the lowest generation while there is no
- * link. Never NULL. */
+/* UI label for the link's 802.11 generation ("Wi-Fi 6 (802.11ax)"); the lowest
+ * generation while there is no link. Never NULL. */
 const char *wifi_sta_phy_str(void);

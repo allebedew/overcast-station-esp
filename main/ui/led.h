@@ -2,15 +2,13 @@
 
 #include <stdint.h>
 
-/* Status LED (single WS2812). A self-contained FreeRTOS task polls the other
- * modules (Wi-Fi, sensors, OTA) every tick and decides what to show — no one
- * pushes state into this module. See led.c for the priority of the states. */
+/* Status LED (single WS2812). Its task polls the other modules every tick and
+ * decides what to show — nothing pushes state in. Priorities are in led.c. */
 
 /* Configures the LED and starts the indicator task. */
 void led_init(void);
 
-/* Marks network activity: while connected the LED dips off for one tick on
- * top of the CO2 color. Callable from any task. */
+/* Marks network activity: the LED dips off for one tick. Any task. */
 void led_notify_activity(void);
 
 /* Brightness (1-255). Persisted in NVS and applied immediately. */

@@ -15,17 +15,13 @@
 #define BLINK_PERIOD_MS    100
 #define PULSE_CYCLE_MS     2000
 
-/* CO2 anchors (ppm) for the connected-state color: fully green at/below
- * CO2_GREEN, pure yellow at CO2_YELLOW, fully red at/above CO2_RED, with a
- * smooth gradient between the anchors. */
+/* CO2 anchors (ppm) of the connected-state gradient: green, yellow, red. */
 #define CO2_GREEN  400
 #define CO2_YELLOW 800
 #define CO2_RED    1200
 
-/* Ignore a missing SCD40 reading right after boot: the sensor needs a few
- * seconds for its first measurement, and we must not flash the "sensor error"
- * code while it is simply warming up. Budget: two or three polls to walk the
- * start sequence, then the 5 s measurement cycle, plus room to spare. */
+/* Grace period before a missing SCD40 reading counts as an error: a few polls
+ * to walk the start sequence, then the 5 s measurement cycle, plus slack. */
 #define SENSOR_WARMUP_US (12 * 1000000LL)
 
 /* Error codes: number of red blinks per cycle. */
@@ -64,18 +60,15 @@ static void set_color(uint8_t r, uint8_t g, uint8_t b)
     ESP_ERROR_CHECK(led_strip_refresh(led_strip));
 }
 
-/* True during the "pulse" slots: `count` flashes of BLINK_PERIOD_MS each,
- * separated by one dark slot, within a PULSE_CYCLE_MS window. Used both for
- * the AP client count (LED blinks OFF from a lit base) and the error code
- * (LED blinks ON from a dark base). */
+/* `count` flashes of BLINK_PERIOD_MS, one dark slot apart, inside a
+ * PULSE_CYCLE_MS window. The caller decides whether that means on or off. */
 static bool in_pulse(int tick, int count)
 {
     int pos = tick % (PULSE_CYCLE_MS / BLINK_PERIOD_MS);
     return pos < 2 * count && pos % 2 == 0;
 }
 
-/* Current error code, 0 if none. Only reported once the sensor has had time
- * to produce its first reading (see SENSOR_WARMUP_US). */
+/* Current error code, 0 if none; see SENSOR_WARMUP_US. */
 static int error_code(void)
 {
     if (esp_timer_get_time() > SENSOR_WARMUP_US) {
@@ -87,9 +80,7 @@ static int error_code(void)
     return 0;
 }
 
-/* Maps a CO2 level to a smooth green->yellow->red color scaled to brightness
- * `b`: red rises 0->b between CO2_GREEN and CO2_YELLOW, then green falls b->0
- * between CO2_YELLOW and CO2_RED. */
+/* CO2 level to a green->yellow->red gradient at brightness `b`. */
 static void co2_color(uint16_t co2, uint8_t b, uint8_t *r, uint8_t *g)
 {
     if (co2 <= CO2_GREEN) {
@@ -107,8 +98,8 @@ static void co2_color(uint16_t co2, uint8_t b, uint8_t *r, uint8_t *g)
     }
 }
 
-/* Connected & healthy: solid color by CO2 level, dipping off for one tick on
- * network activity. Falls back to green while the first reading is pending. */
+/* Solid colour by CO2 level, dipping off for one tick on network activity;
+ * green while the first reading is pending. */
 static void show_co2(int tick, bool activity)
 {
     (void)tick;

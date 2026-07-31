@@ -21,17 +21,12 @@ static const uint8_t TMP117_ADDRS[] = { 0x48, 0x49, 0x4A, 0x4B };
 
 /* Config fields: MOD bits 11:10, CONV bits 9:7, AVG bits 6:5.
  *
- * Continuous conversion, 8 averaged samples, 125 ms cycle — the fastest cycle
- * this averaging allows. The station reads this sensor at 4 Hz, so two results
- * are produced per poll and every poll finds a fresh one whatever jitter the
- * scheduler adds, while averaging eight samples takes the noise down by roughly
- * a factor of three — which is what the display's second decimal needs in order
- * to stop dancing. Reading faster would mean giving up that averaging: the
- * shortest cycle (15.5 ms, single sample) reaches 64 Hz but shows the noise the
- * averaging is here to remove.
+ * Continuous, 8 averaged samples, 125 ms cycle — the fastest this averaging
+ * allows, and two results per 4 Hz poll whatever jitter the scheduler adds.
+ * The averaging cuts noise about threefold, which is what stops the display's
+ * second decimal dancing; a faster cycle would have to give it up.
  *
- * Written explicitly in any case, so a warm restart cannot leave the sensor in
- * shutdown or one-shot mode. */
+ * Written explicitly so a warm restart cannot leave the sensor shut down. */
 #define TMP117_MOD_CONTINUOUS (0x0 << 10)
 #define TMP117_CONV_125MS     (0x1 << 7)
 #define TMP117_AVG_8          (0x1 << 5)
@@ -39,8 +34,7 @@ static const uint8_t TMP117_ADDRS[] = { 0x48, 0x49, 0x4A, 0x4B };
     (TMP117_MOD_CONTINUOUS | TMP117_CONV_125MS | TMP117_AVG_8)
 
 #define TMP117_CONFIG_RESET 0x0002 /* soft reset bit */
-/* Datasheet: 2 ms. Busy-waited — the FreeRTOS tick is 10 ms, so
- * pdMS_TO_TICKS() of a few ms rounds down to zero and does not delay. */
+/* Datasheet: 2 ms. Busy-waited — a vTaskDelay() of a few ms rounds to zero. */
 #define TMP117_RESET_US     2500
 
 /* 7.8125 m°C per LSB. */

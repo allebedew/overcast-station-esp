@@ -9,11 +9,9 @@
  *   HISTORY_1D - 24 h of 1 min averaged points, RAM + flash
  *
  * Filled by sampling climate_get() once a second — nothing pushes into it, so
- * a quantity keeps being recorded for as long as its own sensor is alive,
- * independently of the others. A sensor slower than the sampling rate (the
- * SCD40 produces a result every 5 s) simply repeats its latest value into the
- * 1 s tier; the averaged tiers are unaffected by that.
- */
+ * each quantity is recorded for as long as its own sensor is alive. A sensor
+ * slower than the sampling rate repeats its latest value into the 1 s tier;
+ * the averaged tiers are unaffected. */
 typedef enum {
     HISTORY_5M,
     HISTORY_1H,
@@ -28,22 +26,13 @@ typedef enum {
 #define HISTORY_HAS_PRESS 0x08
 #define HISTORY_HAS_LUX   0x10
 
-/* 16 bytes: the rings hold 2460 of these, so the layout is worth keeping
- * tight. Fixed-point where the resolution is known and bounded, float only
- * for illuminance — it spans six decades and no fixed scale fits it.
- *
- * The scales are the firmware-wide reading resolutions listed in climate.h —
- * 0.01 °C, 0.001 hPa, 1 ppm, 0.1 %, 0.1 lx — so a point drawn on a chart and
- * the same reading on the page carry the same digits. They are resolutions,
- * not accuracies: a lone SCD40 humidity sample is worth ±6 % and the third
- * decimal of an instantaneous pressure is noise. It is the minute-long
- * averages and the shape of the curve that make the extra digits worth
- * storing. */
+/* 16 bytes, and the rings hold 2460 of them. Fixed-point at the firmware-wide
+ * resolutions from climate.h; float only for illuminance, which spans six
+ * decades and fits no fixed scale. */
 typedef struct {
     float lux;
-    int32_t press_mhpa;  /* 0.001 hPa, as measured at the site — everything
-                          * that displays it reduces to sea level first, so a
-                          * later correction to the altitude re-reduces the
+    int32_t press_mhpa;  /* 0.001 hPa, as measured at the site: displayed
+                          * reduced, so an altitude correction re-reduces the
                           * whole recorded history */
     uint16_t co2_ppm;
     int16_t temp_cx100;  /* 0.01 °C */

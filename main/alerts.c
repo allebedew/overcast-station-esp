@@ -16,9 +16,8 @@
 
 #define CHECK_PERIOD_MS 10000
 
-/* CO2 zones: 0 = fresh (<800), 1 = stale (800..1200), 2 = bad (>1200).
- * A zone change is reported; the hysteresis margin keeps sensor noise
- * from flapping around a threshold. */
+/* CO2 zones: 0 = fresh (<800), 1 = stale (800..1200), 2 = bad (>1200). The
+ * hysteresis margin keeps sensor noise from flapping around a threshold. */
 static const int CO2_THRESHOLDS[] = { 500, 800, 1200 };
 #define CO2_HYST_PPM 25
 
@@ -43,8 +42,7 @@ static bool get_sta_ip(esp_ip4_addr_t *ip)
     return ip->addr != 0;
 }
 
-/* Welcome message once the first IP is obtained after boot,
- * then a notification every time the IP changes. */
+/* Welcome message on the first IP after boot, then one per IP change. */
 static void check_ip(void)
 {
     static bool online;
@@ -69,8 +67,7 @@ static void check_ip(void)
     last_ip = ip;
 }
 
-/* Current zone given the previous one; moving to another zone requires
- * clearing the threshold by the hysteresis margin. */
+/* Leaving a zone requires clearing its threshold by the hysteresis margin. */
 static int co2_zone(int ppm, int prev)
 {
     int z = prev;

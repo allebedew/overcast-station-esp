@@ -171,7 +171,8 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   The API carries the code, not the text: the device decodes it with
   `weather_api_code_str()` and the web UI with its own table (`wcode` in
   `index.html`) — the English wordings are identical and an edit to one belongs
-  in the other.
+  in the other. `weather_api_code_short()` is a third table, abbreviated to the
+  10 characters the 16x2 panel leaves next to the outdoor temperature.
 - **Weather locations** — up to 10 named `{name, lat, lon}` plus the active
   index in NVS. Empty on first boot: until one is added the card stays empty
   and no fetch is made. Switching wakes the fetch task via
@@ -236,9 +237,14 @@ component's `INCLUDE_DIRS`, so includes stay flat (`#include "screen_16x2.h"`).
 ## Build & flash
 
 ```sh
-idf.py build flash monitor   # first time (partition table changed) — by cable
-./flash-ota.sh               # afterwards — over the network
+./build.sh                     # build
+./build.sh flash monitor       # first time (partition table changed) — by cable
+./flash-ota.sh                 # afterwards — over the network
 ```
+
+`build.sh` sources `$IDF_PATH/export.sh` (defaults to `~/esp/esp-idf`) and
+forwards everything else to `idf.py`, so the environment does not have to be
+set up in the shell first. Plain `idf.py …` still works in an exported shell.
 
 Deliberate config deviations live in `sdkconfig.defaults`: 16 MB flash, custom
 partition table, rollback, run-time stats for CPU load, `-Os`,

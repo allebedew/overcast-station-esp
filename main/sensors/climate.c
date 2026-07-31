@@ -43,30 +43,25 @@ void climate_set_altitude_m(int metres)
 
 #define SEA_LEVEL_STANDARD_HPA 1013.25f /* ISA standard atmosphere at 0 m */
 
-/* The international barometric formula's altitude factor: at altitude 0 it is
- * exactly 1, so an unconfigured station leaves both directions below
- * unchanged rather than reporting something subtly wrong. */
+/* The international barometric formula's altitude factor; exactly 1 at
+ * altitude 0, so an unconfigured station changes nothing. */
 static float pressure_ratio(int altitude_m)
 {
     return powf(1.0f - altitude_m / 44330.0f, 5.255f);
 }
 
-/* Reduction to sea level: what the barometer would read if it stood at sea
- * level, under a standard atmosphere. That assumption is the whole
- * approximation — the real air column between the station and sea level has
- * its own temperature, and in hard frost a temperature-corrected reduction
- * comes out up to about 2 hPa higher. Taking that temperature from the indoor
- * sensor would be worse than assuming the standard profile (the column is
- * outdoors), and taking it from the weather API would make a local reading
- * stop working when the network does. */
+/* What the barometer would read at sea level under a standard atmosphere. The
+ * standard profile is the whole approximation — in hard frost a
+ * temperature-corrected reduction is up to ~2 hPa higher — but the indoor
+ * sensor is the wrong air column and the weather API would tie a local reading
+ * to the network. */
 float climate_to_sea_level(float press_hpa)
 {
     return press_hpa / pressure_ratio(s_altitude_m);
 }
 
-/* The mirror direction: what a standard atmosphere reads at the site
- * altitude, i.e. the sea-level standard pressure carried back down. Used as
- * the SCD40's ambient-pressure fallback when no BMP581 reading is available. */
+/* The mirror direction: sea-level standard pressure carried back down to the
+ * site. The SCD40's fallback when no BMP581 reading is available. */
 float climate_standard_pressure_hpa(void)
 {
     return SEA_LEVEL_STANDARD_HPA * pressure_ratio(s_altitude_m);
@@ -82,8 +77,8 @@ void climate_get(climate_t *out)
         out->temp_c = tmp117.temp_c;
     }
 
-    /* CO2 and humidity share one reading, so they appear and disappear
-     * together; the SCD40's own temperature is deliberately not used. */
+    /* One reading, so CO2 and humidity appear and disappear together; the
+     * SCD40's own temperature is deliberately unused. */
     scd40_data_t air;
     if (sensors_scd40_get(&air)) {
         out->co2_ok = true;

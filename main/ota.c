@@ -8,8 +8,8 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 
-/* Общий секрет для прошивки по сети — тот же указан в flash-ota.sh.
- * Защищает от случайной/чужой заливки из локальной сети или из режима AP. */
+/* Shared secret for network flashing, same value as in flash-ota.sh. Guards
+ * against a stray upload from the LAN or from AP mode. */
 #define OTA_KEY "weather-ota"
 
 #define OTA_REBOOT_DELAY_MS 1000
@@ -18,8 +18,8 @@ static const char *TAG = "ota";
 
 static volatile bool s_ota_active;
 
-/* Progress for the display, published as a percentage rather than as the two
- * byte counts: one volatile read cannot be caught between them. */
+/* A percentage rather than two byte counts: one volatile read cannot be caught
+ * between them. */
 static volatile int s_ota_percent;
 
 bool ota_is_active(void)
@@ -37,7 +37,7 @@ static void reboot_cb(void *arg)
     esp_restart();
 }
 
-/* Перезагрузка с задержкой, чтобы HTTP-ответ успел уйти клиенту. */
+/* Delayed so the HTTP response reaches the client first. */
 static void schedule_reboot(void)
 {
     const esp_timer_create_args_t args = {
@@ -69,10 +69,8 @@ esp_err_t ota_post_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "OTA start: %u bytes -> %s",
              (unsigned)req->content_len, target->label);
 
-    /* purple blink while uploading, and the OTA page on the display; both
-     * cleared on error (the LED and screen tasks poll this). The progress is
-     * set first, so a task that sees the flag never reads a stale percentage
-     * from the previous attempt. */
+    /* The LED and screen tasks poll this. Progress is set first, so a task
+     * that sees the flag never reads the previous attempt's percentage. */
     s_ota_percent = 0;
     s_ota_active = true;
 
@@ -85,7 +83,7 @@ esp_err_t ota_post_handler(httpd_req_t *req)
                                    "ota begin failed");
     }
 
-    /* буфер статический: обработчики выполняются в единственной задаче httpd */
+    /* Static: the handlers run in the single httpd task. */
     static char buf[4096];
     size_t received = 0;
     int last_decile = -1;
@@ -113,7 +111,7 @@ esp_err_t ota_post_handler(httpd_req_t *req)
     }
 
     if (err == ESP_OK) {
-        err = esp_ota_end(ota); /* проверяет целостность образа */
+        err = esp_ota_end(ota); /* verifies the image */
     } else {
         esp_ota_abort(ota);
     }

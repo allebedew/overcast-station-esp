@@ -1,6 +1,8 @@
 {
   "permissions": {
     "allow": [
+      "Bash(./build.sh)",
+      "Bash(./build.sh *)",
       "Bash(idf.py build)",
       "Bash(idf.py build *)",
       "Bash(idf.py reconfigure)",
@@ -13,7 +15,11 @@
       "Bash(. ~/esp/esp-idf/export.sh *)",
       "Bash(. /Users/alex/esp/esp-idf/export.sh)",
       "Bash(. /Users/alex/esp/esp-idf/export.sh *)",
-      "Bash(system_profiler *)"
+      "Bash(system_profiler *)",
+      "Bash(node --check *)",
+      "Bash(xcodebuild -list *)",
+      "Bash(curl)",
+      "Bash(curl *)"
     ]
   }
 }

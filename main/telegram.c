@@ -27,8 +27,8 @@ static const char *TAG = "telegram";
 
 static QueueHandle_t s_queue;
 
-/* Sends one message. Returns true if it must not be retried:
- * delivered, or rejected by the API (bad token/chat id). */
+/* True when the message must not be retried: delivered, or rejected by the
+ * API (bad token/chat id). */
 static bool send_message(const char *text)
 {
     cJSON *root = cJSON_CreateObject();
@@ -75,7 +75,7 @@ static void telegram_task(void *arg)
         xQueueReceive(s_queue, text, portMAX_DELAY);
         int attempts = 0;
         while (attempts < MAX_ATTEMPTS) {
-            /* no network — just wait, does not count as an attempt */
+            /* no network — wait; does not count as an attempt */
             if (!wifi_is_connected()) {
                 vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
                 continue;

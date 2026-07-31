@@ -15,14 +15,9 @@
 #include "weather_store.h"
 #include "wifi.h"
 
-/* Outside weather from Open-Meteo (https://open-meteo.com). No API key
- * required; the default "best_match" picks the most accurate regional model
- * for the coordinates (ICON / ECMWF over Europe). We read the `current`
- * block: surface_pressure is the real pressure at the location's elevation,
- * pressure_msl is the same reduced to sea level; UV index, cloud cover,
- * wind (speed/gusts/direction), rain/snowfall and the WMO weather_code all
- * come in the same block. Coordinates come from the active location in
- * weather_store; the request URL is built per fetch. */
+/* Open-Meteo (https://open-meteo.com), no API key. The default "best_match"
+ * model is used; coordinates come from the active location in weather_store,
+ * so the URL is rebuilt per fetch. */
 
 /* Fields requested in the `current` block (comma-separated, URL-safe). */
 #define WEATHER_API_CURRENT_FIELDS \
@@ -68,16 +63,14 @@ static esp_err_t http_event(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
-/* Numeric field of `obj`, or `dflt` when it is missing or not a number
- * (Open-Meteo may omit a metric the selected model does not provide). */
+/* `dflt` when missing or not a number — a model may omit a metric. */
 static float jnum(const cJSON *obj, const char *name, float dflt)
 {
     cJSON *it = cJSON_GetObjectItem(obj, name);
     return cJSON_IsNumber(it) ? (float)it->valuedouble : dflt;
 }
 
-/* First element of a numeric array, or `dflt` (daily arrays hold one entry
- * here because we request forecast_days=1). */
+/* First element of a numeric array; daily arrays hold one, forecast_days=1. */
 static float jarr0(const cJSON *arr, float dflt)
 {
     cJSON *it = cJSON_GetArrayItem(arr, 0);
@@ -106,7 +99,7 @@ static bool parse(const char *json)
             .humidity_pct = hum->valuedouble,
             .pressure_hpa = press->valuedouble,
             .uvi = uvi->valuedouble,
-            /* the rest are read leniently, defaulting where a model omits them */
+            /* the rest default where a model omits them */
             .feels_c = jnum(cur, "apparent_temperature", temp->valuedouble),
             .temp_max_c = jarr0(cJSON_GetObjectItem(daily, "temperature_2m_max"),
                                 temp->valuedouble),
@@ -144,8 +137,8 @@ static bool parse(const char *json)
     return ok;
 }
 
-/* Why a fetch ended, because the two failures deserve different waits: a
- * request that never reached the API says nothing about the API. */
+/* The two failures deserve different waits: a request that never reached the
+ * API says nothing about the API. */
 typedef enum {
     FETCH_OK,
     FETCH_TRANSIENT,  /* never got there: DNS, TLS, timeout, no route */
@@ -236,29 +229,25 @@ static void weather_api_task(void *arg)
                 retry_ms = WEATHER_API_FIRST_RETRY_MS;
                 break;
             case FETCH_TRANSIENT:
-                /* A resolver that drops a query usually answers the next one,
-                 * so come back in seconds rather than minutes; the wait then
-                 * doubles, so a real outage settles at the slow rate instead
-                 * of hammering the link. */
+                /* A resolver that drops a query usually answers the next one;
+                 * the doubling settles a real outage at the slow rate. */
                 wait_ms = retry_ms;
                 retry_ms = retry_ms < WEATHER_API_RETRY_INTERVAL_MS / 2
                                ? retry_ms * 2
                                : WEATHER_API_RETRY_INTERVAL_MS;
                 break;
-            default: /* FETCH_REJECTED — the API answered, retrying fast won't help */
+            default: /* FETCH_REJECTED — the API answered; a fast retry won't help */
                 wait_ms = WEATHER_API_RETRY_INTERVAL_MS;
                 retry_ms = WEATHER_API_FIRST_RETRY_MS;
                 break;
             }
-            /* A reading outlives a failed fetch — its age travels with it in
-             * the API and on screen — but only up to a point: past that it is
-             * yesterday's weather and better shown as nothing. */
+            /* A reading outlives a failed fetch, carrying its age, but past
+             * MAX_AGE it is yesterday's weather and better shown as nothing. */
             if (age_ms() > WEATHER_API_MAX_AGE_MS) {
                 invalidate();
             }
         }
-        /* A notification from weather_api_refresh() cuts the wait short so a
-         * location change is picked up right away. */
+        /* weather_api_refresh() cuts the wait short on a location change. */
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms));
     }
 }
@@ -271,8 +260,7 @@ void weather_api_init(void)
 
 void weather_api_refresh(void)
 {
-    /* Drop the cached reading so the old location isn't shown for the new
-     * one, then wake the task to fetch immediately. */
+    /* Drop the cached reading so the old location isn't shown for the new. */
     invalidate();
     if (s_task) {
         xTaskNotifyGive(s_task);
@@ -331,6 +319,41 @@ const char *weather_api_code_str(int code)
     case 95: return "Thunderstorm";
     case 96: return "Thunderstorm, hail";
     case 99: return "Thunderstorm, heavy hail";
+    default: return "Unknown";
+    }
+}
+
+const char *weather_api_code_short(int code)
+{
+    switch (code) {
+    case 0:  return "Clear sky";
+    case 1:  return "Fair";
+    case 2:  return "Cloudy";
+    case 3:  return "Overcast";
+    case 45: return "Fog";
+    case 48: return "Rime fog";
+    case 51: return "Drizzle-";
+    case 53: return "Drizzle";
+    case 55: return "Drizzle+";
+    case 56: return "Frz drz-";
+    case 57: return "Frz drz";
+    case 61: return "Rain-";
+    case 63: return "Rain";
+    case 65: return "Rain+";
+    case 66: return "Frz rain-";
+    case 67: return "Frz rain";
+    case 71: return "Snow-";
+    case 73: return "Snow";
+    case 75: return "Snow+";
+    case 77: return "Snow grns";
+    case 80: return "Showers-";
+    case 81: return "Showers";
+    case 82: return "Showers+";
+    case 85: return "Snow shw-";
+    case 86: return "Snow shw+";
+    case 95: return "Storm";
+    case 96: return "Storm hl";
+    case 99: return "Storm hl+";
     default: return "Unknown";
     }
 }

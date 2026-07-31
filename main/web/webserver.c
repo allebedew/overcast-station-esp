@@ -32,16 +32,14 @@
 
 static const char *TAG = "webserver";
 
-/* The page is embedded already gzipped (see main/CMakeLists.txt) and handed to
- * the browser as-is. Embedded as BINARY, so no NUL is appended and the length
- * is exactly end - start. */
+/* The page is embedded already gzipped (see main/CMakeLists.txt) and served
+ * as-is. Embedded as BINARY: no trailing NUL, length is exactly end - start. */
 extern const char index_html_start[] asm("_binary_index_html_gz_start");
 extern const char index_html_end[] asm("_binary_index_html_gz_end");
 
 static httpd_handle_t s_server;
 
-/* Number of currently open client sockets (includes the one serving
- * the request being handled). */
+/* Includes the socket serving the request being handled. */
 static int http_conn_count(void)
 {
     size_t n = CONFIG_LWIP_MAX_SOCKETS;
@@ -52,16 +50,10 @@ static int http_conn_count(void)
     return (int)n;
 }
 
-/* Bounded assembly of a JSON reply.
- *
- * snprintf() returns the length it *wanted* to write, so the plain
- * `off += snprintf(buf + off, sizeof(buf) - off, ...)` chain walks past the
- * end of the buffer as soon as one reply does not fit: the next call gets a
- * pointer beyond the array and a size that underflows to something enormous,
- * and the length handed to httpd_resp_send() covers memory that was never
- * part of the reply. Appending through jbuf instead clamps at the end and
- * records the truncation, so an oversized reply comes out short rather than
- * out of bounds. */
+/* Bounded assembly of a JSON reply. snprintf() returns the length it *wanted*
+ * to write, so an `off += snprintf(buf + off, sizeof(buf) - off, ...)` chain
+ * walks past the end of the buffer once a reply does not fit; appending
+ * through jbuf clamps instead and records the truncation. */
 typedef struct {
     char *buf;
     size_t cap;
@@ -104,10 +96,7 @@ static void jbuf_printf(jbuf_t *j, const char *fmt, ...)
     }
 }
 
-/* Sends what was assembled. A truncated reply is broken JSON and the page
- * will say so, but only the log says which buffer ran out — the sizes here
- * are dimensioned by hand, so the warning is the thing that catches a reply
- * that outgrew its buffer. */
+/* A truncated reply is broken JSON; only the log says which buffer ran out. */
 static esp_err_t jbuf_send(httpd_req_t *req, const jbuf_t *j)
 {
     if (j->truncated) {
@@ -118,8 +107,7 @@ static esp_err_t jbuf_send(httpd_req_t *req, const jbuf_t *j)
     return httpd_resp_send(req, j->buf, j->len);
 }
 
-/* Экранирует " и \ для подстановки строки в JSON; управляющие символы
- * отбрасывает. Возвращает dst. */
+/* Escapes " and \ for a JSON string; drops control characters. Returns dst. */
 static const char *json_escape(const char *src, char *dst, size_t dstlen)
 {
     size_t o = 0;
@@ -136,8 +124,8 @@ static const char *json_escape(const char *src, char *dst, size_t dstlen)
     return dst;
 }
 
-/* A JSON number, or `null` when there is no sensor behind the quantity —
- * a reading that does not exist must not be served as a zero. Returns dst. */
+/* A JSON number, or `null` — a reading that does not exist must not be served
+ * as a zero. Returns dst. */
 static const char *json_num(char *dst, size_t dstlen, bool ok,
                             const char *fmt, double value)
 {
@@ -149,13 +137,11 @@ static const char *json_num(char *dst, size_t dstlen, bool ok,
     return dst;
 }
 
-/* Обёртка над всеми обработчиками (реальный лежит в user_ctx):
- * мигает светодиодом и логирует каждый HTTP-запрос. */
+/* Wraps every handler (the real one sits in user_ctx): blinks the LED and
+ * logs the request. */
 static esp_err_t handle_request(httpd_req_t *req)
 {
-    /* /api/status and GET /api/history are polled every 1-2 s by the web
-     * UI — too noisy to log. POST /api/history/reset is a rare, deliberate
-     * action and still gets logged. */
+    /* Polled every 1-2 s by the web UI — too noisy to log. */
     if (strcmp(req->uri, "/api/status") != 0 &&
         !(req->method == HTTP_GET &&
           strncmp(req->uri, "/api/history", 12) == 0)) {
@@ -188,9 +174,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     wifi_info_t wifi;
     wifi_get_info(&wifi);
 
-    /* STA and AP are reported as independent objects: in APSTA both interfaces
-     * can be up at once, so the station link is exposed even while the AP is on
-     * (and vice versa). Static buffers are safe — one httpd task. */
+    /* STA and AP are independent objects: in APSTA both can be up at once.
+     * Static buffers are safe — one httpd task. */
 
     static char sta_json[400];
     {
@@ -254,8 +239,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     scd40_data_t air = {0};
     bool air_ok = sensors_scd40_get(&air);
 
-    /* One object per I2C device, so an absent or failing sensor still shows
-     * up with its own `ok` instead of vanishing from the reply. */
+    /* One object per I2C device, so a failing sensor still shows up with its
+     * own `ok` instead of vanishing from the reply. */
     tmp117_data_t tmp117 = {0};
     bool tmp117_ok = sensors_tmp117_get(&tmp117);
 
@@ -277,10 +262,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     char time_str[TIMESYNC_STR_LEN];
     timesync_format(time_str, sizeof(time_str));
 
-    /* The room, as opposed to the chips below: one source per quantity, no
-     * substitutions. This is what the main cards and the charts show, so the
-     * value on a card and the line under it always come from the same
-     * sensor. */
+    /* The room, as opposed to the chips below: one source per quantity, so a
+     * card and its chart always come from the same sensor. */
     climate_t cl;
     climate_get(&cl);
     char cl_temp[12], cl_rh[12], cl_co2[12], cl_press[12], cl_msl[12], cl_lux[16];
@@ -366,9 +349,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     return jbuf_send(req, &j);
 }
 
-/* History as arrays per metric (null = gap); ?p=5m|1h|1d selects the
- * ring (default 1d). The largest response is ~15-20 KB, so it is
- * streamed in chunks. */
+/* History as arrays per metric (null = gap); ?p=5m|1h|1d selects the ring
+ * (default 1d). Up to ~20 KB, so it is streamed in chunks. */
 static esp_err_t history_get_handler(httpd_req_t *req)
 {
     history_tier_t tier = HISTORY_1D;
@@ -388,9 +370,8 @@ static esp_err_t history_get_handler(httpd_req_t *req)
     static char buf[1024]; /* single httpd task */
     httpd_resp_set_type(req, "application/json");
 
-    /* One array per quantity, each gated on its own bit: a sensor that was
-     * absent for part of the window leaves nulls in its own series without
-     * punching holes in the others. */
+    /* Each array is gated on its own bit: a sensor absent for part of the
+     * window leaves nulls only in its own series. */
     static const struct {
         const char *name;
         uint8_t bit;
@@ -423,10 +404,9 @@ static esp_err_t history_get_handler(httpd_req_t *req)
                     snprintf(val, sizeof(val), "%.1f", p.rh_dpct / 10.0);
                     break;
                 case HISTORY_HAS_PRESS:
-                    /* Stored as measured, served reduced to sea level — the
-                     * charts show the same quantity the cards do. Keeping the
-                     * ring absolute means a later correction to the site
-                     * altitude re-reduces the whole history correctly. */
+                    /* Stored as measured, served reduced to sea level: a later
+                     * correction to the site altitude re-reduces the whole
+                     * history correctly. */
                     snprintf(val, sizeof(val), "%.3f",
                              climate_to_sea_level(p.press_mhpa / 1000.0f));
                     break;
@@ -437,8 +417,7 @@ static esp_err_t history_get_handler(httpd_req_t *req)
             }
             jbuf_printf(&j, "%s%s", i ? "," : "", val);
 
-            /* Flushed with room to spare for the next value, so the buffer is
-             * emptied before an append could be cut in half. */
+            /* Room to spare for the next value, so no append is cut in half. */
             if (j.len > sizeof(buf) - 32) {
                 if (httpd_resp_send_chunk(req, j.buf, j.len) != ESP_OK) {
                     return ESP_FAIL;
@@ -517,7 +496,7 @@ static esp_err_t networks_get_handler(httpd_req_t *req)
     return jbuf_send(req, &j);
 }
 
-/* Читает тело запроса и парсит JSON; NULL при ошибке. */
+/* Reads the request body and parses JSON; NULL on error. */
 static cJSON *read_json_body(httpd_req_t *req)
 {
     char body[256];
@@ -603,8 +582,8 @@ static esp_err_t locations_get_handler(httpd_req_t *req)
     return jbuf_send(req, &j);
 }
 
-/* Coordinates are resolved from a place name by the browser (Open-Meteo
- * geocoding) and posted here already numeric. */
+/* The browser resolves a place name to coordinates (Open-Meteo geocoding) and
+ * posts them already numeric. */
 static esp_err_t location_add_post_handler(httpd_req_t *req)
 {
     cJSON *root = read_json_body(req);
@@ -674,9 +653,7 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
         led_set_brightness((uint8_t)bright->valueint);
     }
 
-    /* The backlight arrives as a ready RGB hex string ("00AAFF", a leading
-     * "#" is tolerated): picking the color is the UI's job, the device only
-     * stores what it is given. */
+    /* RGB hex string ("00AAFF", a leading "#" is tolerated). */
     const cJSON *rgb = cJSON_GetObjectItem(root, "backlight_rgb");
     if (cJSON_IsString(rgb) && rgb->valuestring != NULL) {
         const char *hex = rgb->valuestring;
@@ -687,8 +664,7 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
             screen_16x2_set_backlight((uint32_t)value);
         }
     }
-    /* Height of the station above sea level, metres — the only input to the
-     * reduction of the measured pressure to sea level. */
+    /* Metres above sea level — the only input to the pressure reduction. */
     const cJSON *alt = cJSON_GetObjectItem(root, "altitude");
     if (cJSON_IsNumber(alt) && alt->valueint >= CLIMATE_ALTITUDE_MIN &&
         alt->valueint <= CLIMATE_ALTITUDE_MAX) {
@@ -729,16 +705,14 @@ static esp_err_t scd40_calibrate_post_handler(httpd_req_t *req)
 
 static esp_err_t connect_post_handler(httpd_req_t *req)
 {
-    /* ответ уходит до переключения режима, иначе клиент его не получит */
+    /* Reply goes out before the mode switch, or the client never gets it. */
     esp_err_t ret = httpd_resp_sendstr(req, "{\"ok\":true}");
     wifi_reconnect();
     return ret;
 }
 
-/* Every route in one place. The registered handler is always the logging
- * wrapper and the real one rides in user_ctx, so a new endpoint is a line
- * here and nothing else — including the handler count, which the config
- * below takes from the table instead of a number kept in step by hand. */
+/* Every route in one place; the config below takes its handler count from
+ * this table. */
 static const struct {
     const char *uri;
     httpd_method_t method;
@@ -775,11 +749,10 @@ void webserver_start(void)
     mdns_start();
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.stack_size = 8192; /* дефолтных 4 КиБ не хватает обработчику /api/status */
+    config.stack_size = 8192; /* the default 4 KiB is short for /api/status */
     config.max_uri_handlers = sizeof(s_routes) / sizeof(s_routes[0]);
-    /* Recycle the least-recently-used connection instead of holding all
-     * max_open_sockets slots, so the browser's keep-alive polling can't
-     * starve the shared LWIP socket pool of outbound TLS clients. */
+    /* Recycle the LRU connection: the browser's keep-alive polling would
+     * otherwise starve the shared LWIP socket pool of outbound TLS clients. */
     config.lru_purge_enable = true;
     httpd_handle_t server = NULL;
     ESP_ERROR_CHECK(httpd_start(&server, &config));

@@ -3,10 +3,9 @@
 #include <stdbool.h>
 #include "esp_err.h"
 
-/* Stored weather locations (NVS namespace "weather_loc"): a list of named
- * coordinates plus the index of the one currently displayed. Coordinates are
- * resolved from a place name by the web UI (browser-side geocoding) and sent
- * here already numeric. All functions are thread-safe. */
+/* Stored weather locations (NVS namespace "weather_loc"): named coordinates
+ * plus the index of the one displayed. The web UI geocodes place names and
+ * sends coordinates already numeric. All functions are thread-safe. */
 
 #define WEATHER_MAX_LOCATIONS 10
 
@@ -16,17 +15,15 @@ typedef struct {
     float lon;     /* longitude, degrees (-180..180) */
 } weather_location_t;
 
-/* Loads the list from NVS. The list starts out empty: until the user adds a
- * location from the web UI, no weather is fetched. */
+/* Loads the list from NVS. It starts empty, and no weather is fetched until
+ * the user adds a location. */
 void weather_store_init(void);
 
-/* Adds a location, or updates the coordinates of an existing one with the
- * same name. ESP_ERR_NO_MEM when the list is full, ESP_ERR_INVALID_ARG on a
- * bad name or out-of-range coordinates. */
+/* Adds a location, or updates one with the same name. ESP_ERR_NO_MEM when the
+ * list is full, ESP_ERR_INVALID_ARG on a bad name or coordinates. */
 esp_err_t weather_store_add(const char *name, float lat, float lon);
 
-/* Removes the location at idx, shifting the rest down and keeping the active
- * selection pointing at a valid entry. ESP_ERR_NOT_FOUND if idx is invalid. */
+/* Removes idx, keeping the active selection on a valid entry. */
 esp_err_t weather_store_remove(int idx);
 
 int weather_store_count(void);

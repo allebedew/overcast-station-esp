@@ -33,9 +33,8 @@ bool wifi_is_connected(void)
 
 wifi_sta_state_t wifi_sta_state(char *ssid, size_t len)
 {
-    /* The SSID is written by the connect path and read here without a lock: a
-     * torn read would show one frame of a wrong name on the display, and the
-     * alternative is a lock held on every frame for that. */
+    /* Read without a lock: a torn read costs one frame of a wrong name on the
+     * display, which is cheaper than locking every frame. */
     strlcpy(ssid, s_current_ssid, len);
     return s_sta_state;
 }
@@ -96,8 +95,8 @@ int wifi_scan(wifi_scan_ap_t *out, int max_count)
         if (!ssid[0]) {
             continue; /* skip hidden networks */
         }
-        /* One entry per BSSID (no SSID de-dup): a managed network broadcasts
-         * the same SSID from many APs, and we want each AP visible. */
+        /* One entry per BSSID: a managed network broadcasts one SSID from many
+         * APs and each should stay visible. */
         strlcpy(out[n].ssid, ssid, sizeof(out[n].ssid));
         memcpy(out[n].bssid, recs[i].bssid, sizeof(out[n].bssid));
         out[n].rssi = recs[i].rssi;
@@ -120,8 +119,8 @@ static void schedule_retry(void)
     }
 }
 
-/* Tries to associate; if the driver is busy (a scan is running, say) schedules
- * another attempt instead of leaving the state machine stuck. */
+/* A busy driver (a scan, say) gets another attempt scheduled rather than
+ * leaving the state machine stuck. */
 static void try_connect(void)
 {
     s_sta_state = WIFI_STA_CONNECTING;
@@ -145,14 +144,11 @@ static void apply_current_network(void)
     strlcpy((char *)cfg.sta.ssid, net.ssid, sizeof(cfg.sta.ssid));
     strlcpy((char *)cfg.sta.password, net.password, sizeof(cfg.sta.password));
     cfg.sta.threshold.authmode = net.password[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
-    /* Scan every channel and pick the strongest BSSID for this SSID instead of
-     * the first match: on a managed network the same SSID comes from many APs,
-     * and the default fast scan would latch onto a weaker/farther one. */
+    /* Strongest BSSID for the SSID, not the first match — the default fast
+     * scan would latch onto a weaker AP of a managed network. */
     cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
     cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
-    /* If the network is pinned to a BSSID, connect only to that AP (the
-     * all-channel scan above still finds it on whatever channel it uses);
-     * an all-zero BSSID means "unpinned" and keeps the by-signal choice. */
+    /* An all-zero BSSID means unpinned and keeps the by-signal choice. */
     for (int i = 0; i < 6; i++) {
         if (net.bssid[i]) {
             cfg.sta.bssid_set = true;
@@ -177,9 +173,8 @@ static void start_ap(void)
             .authmode = WIFI_AUTH_WPA2_PSK,
         },
     };
-    /* Set the flags before switching the mode: dropping the station link fires
-     * STA_DISCONNECTED, and the handler must see that the AP is coming up so it
-     * does not schedule a reconnect. */
+    /* Before the mode switch: dropping the link fires STA_DISCONNECTED, and the
+     * handler must see the AP coming up so it schedules no reconnect. */
     s_ap_active = true;
     s_sta_state = WIFI_STA_IDLE;
     /* APSTA rather than AP: the station interface is needed for air scans */
@@ -202,15 +197,12 @@ static void start_sta(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
     apply_current_network();
     ESP_LOGI(TAG, "Reconnecting to \"%s\"...", s_current_ssid);
-    /* Clear the flag only now: any STA_DISCONNECTED raised by leaving APSTA
-     * above must still be swallowed by the handler, not turned into a retry. */
+    /* Only now: STA_DISCONNECTED from leaving APSTA must still be swallowed. */
     s_ap_active = false;
     if (was_connected) {
-        /* Already associated (e.g. the user saved a new BSSID for the same
-         * SSID): esp_wifi_connect() would be a no-op and the state machine
-         * would hang in CONNECTING forever. Drop the link instead — the
-         * STA_DISCONNECTED event then drives the reconnect with the new
-         * config. */
+        /* Already associated (a new BSSID saved for the same SSID, say):
+         * esp_wifi_connect() would be a no-op and CONNECTING would hang. The
+         * drop's STA_DISCONNECTED drives the reconnect with the new config. */
         s_sta_state = WIFI_STA_CONNECTING;
         esp_wifi_disconnect();
     } else {
@@ -339,9 +331,6 @@ esp_err_t wifi_connect(void)
     return ESP_OK;
 }
 
-/* The link as words rather than enums — the values only ever leave the
- * firmware through the UI, and the mapping belongs next to the rest of what
- * this module knows about a connection. */
 const char *wifi_authmode_str(int authmode)
 {
     switch ((wifi_auth_mode_t)authmode) {

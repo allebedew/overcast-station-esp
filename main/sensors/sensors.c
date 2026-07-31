@@ -10,49 +10,37 @@
 #include "climate.h"
 #include "i2c_bus.h"
 
-/* Every sensor on the bus delivers its reading from one driver call, so a
- * single task walks them all instead of each getting its own. It ticks at
- * SENSOR_TICK_MS and each sensor comes up at its own period; the hot-plug
- * state machine below is shared — probe until the device answers, then read,
- * and MAX_ERRORS consecutive failures drop it back to probing. */
+/* One task walks every sensor: it ticks at SENSOR_TICK_MS and each sensor comes
+ * up at its own period. Hot-plug is shared — probe until the device answers,
+ * then read, and MAX_ERRORS consecutive failures drop it back to probing. */
 
-/* The tick is the granularity of every period below — a period lands on the
- * first tick at or after it — so they are all multiples of it. One FreeRTOS
- * tick, which is as fine as vTaskDelay() goes; that also puts the 8 Hz ceiling
- * the light sensor is held to at 130 ms rather than the round 125, which is not
- * on this grid. */
+/* One FreeRTOS tick — the granularity of every period below, which is why they
+ * are multiples of it (and why the light sensor's 8 Hz ceiling is 130 ms and
+ * not the round 125). */
 #define SENSOR_TICK_MS  10
 #define PROBE_PERIOD_MS 5000 /* how often to look for an absent sensor */
 #define MAX_ERRORS      3    /* consecutive failures before "offline" */
 
-/* Each sensor is read at the rate it can actually produce new results, so a
- * poll fetches a fresh sample rather than the previous one again: the TMP117
- * and the BMP581 are configured below their poll rate on purpose (see their
- * drivers), the VEML7700 is capped at 8 Hz here and gates itself on the
- * integration time in force below that, and the SCD40's 5 s cycle is fixed in
- * the part — polling it at 1 Hz is how its phase is found again after a
- * restart, not how often it has something new. */
+/* Each sensor is read at the rate it produces new results. The VEML7700 gates
+ * itself on the integration time below this cap; the SCD40's 5 s cycle is fixed
+ * in the part, and 1 Hz is how its phase is found again after a restart. */
 #define SCD40_PERIOD_MS    1000
 #define TMP117_PERIOD_MS   250
 #define BMP581_PERIOD_MS   250
 #define VEML7700_PERIOD_MS 130
 
-/* The SCD40's measurement depends on the ambient pressure, which it cannot
- * measure itself. The BMP581 can, so its reading is forwarded; the fallback is
- * the standard atmospheric pressure at the configured site altitude (ISA
- * model), used until the BMP581 has a reading and whenever it reports
- * something impossible. Resending on every reading would put a write on the
- * bus once a second for nothing — a step of a couple of hPa is well below
- * what the compensation notices. */
+/* The SCD40 needs ambient pressure it cannot measure itself, so the BMP581's
+ * reading is forwarded; the fallback is the ISA pressure at the configured site
+ * altitude. Resent only on a real step — smaller ones the compensation would
+ * not notice anyway. */
 #define SCD40_PRESSURE_MIN   700
 #define SCD40_PRESSURE_MAX   1200
 #define SCD40_PRESSURE_STEP  2 /* hPa of drift worth another write */
 
 static const char *TAG = "sensors";
 
-/* The widest reading of the four, as a staging buffer and as the published
- * snapshot: keeping the union whole (rather than a void* and a length) is what
- * makes the copies below type-checked. */
+/* Staging buffer and published snapshot; a union rather than void* + length so
+ * the copies below stay type-checked. */
 typedef union {
     scd40_data_t scd40;
     tmp117_data_t tmp117;
@@ -62,11 +50,11 @@ typedef union {
 
 typedef struct {
     const char *name;
-    int period_ms; /* how often this sensor is read */
+    int period_ms;
     esp_err_t (*start)(void);
     esp_err_t (*read)(sensor_reading_t *out);
-    /* Optional. Both run in the poll task without the bus lock held, so a
-     * hook that needs the bus takes it itself. */
+    /* Optional; run without the bus lock held, so a hook that needs the bus
+     * takes it itself. */
     void (*on_start)(void);
     void (*on_reading)(const sensor_reading_t *r);
 
@@ -81,8 +69,8 @@ typedef struct {
     sensor_reading_t snapshot;
 } sensor_t;
 
-/* The drivers take their own reading type; these adapters keep the table
- * entries type-safe instead of casting the function pointers. */
+/* Adapters over the drivers' own reading types — the table entries stay
+ * type-safe instead of casting function pointers. */
 static esp_err_t scd40_read_any(sensor_reading_t *r) { return scd40_read(&r->scd40); }
 static esp_err_t tmp117_read_any(sensor_reading_t *r) { return tmp117_read(&r->tmp117); }
 static esp_err_t bmp581_read_any(sensor_reading_t *r) { return bmp581_read(&r->bmp581); }
@@ -122,8 +110,7 @@ static bool sensor_get(sensor_t *s, sensor_reading_t *out)
 
 /* ---------------- cross-sensor wiring ---------------- */
 
-/* What the SCD40 was last told, hPa; 0 = it has not been told anything since
- * it started, and the compensation resets on power-down. */
+/* What the SCD40 was last told, hPa; 0 = nothing since it started. */
 static uint16_t s_scd40_hpa;
 
 static void scd40_sync_pressure(void)
@@ -182,8 +169,8 @@ static void set_offline(sensor_t *s, int64_t now)
     s->probe_at_us = now + (int64_t)PROBE_PERIOD_MS * 1000;
 }
 
-/* Returns true when the sensor asked to be come back to promptly rather than
- * at its own period: a sequence in progress, not a reading. */
+/* True when the sensor asked to be revisited promptly — a sequence in
+ * progress, not a reading. */
 static bool sensor_step(sensor_t *s)
 {
     int64_t now = esp_timer_get_time();
@@ -197,8 +184,8 @@ static bool sensor_step(sensor_t *s)
         i2c_bus_unlock();
 
         if (err == ESP_ERR_NOT_FINISHED) {
-            /* the sequence has a wait in it that the sensor, not the bus,
-             * needs — it resumes at the next tick with the bus free meanwhile */
+            /* the wait is the sensor's, not the bus's: resume next tick and
+             * leave the bus free meanwhile */
             return true;
         }
         if (err != ESP_OK) {
@@ -210,7 +197,7 @@ static bool sensor_step(sensor_t *s)
         if (s->on_start) {
             s->on_start();
         }
-        return true; /* the first conversion under the new settings is not in yet */
+        return true; /* first conversion under the new settings is not in yet */
     }
 
     sensor_reading_t r;
@@ -219,11 +206,8 @@ static bool sensor_step(sensor_t *s)
     i2c_bus_unlock();
 
     if (err == ESP_ERR_NOT_FINISHED) {
-        /* Nothing new to publish yet, and not a failure either. Coming back at
-         * the sensor's own period would charge a full period for every step of
-         * a sequence — the VEML7700 walks several range changes to follow a
-         * torch, and at 1 Hz that alone put seconds between the light and the
-         * display. */
+        /* Nothing new yet, and not a failure. Waiting a full period per step
+         * would cost seconds over a VEML7700 range walk. */
         return true;
     }
     if (err != ESP_OK) {
@@ -256,8 +240,8 @@ static void sensors_task(void *arg)
             if (now < s->next_us) {
                 continue;
             }
-            /* next slot measured from now, so a poll held up by the bus lock
-             * shifts the schedule instead of firing a catch-up burst */
+            /* measured from now, so a poll held up by the bus lock shifts the
+             * schedule instead of firing a catch-up burst */
             s->next_us = now + (int64_t)s->period_ms * 1000;
             if (sensor_step(s)) {
                 s->next_us = 0; /* mid-sequence: next tick, not next period */
@@ -312,9 +296,8 @@ bool sensors_veml7700_get(veml7700_data_t *out)
 esp_err_t sensors_scd40_calibrate(uint16_t target_ppm, int *correction_ppm)
 {
     i2c_bus_lock();
-    /* "running" belongs to the poll task; reading it here only saves a pointless
-     * round trip on a sensor known to be absent. If it is stale the commands
-     * below fail on the bus and the error comes back to the caller anyway. */
+    /* "running" belongs to the poll task; a stale read here only costs a bus
+     * round trip that fails and reports back anyway. */
     if (!s_sensors[SENSOR_SCD40].running) {
         i2c_bus_unlock();
         return ESP_ERR_INVALID_STATE;

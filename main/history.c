@@ -14,8 +14,8 @@
 #include "timesync.h"
 
 #define SNAPSHOT_MAGIC   0x48495354 /* "HIST" */
-/* Bumped when history_point_t changed shape; a file from an older firmware
- * fails the check below and is dropped rather than reinterpreted. */
+/* Bumped when history_point_t changes shape: an older file is then dropped
+ * rather than reinterpreted. */
 #define SNAPSHOT_VERSION 2
 
 static const char *TAG = "history";
@@ -39,9 +39,8 @@ typedef struct {
     history_point_t *ring;
     int head; /* next write position */
     int count;
-    /* accumulators for the slot in progress (tiers with interval > 1 s).
-     * Counted per quantity, so one sensor dropping out does not turn the
-     * whole slot into a gap. */
+    /* Slot in progress, counted per quantity so one sensor dropping out does
+     * not turn the whole slot into a gap. */
     acc_t co2, temp, rh, press, lux;
 } tier_t;
 
@@ -73,8 +72,7 @@ static tier_t s_tiers[HISTORY_TIER_COUNT] = {
     },
 };
 
-/* Snapshot file: header + all `len` slots (only the first `count` are
- * meaningful). */
+/* Snapshot file: header + all `len` slots, of which `count` are meaningful. */
 typedef struct {
     uint32_t magic;
     uint16_t version;
@@ -82,8 +80,8 @@ typedef struct {
     int64_t last_ts; /* unix time of the newest point; 0 = clock unsynced */
 } snap_hdr_t;
 
-/* Shared by save/restore; no overlap: restore runs once at the first
- * minute tick, the earliest save happens minutes later. */
+/* Shared by save/restore: restore runs once at the first minute tick, the
+ * earliest save minutes later. */
 static history_point_t s_snap_points[24 * 60]; /* sized for the largest tier */
 static TaskHandle_t s_save_task;
 static bool s_restored;
@@ -130,9 +128,8 @@ static void save_snapshot(tier_t *t)
     ESP_LOGI(TAG, "%s: saved %u points", t->file, hdr.count);
 }
 
-/* Loads the snapshot into the ring: snapshot points, then a downtime gap
- * (computable only when both the snapshot and the current clock are
- * SNTP-anchored), then whatever points were collected since boot. */
+/* Snapshot points, then a downtime gap (computable only when both clocks are
+ * SNTP-anchored), then the points collected since boot. */
 static void restore_snapshot(tier_t *t)
 {
     FILE *f = fopen(t->file, "rb");
@@ -233,8 +230,7 @@ static void acc_sample(const climate_t *c)
     }
 }
 
-/* One climate reading as a ring point, at the resolutions history_point_t
- * stores. A quantity whose sensor is missing leaves its bit clear. */
+/* One climate reading as a ring point; a missing sensor leaves its bit clear. */
 static history_point_t point_of(const climate_t *c)
 {
     history_point_t p = {0};
@@ -262,8 +258,7 @@ static history_point_t point_of(const climate_t *c)
     return p;
 }
 
-/* Turns the samples accumulated over the tier interval into one ring point.
- * A quantity with no samples leaves its bit clear; with none at all the point
+/* The tier's accumulated samples as one ring point. With no samples at all it
  * is a gap, so the time axis stays uniform even when everything is offline. */
 static void flush_tier(tier_t *t)
 {
@@ -306,10 +301,8 @@ static void tick_cb(void *arg)
     static uint32_t ticks;
     ticks++;
 
-    /* Sampling, not listening: whatever each sensor last published is what
-     * gets recorded. A sensor slower than 1 Hz repeats its value into the 1 s
-     * tier — the alternative, four gaps out of five, is not more truthful and
-     * draws far worse. */
+    /* Sampling, not listening: a sensor slower than 1 Hz repeats its value into
+     * the 1 s tier, which draws better than four gaps out of five. */
     climate_t c;
     climate_get(&c);
     acc_sample(&c);
@@ -323,8 +316,8 @@ static void tick_cb(void *arg)
         flush_tier(&s_tiers[HISTORY_1H]);
     }
     if (ticks % s_tiers[HISTORY_1D].interval_s == 0) {
-        /* restore is deferred to the first minute tick: by now SNTP has
-         * usually synced, so the downtime gap can be computed */
+        /* deferred to the first minute tick, by when SNTP has usually synced
+         * and the downtime gap can be computed */
         if (!s_restored) {
             s_restored = true;
             for (int i = 0; i < HISTORY_TIER_COUNT; i++) {
@@ -389,9 +382,8 @@ bool history_get(history_tier_t tier, int idx, history_point_t *out)
 
 void history_reset(void)
 {
-    /* Stored points become unreachable once count drops to 0 (history_get
-     * bounds-checks on it), so there is no need to clear the ring arrays
-     * themselves under the lock. */
+    /* count = 0 makes the stored points unreachable (history_get bounds-checks
+     * on it), so the ring arrays need no clearing. */
     taskENTER_CRITICAL(&s_lock);
     for (int i = 0; i < HISTORY_TIER_COUNT; i++) {
         tier_t *t = &s_tiers[i];

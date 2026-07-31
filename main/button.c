@@ -6,7 +6,7 @@
 #include "screen_16x2.h"
 #include "wifi.h"
 
-#define BUTTON_GPIO 9 /* кнопка BOOT */
+#define BUTTON_GPIO 9 /* BOOT button */
 #define LONG_PRESS_MS 1500
 
 static const char *TAG = "button";
@@ -41,7 +41,7 @@ void button_init(void)
     ESP_ERROR_CHECK(iot_button_register_cb(btn, BUTTON_SINGLE_CLICK, NULL, on_button_click, NULL));
 
     /* Fires while the button is still down, so the AP toggles as soon as the
-     * hold is long enough — no need to guess when to let go. */
+     * hold is long enough. */
     button_event_args_t long_press = { .long_press.press_time = LONG_PRESS_MS };
     ESP_ERROR_CHECK(iot_button_register_cb(btn, BUTTON_LONG_PRESS_START, &long_press,
                                            on_button_long_press, NULL));

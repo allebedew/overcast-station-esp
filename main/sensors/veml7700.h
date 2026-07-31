@@ -5,10 +5,9 @@
 
 #include "esp_err.h"
 
-/* Vishay VEML7700 — ambient light sensor with a lux-matched channel (ALS) and
- * an unfiltered white channel. The usable range spans six decades, so the
- * driver auto-ranges over the gain / integration-time table and reports which
- * step it settled on. */
+/* Vishay VEML7700 — a lux-matched channel (ALS) and an unfiltered white one.
+ * The range spans six decades, so the driver auto-ranges over the gain /
+ * integration-time table and reports the step it settled on. */
 
 typedef struct {
     float lux;       /* ALS channel, corrected */
@@ -21,13 +20,11 @@ typedef struct {
     uint16_t it_ms;   /* integration time */
 } veml7700_data_t;
 
-/* Probes the (fixed) address, powers the sensor up and applies the starting
- * range. Safe to call again after a failure. */
+/* Probes the address, powers up and applies the starting range. Safe to call
+ * again after a failure. */
 esp_err_t veml7700_start(void);
 
-/* Reads both channels and converts them to lux. Returns ESP_ERR_NOT_FINISHED
- * when no trustworthy sample is available yet: either the reading fell outside
- * the current range — the range is re-picked and the sample dropped — or an
- * integration under the newly applied settings has not completed. Either way
- * the next call gets a value. */
+/* Both channels in lux. ESP_ERR_NOT_FINISHED when no trustworthy sample is
+ * ready: the reading fell outside the range (which is re-picked and the sample
+ * dropped), or the integration under new settings is unfinished. */
 esp_err_t veml7700_read(veml7700_data_t *out);
