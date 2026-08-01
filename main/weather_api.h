@@ -16,8 +16,11 @@ typedef struct {
     float wind_kmh;         /* wind speed at 10 m, km/h */
     float gust_kmh;         /* wind gusts at 10 m, km/h */
     int wind_dir_deg;       /* wind direction, meteorological degrees (0 = N) */
-    float precip_mm;        /* total precipitation over the last hour (rain +
-                             * showers + snow water-equivalent), mm */
+    float precip_mmh;       /* precipitation rate (rain + showers + snow
+                             * water-equivalent), mm/h — under 2.5 light,
+                             * 2.5..7.5 moderate, above that heavy */
+    bool is_day;            /* daylight at the location; the WMO code alone does
+                             * not tell a clear day from a clear night */
     int cloud_pct;          /* cloud cover, % */
     int weather_code;       /* WMO weather interpretation code, -1 if unknown */
     float elevation_m;      /* model grid-cell elevation for the coordinates, m */

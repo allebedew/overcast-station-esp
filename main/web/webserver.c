@@ -276,19 +276,20 @@ static esp_err_t status_get_handler(httpd_req_t *req)
                  weather_name, weather_store_get_active(), wloc.lat, wloc.lon, tz);
     }
 
-    char wx_cur[352] = "null";
+    char wx_cur[416] = "null";
     if (weather_ok) {
         snprintf(wx_cur, sizeof(wx_cur),
                  "{\"temp\":%.1f,\"feels\":%.1f,\"tmin\":%.1f,\"tmax\":%.1f,"
                  "\"hum\":%.0f,\"press\":%.1f,\"press_msl\":%.1f,\"uvi\":%.2f,"
-                 "\"wind\":%.1f,\"gust\":%.1f,\"wind_dir\":%d,\"precip\":%.2f,"
-                 "\"clouds\":%d,\"code\":%d,\"elev\":%.0f,\"age\":%d}",
+                 "\"wind\":%.1f,\"gust\":%.1f,\"wind_dir\":%d,"
+                 "\"precip_rate\":%.1f,\"clouds\":%d,\"code\":%d,\"is_day\":%d,"
+                 "\"elev\":%.0f,\"age\":%d}",
                  weather.temp_c, weather.feels_c, weather.temp_min_c,
                  weather.temp_max_c, weather.humidity_pct, weather.pressure_hpa,
                  weather.pressure_msl_hpa, weather.uvi, weather.wind_kmh,
-                 weather.gust_kmh, weather.wind_dir_deg, weather.precip_mm,
-                 weather.cloud_pct, weather.weather_code, weather.elevation_m,
-                 (int)weather.age_s);
+                 weather.gust_kmh, weather.wind_dir_deg, weather.precip_mmh,
+                 weather.cloud_pct, weather.weather_code, weather.is_day,
+                 weather.elevation_m, (int)weather.age_s);
     }
 
     char time_str[TIMESYNC_STR_LEN];

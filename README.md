@@ -201,9 +201,12 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
 - **Outside weather (Open-Meteo)** — the active location fetched over HTTPS
   every 15 min, no API key, default `best_match` model. Temperature and
   apparent temperature, humidity, surface and sea-level pressure, UV index,
-  cloud cover, wind speed / gusts / direction, precipitation and the WMO code,
-  plus today's min/max from `daily`; `timezone=auto` yields
-  `utc_offset_seconds` and the reply's `elevation` is kept.
+  cloud cover, wind speed / gusts / direction, precipitation, daylight flag and
+  the WMO code, plus today's min/max from `daily`; `timezone=auto` yields
+  `utc_offset_seconds` and the reply's `elevation` is kept. `precipitation` is
+  an accumulation over the model step, so it is kept only as a rate in mm/h,
+  rescaled by the reply's `interval` (900 s on 15-minute models, 3600 s on
+  hourly ones).
   A request that never reached the API (DNS, TLS, timeout) is retried after
   15 s, then 30, 60, … up to 5 min; a reply that arrived but was unusable waits
   the full 5 min. The cached reading survives a failed fetch (age in

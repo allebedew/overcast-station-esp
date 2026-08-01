@@ -23,7 +23,7 @@
 #define WEATHER_API_CURRENT_FIELDS \
     "temperature_2m,relative_humidity_2m,apparent_temperature," \
     "surface_pressure,pressure_msl,uv_index,weather_code,cloud_cover," \
-    "wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation"
+    "wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation,is_day"
 
 /* Daily aggregates; forecast_days=1 keeps only today, so index 0 is today. */
 #define WEATHER_API_DAILY_FIELDS "temperature_2m_max,temperature_2m_min"
@@ -77,6 +77,17 @@ static float jarr0(const cJSON *arr, float dflt)
     return cJSON_IsNumber(it) ? (float)it->valuedouble : dflt;
 }
 
+/* `precipitation` is an accumulation over the model's own step, which `interval`
+ * reports: 900 s for the 15-minute models, 3600 s for the hourly ones. Rescaling
+ * to mm/h is what makes the number comparable to the usual light/moderate/heavy
+ * thresholds instead of being four times too small. */
+static float precip_rate(const cJSON *cur)
+{
+    float mm = jnum(cur, "precipitation", 0);
+    float interval_s = jnum(cur, "interval", 3600);
+    return interval_s > 0 ? mm * 3600.0f / interval_s : 0;
+}
+
 static bool parse(const char *json, const weather_location_t *loc)
 {
     cJSON *root = cJSON_Parse(json);
@@ -109,7 +120,8 @@ static bool parse(const char *json, const weather_location_t *loc)
             .wind_kmh = jnum(cur, "wind_speed_10m", 0),
             .gust_kmh = jnum(cur, "wind_gusts_10m", 0),
             .wind_dir_deg = (int)lroundf(jnum(cur, "wind_direction_10m", 0)),
-            .precip_mm = jnum(cur, "precipitation", 0),
+            .precip_mmh = precip_rate(cur),
+            .is_day = jnum(cur, "is_day", 1) != 0,
             .cloud_pct = (int)lroundf(jnum(cur, "cloud_cover", 0)),
             .weather_code = (int)lroundf(jnum(cur, "weather_code", -1)),
             .elevation_m = jnum(root, "elevation", 0),
@@ -127,10 +139,11 @@ static bool parse(const char *json, const weather_location_t *loc)
         ESP_LOGI(TAG,
                  "updated: %.1f C (feels %.1f, %.1f..%.1f), %.0f%%, %.1f/%.1f hPa, "
                  "UVI %.2f, wind %.1f (gust %.1f) km/h @%d, clouds %d%%, "
-                 "precip %.2f mm, %s",
+                 "precip %.1f mm/h, %s, %s",
                  d.temp_c, d.feels_c, d.temp_min_c, d.temp_max_c, d.humidity_pct,
                  d.pressure_hpa, d.pressure_msl_hpa, d.uvi, d.wind_kmh, d.gust_kmh,
-                 d.wind_dir_deg, d.cloud_pct, d.precip_mm,
+                 d.wind_dir_deg, d.cloud_pct, d.precip_mmh,
+                 d.is_day ? "day" : "night",
                  weather_api_code_str(d.weather_code));
     } else {
         ESP_LOGW(TAG, "unexpected JSON shape");
