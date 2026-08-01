@@ -1383,6 +1383,7 @@
                     weatherGust: "Порывы",
                     weatherClouds: "Облачность",
                     weatherPrecip: "Осадки",
+                    weatherSunshine: "Сияние",
                     weatherAlt: "выс.",
                     uKmh: "км/ч",
                     uMmh: "мм/ч",
@@ -1391,6 +1392,12 @@
                     weatherWait: "ожидание данных…",
                     sunPolarDay: "полярный день",
                     sunPolarNight: "полярная ночь",
+                    sunDay: "день",
+                    sunGolden: "золотой час",
+                    sunCivil: "гражданские сумерки",
+                    sunNautical: "навигационные сумерки",
+                    sunAstro: "астрономические сумерки",
+                    sunNight: "ночь",
                     sensorsTitle: "Датчики",
                     sensOk: "Работает",
                     sensOff: "Нет ответа",
@@ -1590,6 +1597,7 @@
                     weatherGust: "Gusts",
                     weatherClouds: "Clouds",
                     weatherPrecip: "Precipitation",
+                    weatherSunshine: "Sunshine",
                     weatherAlt: "alt.",
                     uKmh: "km/h",
                     uMmh: "mm/h",
@@ -1598,6 +1606,12 @@
                     weatherWait: "waiting for data…",
                     sunPolarDay: "polar day",
                     sunPolarNight: "polar night",
+                    sunDay: "day",
+                    sunGolden: "golden hour",
+                    sunCivil: "civil twilight",
+                    sunNautical: "nautical twilight",
+                    sunAstro: "astronomical twilight",
+                    sunNight: "night",
                     sensorsTitle: "Sensors",
                     sensOk: "Online",
                     sensOff: "No response",
@@ -2121,10 +2135,11 @@
                     l: "weatherGust",
                     src: ["wind", "gust", "wind_dir"],
                     ui: "uKmh",
-                    /* the direction leads the reading it belongs to, the way a
-                     * forecast reads it out: "W 4.8 km/h" */
-                    f: (w, g, dir) => `${windDir(dir)} ${w.toFixed(1)}`,
-                    lf: (w, g) => `${t("weatherGust")}: ${g.toFixed(1)}`,
+                    /* the value is the speed alone, so it lines up with every
+                     * other tile; the direction joins the gusts in the label */
+                    f: (w) => w.toFixed(1),
+                    lf: (w, g, dir) =>
+                        `${windDir(dir)} · ${t("weatherGust")}: ${g.toFixed(1)}`,
                 },
                 { k: "clouds", l: "weatherClouds", u: "%", f: (v) => v.toFixed(0) },
                 {
@@ -2132,6 +2147,19 @@
                     l: "weatherPrecip",
                     ui: "uMmh",
                     f: (v) => v.toFixed(1),
+                },
+                {
+                    /* whole-day totals: hours of sun as the reading, its share
+                     * of the daylight in the label */
+                    k: "sunshine",
+                    l: "weatherSunshine",
+                    src: ["sunshine", "daylight"],
+                    ui: "uH",
+                    f: (s) => (s / 3600).toFixed(1),
+                    lf: (s, d) =>
+                        d > 0
+                            ? `${t("weatherSunshine")}: ${Math.round((100 * s) / d)}%`
+                            : t("weatherSunshine"),
                 },
             ];
 
@@ -2216,6 +2244,17 @@
             /*   Sun: ↑05:25 · ↓20:59 · 15h 34m · +32.4° · ↓ in 8h 32m
              * One line, not tiles: four related facts about the day rather than
              * four readings. Only the two clock times need the offset. */
+            /* Kept in step with sun_phase_str() — the API sends the band, the
+             * page only names it. */
+            const SUN_PHASE = {
+                day: "sunDay",
+                golden: "sunGolden",
+                civil: "sunCivil",
+                nautical: "sunNautical",
+                astro: "sunAstro",
+                night: "sunNight",
+            };
+
             function renderSun(s, loc) {
                 const el = $("sunMeta");
                 if (!s) {
@@ -2229,6 +2268,9 @@
                     s.elev,
                     (v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}°`,
                 );
+                /* Named for the device's own elevation, so the wording and the
+                 * angle beside it can never disagree. */
+                const phase = SUN_PHASE[s.phase] ? ` · ${t(SUN_PHASE[s.phase])}` : "";
                 /* Counted by the device against its synced clock, so it is not
                  * at the mercy of the browser's. */
                 const next =
@@ -2239,10 +2281,10 @@
                     "Sun: " +
                     (s.state === "rises"
                         ? `↑${clock(s.rise)} · ↓${clock(s.set)} · ` +
-                          `${fmtSpan(s.day_len)} · ${angle}${next}`
+                          `${fmtSpan(s.day_len)} · ${angle}${phase}${next}`
                         : `${t(
                               s.state === "polar_day" ? "sunPolarDay" : "sunPolarNight",
-                          )} · ${angle}`);
+                          )} · ${angle}${phase}`);
             }
 
             /* ---------- toast ---------- */

@@ -182,9 +182,11 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   composition over the history, no task and no state beyond a 15 s cache.
   Shown on the Zambretti LCD page and on the pressure card, whose badge is the
   tendency (arrow repeated once per grade) and whose footer is the wording.
-- **Sun** — sunrise, sunset, day length and the sun's angle above the horizon,
-  from the active location's coordinates and the SNTP clock (NOAA sunrise
-  equation, `sun.c`). No network: unlike the Open-Meteo reading beside it, it
+- **Sun** — sunrise, sunset, day length, the sun's angle above the horizon and
+  the twilight band that angle falls in (day above +6°, golden hour down to the
+  horizon, then civil / nautical / astronomical twilight at −6 / −12 / −18°,
+  night below), from the active location's coordinates and the SNTP clock (NOAA
+  sunrise equation, `sun.c`). No network: unlike the Open-Meteo reading beside it, it
   survives an outage and a reboot. Within a minute of the USNO tables in
   temperate latitudes, a few minutes past 60° where the sun grazes the horizon.
   Polar day and polar night are a state of their own, not missing data. Needs
@@ -202,7 +204,9 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   every 15 min, no API key, default `best_match` model. Temperature and
   apparent temperature, humidity, surface and sea-level pressure, UV index,
   cloud cover, wind speed / gusts / direction, precipitation, daylight flag and
-  the WMO code, plus today's min/max from `daily`; `timezone=auto` yields
+  the WMO code, plus today's min/max and sunshine / daylight duration from
+  `daily` (the card shows the sunshine in hours and its share of the daylight);
+  `timezone=auto` yields
   `utc_offset_seconds` and the reply's `elevation` is kept. `precipitation` is
   an accumulation over the model step, so it is kept only as a rate in mm/h,
   rescaled by the reply's `interval` (900 s on 15-minute models, 3600 s on
@@ -274,7 +278,7 @@ card belongs in that device's module, not in the caller — dew point in
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (gzipped) |
-| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system`, `settings` (`led_brightness`, `backlight_rgb`, read-only `backlight_scale`, `altitude`) |
+| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `phase` `day`/`golden`/`civil`/`nautical`/`astro`/`night`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system`, `settings` (`led_brightness`, `backlight_rgb`, read-only `backlight_scale`, `altitude`) |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`); `{period, co2, temp, rh, press, lux}`, each series gated on its own quantity so `null` is a gap in that series alone. `press` comes out reduced to sea level |
 | `/api/history/reset` | POST | wipe all tiers, RAM rings and flash snapshots |
 | `/api/scan` | GET | Wi-Fi scan, `[{ssid, bssid, ch, rssi, auth}]`, one entry per BSSID |

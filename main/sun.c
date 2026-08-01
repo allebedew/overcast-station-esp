@@ -220,3 +220,43 @@ bool sun_next_event(int32_t *in_s, bool *is_rise)
     *is_rise = rise;
     return true;
 }
+
+/* Golden hour ends where the light stops reddening, not at a horizon crossing,
+ * so its upper bound is a plain elevation. The lower one is the horizon itself:
+ * below it the sun is set and civil twilight has begun. */
+#define GOLDEN_DEG    6.0
+#define CIVIL_DEG     (-6.0)
+#define NAUTICAL_DEG  (-12.0)
+#define ASTRO_DEG     (-18.0)
+
+sun_phase_t sun_phase_of(double elev_deg)
+{
+    if (elev_deg > GOLDEN_DEG)    return SUN_PHASE_DAY;
+    if (elev_deg > HORIZON_DEG)   return SUN_PHASE_GOLDEN;
+    if (elev_deg > CIVIL_DEG)     return SUN_PHASE_CIVIL;
+    if (elev_deg > NAUTICAL_DEG)  return SUN_PHASE_NAUTICAL;
+    if (elev_deg > ASTRO_DEG)     return SUN_PHASE_ASTRO;
+    return SUN_PHASE_NIGHT;
+}
+
+bool sun_phase(sun_phase_t *out)
+{
+    double elev;
+    if (!sun_elevation_deg(&elev)) {
+        return false;
+    }
+    *out = sun_phase_of(elev);
+    return true;
+}
+
+const char *sun_phase_str(sun_phase_t phase)
+{
+    switch (phase) {
+    case SUN_PHASE_DAY:      return "day";
+    case SUN_PHASE_GOLDEN:   return "golden";
+    case SUN_PHASE_CIVIL:    return "civil";
+    case SUN_PHASE_NAUTICAL: return "nautical";
+    case SUN_PHASE_ASTRO:    return "astro";
+    default:                 return "night";
+    }
+}

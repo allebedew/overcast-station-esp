@@ -17,6 +17,18 @@ typedef enum {
     SUN_POLAR_NIGHT, /* it never rises */
 } sun_state_t;
 
+/* Where the sun stands right now on the twilight ladder. Unlike sun_state_t,
+ * which describes a whole day, this is a property of the moment. The bands are
+ * the conventional ones, by the elevation of the sun's centre. */
+typedef enum {
+    SUN_PHASE_DAY,      /* above +6° */
+    SUN_PHASE_GOLDEN,   /* horizon..+6°: up, but low enough to redden */
+    SUN_PHASE_CIVIL,    /* -6°..horizon: outdoors without artificial light */
+    SUN_PHASE_NAUTICAL, /* -12°..-6°: the sea horizon still shows */
+    SUN_PHASE_ASTRO,    /* -18°..-12° */
+    SUN_PHASE_NIGHT,    /* below -18° */
+} sun_phase_t;
+
 typedef struct {
     sun_state_t state;
     time_t rise;       /* UTC; both meaningless unless SUN_RISES */
@@ -36,6 +48,16 @@ bool sun_next_event(int32_t *in_s, bool *is_rise);
 
 /* Degrees above the horizon right now, negative below. Needs no UTC offset. */
 bool sun_elevation_deg(double *out);
+
+/* The current phase. False without a synced clock or an active location. */
+bool sun_phase(sun_phase_t *out);
+
+/* The phase of a given elevation, in degrees. */
+sun_phase_t sun_phase_of(double elev_deg);
+
+/* API name of a phase: "day", "golden", "civil", "nautical", "astro", "night".
+ * Never NULL. */
+const char *sun_phase_str(sun_phase_t phase);
 
 /* The math alone, for a place and an instant. Longitude is east-positive. */
 void sun_compute(double lat, double lon, int32_t utc_offset_s, time_t now,

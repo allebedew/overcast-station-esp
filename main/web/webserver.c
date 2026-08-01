@@ -276,20 +276,25 @@ static esp_err_t status_get_handler(httpd_req_t *req)
                  weather_name, weather_store_get_active(), wloc.lat, wloc.lon, tz);
     }
 
-    char wx_cur[416] = "null";
+    char wx_cur[480] = "null";
     if (weather_ok) {
+        char wx_sun[12], wx_daylight[12];
+        json_num(wx_sun, sizeof(wx_sun), weather.sunshine_s >= 0, "%.0f",
+                 (double)weather.sunshine_s);
+        json_num(wx_daylight, sizeof(wx_daylight), weather.daylight_s >= 0, "%.0f",
+                 (double)weather.daylight_s);
         snprintf(wx_cur, sizeof(wx_cur),
                  "{\"temp\":%.1f,\"feels\":%.1f,\"tmin\":%.1f,\"tmax\":%.1f,"
                  "\"hum\":%.0f,\"press\":%.1f,\"press_msl\":%.1f,\"uvi\":%.2f,"
                  "\"wind\":%.1f,\"gust\":%.1f,\"wind_dir\":%d,"
                  "\"precip_rate\":%.1f,\"clouds\":%d,\"code\":%d,\"is_day\":%d,"
-                 "\"elev\":%.0f,\"age\":%d}",
+                 "\"sunshine\":%s,\"daylight\":%s,\"elev\":%.0f,\"age\":%d}",
                  weather.temp_c, weather.feels_c, weather.temp_min_c,
                  weather.temp_max_c, weather.humidity_pct, weather.pressure_hpa,
                  weather.pressure_msl_hpa, weather.uvi, weather.wind_kmh,
                  weather.gust_kmh, weather.wind_dir_deg, weather.precip_mmh,
                  weather.cloud_pct, weather.weather_code, weather.is_day,
-                 weather.elevation_m, (int)weather.age_s);
+                 wx_sun, wx_daylight, weather.elevation_m, (int)weather.age_s);
     }
 
     char time_str[TIMESYNC_STR_LEN];
@@ -320,7 +325,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     /* Computed from the location and the clock alone, so it stands with no
      * network at all and outlives the weather reading beside it. */
     sun_info_t sun;
-    char sun_json[224] = "null";
+    char sun_json[256] = "null";
     if (sun_get(0, &sun)) {
         char rise[16] = "null", set[16] = "null";
         if (sun.state == SUN_RISES) {
@@ -340,12 +345,12 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         sun_elevation_deg(&elev);
         snprintf(sun_json, sizeof(sun_json),
                  "{\"state\":\"%s\",\"rise\":%s,\"set\":%s,\"day_len\":%d,"
-                 "\"up\":%s,\"elev\":%.1f,%s}",
+                 "\"up\":%s,\"elev\":%.1f,\"phase\":\"%s\",%s}",
                  sun.state == SUN_RISES       ? "rises"
                  : sun.state == SUN_POLAR_DAY ? "polar_day"
                                               : "polar_night",
                  rise, set, (int)sun.day_len_s, sun.up ? "true" : "false", elev,
-                 next);
+                 sun_phase_str(sun_phase_of(elev)), next);
     }
 
     static char json[3072];

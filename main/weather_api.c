@@ -26,7 +26,8 @@
     "wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation,is_day"
 
 /* Daily aggregates; forecast_days=1 keeps only today, so index 0 is today. */
-#define WEATHER_API_DAILY_FIELDS "temperature_2m_max,temperature_2m_min"
+#define WEATHER_API_DAILY_FIELDS \
+    "temperature_2m_max,temperature_2m_min,sunshine_duration,daylight_duration"
 
 #define WEATHER_API_UPDATE_INTERVAL_MS (15 * 60 * 1000)
 #define WEATHER_API_RETRY_INTERVAL_MS  (5 * 60 * 1000)  /* retry sooner after a failure */
@@ -116,6 +117,11 @@ static bool parse(const char *json, const weather_location_t *loc)
                                 temp->valuedouble),
             .temp_min_c = jarr0(cJSON_GetObjectItem(daily, "temperature_2m_min"),
                                 temp->valuedouble),
+            /* whole-day totals, so both are forecasts until the day is over */
+            .sunshine_s = (int32_t)lroundf(
+                jarr0(cJSON_GetObjectItem(daily, "sunshine_duration"), -1)),
+            .daylight_s = (int32_t)lroundf(
+                jarr0(cJSON_GetObjectItem(daily, "daylight_duration"), -1)),
             .pressure_msl_hpa = jnum(cur, "pressure_msl", press->valuedouble),
             .wind_kmh = jnum(cur, "wind_speed_10m", 0),
             .gust_kmh = jnum(cur, "wind_gusts_10m", 0),
@@ -139,10 +145,11 @@ static bool parse(const char *json, const weather_location_t *loc)
         ESP_LOGI(TAG,
                  "updated: %.1f C (feels %.1f, %.1f..%.1f), %.0f%%, %.1f/%.1f hPa, "
                  "UVI %.2f, wind %.1f (gust %.1f) km/h @%d, clouds %d%%, "
-                 "precip %.1f mm/h, %s, %s",
+                 "precip %.1f mm/h, sun %.1f/%.1f h, %s, %s",
                  d.temp_c, d.feels_c, d.temp_min_c, d.temp_max_c, d.humidity_pct,
                  d.pressure_hpa, d.pressure_msl_hpa, d.uvi, d.wind_kmh, d.gust_kmh,
                  d.wind_dir_deg, d.cloud_pct, d.precip_mmh,
+                 d.sunshine_s / 3600.0f, d.daylight_s / 3600.0f,
                  d.is_day ? "day" : "night",
                  weather_api_code_str(d.weather_code));
     } else {
@@ -168,7 +175,7 @@ static fetch_result_t fetch(const weather_location_t *loc)
 
     /* timezone=auto makes the daily min/max span the local calendar day and
      * fills utc_offset_seconds in the reply. */
-    char url[384];
+    char url[512];
     snprintf(url, sizeof(url),
              "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
              "&current=" WEATHER_API_CURRENT_FIELDS
