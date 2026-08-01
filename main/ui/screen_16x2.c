@@ -10,17 +10,17 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_system.h"
-#include "esp_timer.h"
 
 #include "lcd1602_rgb.h"
 #include "climate.h"
-#include "forecast.h"
+#include "zambretti.h"
 #include "ota.h"
 #include "settings.h"
+#include "sun.h"
 #include "sysinfo.h"
 #include "timesync.h"
 #include "weather_api.h"
-#include "wifi.h"
+#include "weather_store.h"
 
 /* Polling rate, not write rate: the transport drops frames that would repaint
  * the same characters. */
@@ -53,16 +53,14 @@
 #define SETTING_RGB  "bl_rgb"
 
 typedef enum {
-    PAGE_INDOOR,  /* what the station measures, plus the outdoor headline */
-    PAGE_PRECISE, /* the same air at the sensors' full resolution */
-    PAGE_OUTDOOR,  /* the rest of the Open-Meteo reading */
-    PAGE_FORECAST, /* what the station's own barometer expects */
-    PAGE_SYSTEM,   /* clock and how the station itself is doing */
+    PAGE_INDOOR,    /* what the station measures, plus the outdoor headline */
+    PAGE_PRECISE,   /* the same air at the sensors' full resolution */
+    PAGE_OUTDOOR,   /* the rest of the Open-Meteo reading */
+    PAGE_ZAMBRETTI, /* what the station's own barometer expects */
+    PAGE_SUN,       /* the day's length and where the sun is in it */
+    PAGE_SYSTEM,    /* clock and how the station itself is doing */
     PAGE_COUNT,
 } page_t;
-
-#define DOTS_PERIOD_US 500000
-#define DOTS_MAX       3
 
 static const char *TAG = "screen";
 
@@ -166,12 +164,12 @@ static void render_outdoor(char *l0, char *l1)
 
 /*   1013.2 hPa v2.1  (sea level, tendency over 3 h; the ROM has no arrows)
  *   Chgable, rain     (the Zambretti wording, shortened to the panel) */
-static void render_forecast(char *l0, char *l1)
+static void render_zambretti(char *l0, char *l1)
 {
     climate_t c;
     climate_get(&c);
-    forecast_t f;
-    forecast_get(&f);
+    zambretti_t f;
+    zambretti_get(&f);
 
     char press[12];
     fmt_or(press, sizeof(press), c.press_ok, "----.-", "%6.1f",
@@ -187,7 +185,49 @@ static void render_forecast(char *l0, char *l1)
     char dir = f.trend > 0 ? '^' : f.trend < 0 ? 'v' : '=';
     snprintf(l0, RENDER_BUF, "%s hPa %c%.1f", press, dir,
              delta < 0 ? -delta : delta);
-    snprintf(l1, RENDER_BUF, "%s", forecast_code_short(f.code));
+    snprintf(l1, RENDER_BUF, "%s", zambretti_code_short(f.code));
+}
+
+/*   Day 05:25 20:59  (sunrise and sunset in the location's local time)
+ *   Sun+32.4° v13:45  (angle above the horizon, then the wait for the next
+ *                      crossing — '^' rise, 'v' set; sixteen exactly) */
+static void render_sun(char *l0, char *l1)
+{
+    sun_info_t s;
+    double elev;
+    if (!sun_get(0, &s) || !sun_elevation_deg(&elev)) {
+        snprintf(l0, RENDER_BUF, "no sun data");
+        l1[0] = '\0';
+        return;
+    }
+
+    weather_location_t loc;
+    bool tz_known = weather_store_get_active_location(&loc) &&
+                    loc.utc_offset_s != WEATHER_TZ_UNKNOWN;
+
+    if (s.state == SUN_RISES && tz_known) {
+        struct tm rise, set;
+        time_t r = s.rise + loc.utc_offset_s, t = s.set + loc.utc_offset_s;
+        gmtime_r(&r, &rise);
+        gmtime_r(&t, &set);
+        snprintf(l0, RENDER_BUF, "Day %02d:%02d %02d:%02d", rise.tm_hour,
+                 rise.tm_min, set.tm_hour, set.tm_min);
+    } else if (s.state == SUN_RISES) {
+        /* The angle and the countdown below need no zone; these two do. */
+        snprintf(l0, RENDER_BUF, "Day --:-- --:--");
+    } else {
+        snprintf(l0, RENDER_BUF, "Day: no %s",
+                 s.state == SUN_POLAR_DAY ? "sunset" : "sunrise");
+    }
+
+    int32_t in_s;
+    bool is_rise;
+    if (sun_next_event(&in_s, &is_rise)) {
+        snprintf(l1, RENDER_BUF, "Sun%+5.1f" DEG " %c%2d:%02d", elev,
+                 is_rise ? '^' : 'v', (int)(in_s / 3600), (int)(in_s / 60) % 60);
+    } else {
+        snprintf(l1, RENDER_BUF, "Sun%+5.1f" DEG, elev);
+    }
 }
 
 /*   17:27:40 28.07    (the colons blink, one second on, one second off)
@@ -232,38 +272,13 @@ static void render_ota(char *l0, char *l1)
     l1[LCD1602_COLS] = '\0';
 }
 
-static void render_wifi(char *l0, char *l1, wifi_sta_state_t state,
-                        const char *ssid)
-{
-    int dots = (int)(esp_timer_get_time() / DOTS_PERIOD_US) % (DOTS_MAX + 1);
-    const char *base = state == WIFI_STA_WAITING_RETRY ? "Wi-Fi retry"
-                                                       : "Wi-Fi connect";
-    snprintf(l0, RENDER_BUF, "%s%.*s", base, dots, "...");
-    snprintf(l1, RENDER_BUF, "%s", ssid[0] ? ssid : "(no network)");
-}
-
-/* OTA and Wi-Fi pages pre-empt the selected one. Once the station connects, or
- * the round-robin gives up, the Wi-Fi page steps aside for good — a later drop
- * is reported by the LED. */
+/* The OTA page pre-empts the selected one; Wi-Fi state is reported by the LED. */
 static void render_page(char *l0, char *l1)
 {
-    static bool settled;
-
     if (ota_is_active()) {
         s_override_active = true;
         render_ota(l0, l1);
         return;
-    }
-
-    if (!settled) {
-        char ssid[33] = "";
-        wifi_sta_state_t sta = wifi_sta_state(ssid, sizeof(ssid));
-        if (sta == WIFI_STA_CONNECTING || sta == WIFI_STA_WAITING_RETRY) {
-            s_override_active = true;
-            render_wifi(l0, l1, sta, ssid);
-            return;
-        }
-        settled = true;
     }
 
     s_override_active = false;
@@ -271,7 +286,8 @@ static void render_page(char *l0, char *l1)
     case PAGE_INDOOR:   render_indoor(l0, l1); break;
     case PAGE_PRECISE:  render_precise(l0, l1); break;
     case PAGE_OUTDOOR:  render_outdoor(l0, l1); break;
-    case PAGE_FORECAST: render_forecast(l0, l1); break;
+    case PAGE_ZAMBRETTI: render_zambretti(l0, l1); break;
+    case PAGE_SUN:      render_sun(l0, l1); break;
     default:            render_system(l0, l1); break;
     }
 }

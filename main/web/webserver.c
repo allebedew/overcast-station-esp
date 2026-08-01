@@ -16,7 +16,8 @@
 #include "cJSON.h"
 #include "mdns.h"
 #include "climate.h"
-#include "forecast.h"
+#include "zambretti.h"
+#include "sun.h"
 #include "history.h"
 #include "led.h"
 #include "ota.h"
@@ -259,6 +260,37 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     char weather_name[67];
     json_escape(wloc_ok ? wloc.name : "", weather_name, sizeof(weather_name));
 
+    /* Two independent things: the place, known the moment it is saved, and the
+     * reading fetched for it. Either is null on its own, and an absent value
+     * is never zero — UTC+0 and latitude 0 are both real. */
+    char wx_loc[192] = "null";
+    if (wloc_ok) {
+        char tz[16] = "null";
+        int32_t offset = weather_ok ? weather.utc_offset_s : wloc.utc_offset_s;
+        if (offset != WEATHER_TZ_UNKNOWN) {
+            snprintf(tz, sizeof(tz), "%d", (int)offset);
+        }
+        snprintf(wx_loc, sizeof(wx_loc),
+                 "{\"name\":\"%s\",\"active\":%d,\"lat\":%.4f,\"lon\":%.4f,"
+                 "\"utc_offset\":%s}",
+                 weather_name, weather_store_get_active(), wloc.lat, wloc.lon, tz);
+    }
+
+    char wx_cur[352] = "null";
+    if (weather_ok) {
+        snprintf(wx_cur, sizeof(wx_cur),
+                 "{\"temp\":%.1f,\"feels\":%.1f,\"tmin\":%.1f,\"tmax\":%.1f,"
+                 "\"hum\":%.0f,\"press\":%.1f,\"press_msl\":%.1f,\"uvi\":%.2f,"
+                 "\"wind\":%.1f,\"gust\":%.1f,\"wind_dir\":%d,\"precip\":%.2f,"
+                 "\"clouds\":%d,\"code\":%d,\"elev\":%.0f,\"age\":%d}",
+                 weather.temp_c, weather.feels_c, weather.temp_min_c,
+                 weather.temp_max_c, weather.humidity_pct, weather.pressure_hpa,
+                 weather.pressure_msl_hpa, weather.uvi, weather.wind_kmh,
+                 weather.gust_kmh, weather.wind_dir_deg, weather.precip_mm,
+                 weather.cloud_pct, weather.weather_code, weather.elevation_m,
+                 (int)weather.age_s);
+    }
+
     char time_str[TIMESYNC_STR_LEN];
     timesync_format(time_str, sizeof(time_str));
 
@@ -275,13 +307,44 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     json_num(cl_lux, sizeof(cl_lux), cl.lux_ok, "%.1f", cl.lux);
 
     /* Absent as a whole until three hours of pressure are on record. */
-    forecast_t fc;
-    forecast_get(&fc);
-    char fc_json[64] = "null";
-    if (fc.ok) {
-        snprintf(fc_json, sizeof(fc_json),
-                 "{\"trend\":%d,\"delta_3h\":%.2f,\"code\":%u}", fc.trend,
-                 fc.delta_3h_hpa, fc.code);
+    zambretti_t zb;
+    zambretti_get(&zb);
+    char zb_json[64] = "null";
+    if (zb.ok) {
+        snprintf(zb_json, sizeof(zb_json),
+                 "{\"trend\":%d,\"delta_3h\":%.2f,\"code\":%u}", zb.trend,
+                 zb.delta_3h_hpa, zb.code);
+    }
+
+    /* Computed from the location and the clock alone, so it stands with no
+     * network at all and outlives the weather reading beside it. */
+    sun_info_t sun;
+    char sun_json[224] = "null";
+    if (sun_get(0, &sun)) {
+        char rise[16] = "null", set[16] = "null";
+        if (sun.state == SUN_RISES) {
+            snprintf(rise, sizeof(rise), "%lld", (long long)sun.rise);
+            snprintf(set, sizeof(set), "%lld", (long long)sun.set);
+        }
+        /* A duration, not an instant: the page would otherwise count down
+         * against the browser's clock instead of the station's. */
+        char next[64] = "\"next_in\":null,\"next_is_rise\":null";
+        int32_t in_s;
+        bool is_rise;
+        if (sun_next_event(&in_s, &is_rise)) {
+            snprintf(next, sizeof(next), "\"next_in\":%d,\"next_is_rise\":%s",
+                     (int)in_s, is_rise ? "true" : "false");
+        }
+        double elev = 0;
+        sun_elevation_deg(&elev);
+        snprintf(sun_json, sizeof(sun_json),
+                 "{\"state\":\"%s\",\"rise\":%s,\"set\":%s,\"day_len\":%d,"
+                 "\"up\":%s,\"elev\":%.1f,%s}",
+                 sun.state == SUN_RISES       ? "rises"
+                 : sun.state == SUN_POLAR_DAY ? "polar_day"
+                                              : "polar_night",
+                 rise, set, (int)sun.day_len_s, sun.up ? "true" : "false", elev,
+                 next);
     }
 
     static char json[3072];
@@ -292,7 +355,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"climate\":{"
         "\"temp\":%s,\"rh\":%s,\"co2\":%s,"
         "\"press\":%s,\"press_msl\":%s,\"lux\":%s},"
-        "\"forecast\":%s,"
+        "\"zambretti\":%s,\"sun\":%s,"
         "\"sensors\":{"
         "\"scd40\":{\"ok\":%s,\"co2\":%u,\"temp\":%.1f,\"rh\":%.1f,"
         "\"dew\":%.1f},"
@@ -301,15 +364,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"veml7700\":{\"ok\":%s,"
         "\"lux\":%.1f,\"white_ratio\":%.2f,"
         "\"gain\":\"%s\",\"it\":%u}},"
-        "\"weather\":{\"ok\":%s,\"temp\":%.1f,\"feels\":%.1f,"
-        "\"tmin\":%.1f,\"tmax\":%.1f,"
-        "\"hum\":%.0f,\"press\":%.1f,\"press_msl\":%.1f,"
-        "\"uvi\":%.2f,\"wind\":%.1f,\"gust\":%.1f,"
-        "\"wind_dir\":%d,\"precip\":%.2f,"
-        "\"clouds\":%d,\"code\":%d,"
-        "\"elev\":%.0f,\"utc_offset\":%d,\"age\":%d,"
-        "\"name\":\"%s\",\"active\":%d,"
-        "\"lat\":%.4f,\"lon\":%.4f},"
+        "\"weather\":{\"loc\":%s,\"current\":%s},"
         "\"system\":{"
         "\"uptime\":%lld,\"time\":\"%s\",\"time_synced\":%s,"
         "\"app_version\":\"%s\",\"build\":\"%s %s\",\"idf_ver\":\"%s\","
@@ -324,7 +379,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"altitude\":%d}}",
         sta_json, ap_json,
         cl_temp, cl_rh, cl_co2, cl_press, cl_msl, cl_lux,
-        fc_json,
+        zb_json, sun_json,
         air_ok ? "true" : "false", air.co2_ppm, air.temp_c, air.rh_pct,
         air.dew_c,
         tmp117_ok ? "true" : "false", tmp117.temp_c,
@@ -333,15 +388,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         veml_ok ? "true" : "false",
         veml.lux, veml.white_ratio,
         veml.gain, veml.it_ms,
-        weather_ok ? "true" : "false", weather.temp_c, weather.feels_c,
-        weather.temp_min_c, weather.temp_max_c,
-        weather.humidity_pct, weather.pressure_hpa, weather.pressure_msl_hpa,
-        weather.uvi, weather.wind_kmh, weather.gust_kmh,
-        weather.wind_dir_deg, weather.precip_mm,
-        weather.cloud_pct, weather.weather_code,
-        weather.elevation_m, weather.utc_offset_s, (int)weather.age_s,
-        weather_name, weather_store_get_active(),
-        wloc_ok ? wloc.lat : 0, wloc_ok ? wloc.lon : 0,
+        wx_loc, wx_cur,
         run.uptime_s,
         time_str,
         timesync_is_synced() ? "true" : "false",
@@ -607,6 +654,7 @@ static esp_err_t location_add_post_handler(httpd_req_t *req)
     const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(root, "name"));
     const cJSON *lat = cJSON_GetObjectItem(root, "lat");
     const cJSON *lon = cJSON_GetObjectItem(root, "lon");
+    int was_active = weather_store_get_active();
     esp_err_t err = (name && cJSON_IsNumber(lat) && cJSON_IsNumber(lon))
         ? weather_store_add(name, (float)lat->valuedouble, (float)lon->valuedouble)
         : ESP_ERR_INVALID_ARG;
@@ -616,6 +664,11 @@ static esp_err_t location_add_post_handler(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
                                    err == ESP_ERR_NO_MEM ? "list is full"
                                                          : "bad location");
+    }
+    /* Only when this one became the active location. Adding a second city
+     * must not drop the reading the first one is being shown with. */
+    if (weather_store_get_active() != was_active) {
+        weather_api_refresh();
     }
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }

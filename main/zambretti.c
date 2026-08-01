@@ -1,4 +1,4 @@
-#include "forecast.h"
+#include "zambretti.h"
 
 #include <string.h>
 #include <time.h>
@@ -25,7 +25,7 @@
 #define CACHE_US (15 * 1000000LL)
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
-static forecast_t s_cache;
+static zambretti_t s_cache;
 static int64_t s_cache_us;
 
 /* Zambretti: a pressure ladder per tendency, each step one of the 26 wordings.
@@ -110,7 +110,7 @@ static bool is_winter(void)
     return NORTHERN_HEMISPHERE ? !apr_to_sep : apr_to_sep;
 }
 
-static uint8_t zambretti(float msl_hpa, int8_t trend)
+static uint8_t select_code(float msl_hpa, int8_t trend)
 {
     const int16_t *ladder;
     const char *codes;
@@ -191,7 +191,7 @@ static bool fit_slope(float *slope_hpa_min)
     return true;
 }
 
-static void compute(forecast_t *out)
+static void compute(zambretti_t *out)
 {
     memset(out, 0, sizeof(*out));
 
@@ -206,11 +206,11 @@ static void compute(forecast_t *out)
      * applies to the change as it does to the reading. */
     out->delta_3h_hpa = climate_to_sea_level(slope * WINDOW_MIN);
     out->trend = classify(out->delta_3h_hpa);
-    out->code = zambretti(c.press_msl_hpa, out->trend);
+    out->code = select_code(c.press_msl_hpa, out->trend);
     out->ok = true;
 }
 
-void forecast_get(forecast_t *out)
+void zambretti_get(zambretti_t *out)
 {
     int64_t now = esp_timer_get_time();
 
@@ -232,12 +232,12 @@ void forecast_get(forecast_t *out)
     taskEXIT_CRITICAL(&s_lock);
 }
 
-const char *forecast_code_str(uint8_t code)
+const char *zambretti_code_str(uint8_t code)
 {
     return code < 26 ? TEXT[code] : "";
 }
 
-const char *forecast_code_short(uint8_t code)
+const char *zambretti_code_short(uint8_t code)
 {
     return code < 26 ? TEXT_SHORT[code] : "";
 }

@@ -11,7 +11,7 @@
 void screen_16x2_init(void);
 
 /* Wired to a short press of the BOOT button; safe to call from any task. Does
- * nothing while the Wi-Fi or OTA page is up. */
+ * nothing while the OTA page is up. */
 void screen_16x2_next_page(void);
 
 /* Backlight colour as 0xRRGGBB, applied as-is. Persisted; effective next

@@ -82,7 +82,7 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   `0x60` / `0x30` / `0x6B` / `0x2D` the board revision uses. Redrawn at 10 fps;
   an absent panel is re-probed every 5 s. Text is ASCII-only — the ROM has no
   Cyrillic and other bytes show as `?`, the exceptions being the degree sign
-  (`\xDF`) and the solid block (`\xFF`). Five pages, advanced by a short BOOT
+  (`\xDF`) and the solid block (`\xFF`). Six pages, advanced by a short BOOT
   click and remembered in NVS (`settings/screen_page`):
 
   | Page | Rows |
@@ -90,7 +90,8 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   | indoor + headline | `23.46° 45% 1250` / `12.3°  Overcast` |
   | indoor precise | `23.46° 16.8 1250` / `1013.250  999.9x` |
   | outdoor detail | `12.3° 8..17 C3` / `78% 1013 NW15 U3` |
-  | forecast | `1013.2 hPa v2.1` / `Chgable, rain` |
+  | zambretti | `1013.2 hPa v2.1` / `Chgable, rain` |
+  | sun | `Day 05:25 20:59` / `Sun+32.4° v13:45` |
   | system | `17:27:40 28.07` / `12% 184k BL184` |
 
   Sixteen characters are the whole constraint: the humidity is whole percent on
@@ -99,13 +100,12 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   1000 lx, then drops to whole lux and to kilolux — the one place in the
   firmware that shows fewer digits than the standard resolution.
 
-  Two pages outside that rotation pre-empt whatever is selected; the button
-  cannot reach them and neither is stored, so the chosen page returns.
-  - Wi-Fi connect — `Wi-Fi connect...` / `HomeNetwork`, only the **first**
-    connection after a restart. Once the station associates, or the round-robin
-    gives up, it steps aside for good and a later drop is reported by the LED
+  One page outside that rotation pre-empts whatever is selected; the button
+  cannot reach it and it is not stored, so the chosen page returns.
   - OTA update — `Updating...  67%` over a progress bar, one cell per 6.25 %.
     Stays at 100 % until the reboot, disappears on a failed upload
+
+  Wi-Fi state is reported by the LED only.
 
   The backlight color is stored as plain RGB (NVS `bl_rgb`, default `00AAFF`) —
   the device knows nothing about hue or color models. What reaches the panel is
@@ -167,26 +167,39 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   1 d from `/api/history?p=`, re-polled at 2/10/60 s, with a hover crosshair
   and gaps for offline periods. Illuminance is drawn on a **logarithmic** y
   axis.
-- **Forecast** — the station's own barometer only, no network: the Open-Meteo
-  reading belongs to whichever location is selected, possibly another city.
+- **Zambretti forecast** — the station's own barometer only, no network: the
+  Open-Meteo reading belongs to whichever location is selected, possibly
+  another city.
   The **tendency** is a least-squares fit over the last 3 h of the 1 d ring —
   not the difference between its ends, which one outlier or one dropped slot
   would decide — graded 0 / ±1 / ±2 / ±3 at 0.5, 1.5 and 3.5 hPa per 3 h.
   It feeds the **Zambretti** ladder (sea-level pressure, tendency, and a winter
-  step when the clock is set, hemisphere a build constant in `forecast.c`) to
-  one of 26 wordings, carried as a code A…Z with the texts in `forecast.c` and,
+  step when the clock is set, hemisphere a build constant in `zambretti.c`) to
+  one of 26 wordings, carried as a code A…Z with the texts in `zambretti.c`
+  and,
   translated, in `zcode` in `index.html`. Absent until three hours are on
   record — 60 % of the slots filled and spread over at least two of them. Pure
   composition over the history, no task and no state beyond a 15 s cache.
-  Shown on the forecast LCD page and on the pressure card, whose badge is the
+  Shown on the Zambretti LCD page and on the pressure card, whose badge is the
   tendency (arrow repeated once per grade) and whose footer is the wording.
+- **Sun** — sunrise, sunset, day length and the sun's angle above the horizon,
+  from the active location's coordinates and the SNTP clock (NOAA sunrise
+  equation, `sun.c`). No network: unlike the Open-Meteo reading beside it, it
+  survives an outage and a reboot. Within a minute of the USNO tables in
+  temperate latitudes, a few minutes past 60° where the sun grazes the horizon.
+  Polar day and polar night are a state of their own, not missing data. Needs
+  only a clock and a location: the times are absolute (unix UTC), and the
+  offset — which a location has only after its first fetch — is what turns them
+  into wall-clock time. Without it the angle, the day's length and the countdown
+  still stand and only the two clock times read `--:--`. Shown as a line on the
+  weather card and on its own LCD page, which counts down to the next crossing.
 - **Telegram notifications** — push-only bot: welcome on boot, IP change, and
   air alerts from the SCD40 — CO₂ crossing 800/1200 ppm (±25 ppm hysteresis),
   temperature drift ≥2 °C, humidity drift ≥10 %. Token and chat id are
   compile-time constants in `telegram.c`; left empty, the module disables
   itself.
 - **Outside weather (Open-Meteo)** — the active location fetched over HTTPS
-  once an hour, no API key, default `best_match` model. Temperature and
+  every 15 min, no API key, default `best_match` model. Temperature and
   apparent temperature, humidity, surface and sea-level pressure, UV index,
   cloud cover, wind speed / gusts / direction, precipitation and the WMO code,
   plus today's min/max from `daily`; `timezone=auto` yields
@@ -194,16 +207,20 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   A request that never reached the API (DNS, TLS, timeout) is retried after
   15 s, then 30, 60, … up to 5 min; a reply that arrived but was unusable waits
   the full 5 min. The cached reading survives a failed fetch (age in
-  `weather.age`) and is dropped once it passes an hour.
+  `weather.current.age`) and is dropped once it passes an hour, whether the
+  fetch failed or the link never came up.
   The API carries the code, not the text: the device decodes it with
   `weather_api_code_str()` and the web UI with its own table (`wcode` in
   `index.html`) — the English wordings are identical and an edit to one belongs
   in the other. `weather_api_code_short()` is a third table, abbreviated to the
   10 characters the 16x2 panel leaves next to the outdoor temperature.
-- **Weather locations** — up to 10 named `{name, lat, lon}` plus the active
-  index in NVS. Empty on first boot: until one is added the card stays empty
-  and no fetch is made. Switching wakes the fetch task via
-  `weather_api_refresh()`.
+- **Weather locations** — up to 10 named `{name, lat, lon, utc_offset}` plus the
+  active index in NVS. Empty on first boot: until one is added the card stays
+  empty and no fetch is made. The first location added becomes the active one.
+  Switching, deleting, and that first add wake the fetch task via
+  `weather_api_refresh()`. The offset is filled from the first successful fetch
+  and rewritten only when it changes, so the display clock is right after a
+  reboot and through an outage, without a reading to read it from.
 - **SNTP** — UTC from `pool.ntp.org`; until the first sync `system.time` is
   dashes.
 
@@ -235,7 +252,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `sensors/bmp581.c` | address auto-detection, chip-ID check, soft reset out of deep standby, DSP/IIR + OSR/ODR setup, 6-byte burst read |
 | `sensors/veml7700.c` | command registers, auto-ranging table with its settle deadline, lux conversion with the >1000 lx correction, white/ALS ratio |
 | `sysinfo.c` | the station's own health: a boot-time snapshot of what cannot change plus live counters, the SoC temperature sensor, reset reason. CPU load is measured in one 1 s window shared by all callers |
-| `ui/screen_16x2.c` | five button-advanced pages plus two conditional ones that pre-empt them, 10 fps loop, backlight dimmed to the ambient light. Sized for 16x2 |
+| `ui/screen_16x2.c` | six button-advanced pages plus the OTA one that pre-empts them, 10 fps loop, backlight dimmed to the ambient light. Sized for 16x2 |
 | `ui/lcd1602_rgb.c` | DFR0464 transport: character output, backlight registers, revision detection, hot-plug recovery. The only file tied to this display |
 | `timesync.c` | SNTP client; `timesync_is_synced()` and `timesync_format()` |
 | `sensors/climate.c` | the room-level view over the devices, plus the reduction to sea level and the site-altitude setting. Its header carries the reading resolutions |
@@ -243,8 +260,9 @@ card belongs in that device's module, not in the caller — dew point in
 | `storage.c` | mounts the LittleFS `storage` partition at `/data` |
 | `telegram.c` | message queue + sender task; `telegram_notify(fmt, ...)` |
 | `weather_api.c` | Open-Meteo client; own task fetches the active location hourly, `weather_api_refresh()` forces a reload |
-| `weather_store.c` | saved locations + active index in NVS (`weather_loc`), mutex-protected |
-| `forecast.c` | 3 h barometric tendency fitted over the 1 d ring, and the Zambretti wording it selects with the sea-level pressure |
+| `weather_store.c` | saved locations + their UTC offset + active index in NVS (`weather_loc`), mutex-protected |
+| `sun.c` | sunrise/sunset/elevation for the active location; `sun_next_event()` is the countdown the display shows |
+| `zambretti.c` | 3 h barometric tendency fitted over the 1 d ring, and the Zambretti wording it selects with the sea-level pressure |
 | `alerts.c` | notification rules and thresholds; own task polls every 10 s |
 | `settings.c` | thin u8/u32/i32 get/set over the NVS namespace `settings` |
 
@@ -253,7 +271,7 @@ card belongs in that device's module, not in the caller — dew point in
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (gzipped) |
-| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`), `forecast` (`trend` −3…+3, `delta_3h`, Zambretti `code`; `null` until three hours of pressure are recorded), `weather`, `system`, `settings` (`led_brightness`, `backlight_rgb`, read-only `backlight_scale`, `altitude`) |
+| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system`, `settings` (`led_brightness`, `backlight_rgb`, read-only `backlight_scale`, `altitude`) |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`); `{period, co2, temp, rh, press, lux}`, each series gated on its own quantity so `null` is a gap in that series alone. `press` comes out reduced to sea level |
 | `/api/history/reset` | POST | wipe all tiers, RAM rings and flash snapshots |
 | `/api/scan` | GET | Wi-Fi scan, `[{ssid, bssid, ch, rssi, auth}]`, one entry per BSSID |

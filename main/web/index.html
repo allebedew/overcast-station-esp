@@ -1095,6 +1095,7 @@
                      the decoded conditions; the full set of tiles is always
                      laid out, data or not -->
                 <div class="weather-grid" id="weatherGrid"></div>
+                <div class="weather-meta" id="sunMeta"></div>
                 <div class="weather-meta" id="weatherMeta"></div>
             </div>
 
@@ -1388,6 +1389,8 @@
                     uMeters: "м",
                     weatherAgo: "обновлено {n} назад",
                     weatherWait: "ожидание данных…",
+                    sunPolarDay: "полярный день",
+                    sunPolarNight: "полярная ночь",
                     sensorsTitle: "Датчики",
                     sensOk: "Работает",
                     sensOff: "Нет ответа",
@@ -1414,7 +1417,7 @@
                     locRemoved: "Локация удалена: {name}",
                     locDelConfirm: "Удалить локацию «{name}»?",
                     locLast: "Нельзя удалить последнюю локацию",
-                    compass: ["С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ"],
+                    compass: ["С", "В", "Ю", "З"],
                     wcode: {
                         0: "Ясно",
                         1: "Преимущественно ясно",
@@ -1593,6 +1596,8 @@
                     uMeters: "m",
                     weatherAgo: "updated {n} ago",
                     weatherWait: "waiting for data…",
+                    sunPolarDay: "polar day",
+                    sunPolarNight: "polar night",
                     sensorsTitle: "Sensors",
                     sensOk: "Online",
                     sensOff: "No response",
@@ -1619,7 +1624,7 @@
                     locRemoved: "Location removed: {name}",
                     locDelConfirm: "Remove location “{name}”?",
                     locLast: "Can't remove the last location",
-                    compass: ["N", "NE", "E", "SE", "S", "SW", "W", "NW"],
+                    compass: ["N", "E", "S", "W"],
                     /* Kept word for word in sync with weather_api_code_str()
                        in the firmware, which is what the 16x2 panel shows —
                        the two used to word the same code differently. Editing
@@ -1654,7 +1659,7 @@
                         96: "Thunderstorm, hail",
                         99: "Thunderstorm, heavy hail",
                     },
-                    /* The Zambretti wordings, in the order forecast.c lists
+                    /* The Zambretti wordings, in the order zambretti.c lists
                        them (code 0 = A). Same rule as wcode: the firmware
                        carries the English for Telegram and the panel, so an
                        edit here belongs there too. */
@@ -1883,9 +1888,29 @@
                 return `${Math.max(1, m)} ${t("uM")}`;
             }
 
-            /* Meteorological degrees → localized 8-point compass label. */
+            /* Unix UTC + the location's offset → "HH:MM" where the sun rises,
+             * which is not necessarily where the browser is. */
+            function fmtClock(unix, off) {
+                const d = new Date((unix + off) * 1000);
+                return (
+                    String(d.getUTCHours()).padStart(2, "0") +
+                    ":" +
+                    String(d.getUTCMinutes()).padStart(2, "0")
+                );
+            }
+
+            /* Seconds → "15h 34m". Under an hour the hours go, not shown as a
+             * zero: a winter day near the arctic circle lasts minutes. */
+            function fmtSpan(s) {
+                const h = Math.floor(s / 3600),
+                    m = Math.floor(s / 60) % 60;
+                return h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
+            }
+
+            /* Meteorological degrees → one localized letter, so the tile keeps
+             * the direction to a single glyph: 4 points, ±45° each. */
             function windDir(deg) {
-                return t("compass")[Math.round(deg / 45) % 8];
+                return t("compass")[Math.round(deg / 90) % 4];
             }
 
             /* UTC offset in seconds → "UTC+2" / "UTC+5.5" / "UTC-3". */
@@ -2140,11 +2165,14 @@
             }
 
             function renderWeather(w) {
-                const ok = !!w.ok;
+                /* Two nullable halves: the saved place and the reading fetched
+                 * for it. An empty stand-in makes every field read as absent. */
+                const c = w.current || {};
+                const l = w.loc || {};
                 const live = (v) =>
-                    ok && typeof v === "number" && Number.isFinite(v) ? v : null;
+                    typeof v === "number" && Number.isFinite(v) ? v : null;
                 WEATHER_TILES.forEach((m) => {
-                    const vals = (m.src || [m.k]).map((k) => live(w[k]));
+                    const vals = (m.src || [m.k]).map((k) => live(c[k]));
                     const have = vals.every((v) => v !== null);
                     $("wx_" + m.k).textContent = have ? m.f(...vals) : NA;
                     if (m.uf)
@@ -2158,7 +2186,7 @@
                 /* the phrase is the reading; the bare WMO number goes to the
                  * label, where it documents the phrase without competing
                  * with it */
-                const code = live(w.code);
+                const code = live(c.code);
                 const wtext = code === null ? "" : t("wcode")[code] || "";
                 $("weatherCond").textContent =
                     wtext || (code !== null && code >= 0 ? String(code) : "—");
@@ -2167,19 +2195,54 @@
                         ? `${t("weatherCondCode")}: ${code}`
                         : t("weatherCondLabel");
 
-                $("weatherMeta").textContent = ok
-                    ? `${t("weatherAlt")} ${num(live(w.elev), Math.round)} ` +
-                      `${t("uMeters")} · lat ${num(live(w.lat), (v) => v.toFixed(2))}` +
-                      `, lon ${num(live(w.lon), (v) => v.toFixed(2))}` +
-                      ` · ${num(live(w.utc_offset), fmtUtc)}`
-                    : "—";
+                /* The coordinates and the zone describe the stored location,
+                 * so they outlive the reading; the elevation comes from the
+                 * reply and goes with it. */
+                const coord = (v) => v.toFixed(2);
+                $("weatherMeta").textContent =
+                    `${t("weatherAlt")} ${num(live(c.elev), Math.round)} ` +
+                    `${t("uMeters")} · lat ${num(l.lat, coord)}` +
+                    `, lon ${num(l.lon, coord)}` +
+                    ` · ${num(l.utc_offset, fmtUtc)}`;
 
-                const age = live(w.age);
-                $("weatherAge").textContent = !ok
+                const age = live(c.age);
+                $("weatherAge").textContent = !w.current
                     ? t("weatherWait")
                     : age !== null && age >= 0
                       ? t("weatherAgo").replace("{n}", fmtAgo(age))
                       : "";
+            }
+
+            /*   Sun: ↑05:25 · ↓20:59 · 15h 34m · +32.4° · ↓ in 8h 32m
+             * One line, not tiles: four related facts about the day rather than
+             * four readings. Only the two clock times need the offset. */
+            function renderSun(s, loc) {
+                const el = $("sunMeta");
+                if (!s) {
+                    el.textContent = "—";
+                    return;
+                }
+                const off = loc.utc_offset;
+                const clock = (v) =>
+                    typeof off === "number" ? fmtClock(v, off) : NA;
+                const angle = num(
+                    s.elev,
+                    (v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}°`,
+                );
+                /* Counted by the device against its synced clock, so it is not
+                 * at the mercy of the browser's. */
+                const next =
+                    typeof s.next_in === "number"
+                        ? ` · ${s.next_is_rise ? "↑" : "↓"} in ${fmtSpan(s.next_in)}`
+                        : "";
+                el.textContent =
+                    "Sun: " +
+                    (s.state === "rises"
+                        ? `↑${clock(s.rise)} · ↓${clock(s.set)} · ` +
+                          `${fmtSpan(s.day_len)} · ${angle}${next}`
+                        : `${t(
+                              s.state === "polar_day" ? "sunPolarDay" : "sunPolarNight",
+                          )} · ${angle}`);
             }
 
             /* ---------- toast ---------- */
@@ -2329,6 +2392,7 @@
                 });
 
                 renderWeather(s.weather || {});
+                renderSun(s.sun, (s.weather && s.weather.loc) || {});
                 renderSensors(sn);
 
                 /* system card: Wi-Fi station and access point shown as
@@ -2551,12 +2615,12 @@
                      * window: three hours by definition, so it must not follow
                      * the 5 m / 1 h / 1 d segment. The arrow repeats with the
                      * grade — one head slow, three rapid. */
-                    badge: (cl, s) => trendBadge(s.forecast),
+                    badge: (cl, s) => trendBadge(s.zambretti),
                     footer: (cl, s) =>
-                        s.forecast
+                        s.zambretti
                             ? {
-                                  text: t("zcode")[s.forecast.code],
-                                  cls: trendBadge(s.forecast).cls,
+                                  text: t("zcode")[s.zambretti.code],
+                                  cls: trendBadge(s.zambretti).cls,
                               }
                             : null,
                 },

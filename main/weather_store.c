@@ -74,16 +74,27 @@ esp_err_t weather_store_add(const char *name, float lat, float lon)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     int i;
     for (i = 0; i < s_count && strcmp(s_locations[i].name, name) != 0; i++) {}
-    if (i == s_count) {
+    bool fresh = i == s_count;
+    if (fresh) {
         if (s_count == WEATHER_MAX_LOCATIONS) {
             xSemaphoreGive(s_lock);
             return ESP_ERR_NO_MEM;
         }
         s_count++;
     }
+    /* Re-adding the same place keeps the offset it already learned; moved
+     * coordinates are a different place and may be in another zone. */
+    if (fresh || s_locations[i].lat != lat || s_locations[i].lon != lon) {
+        s_locations[i].utc_offset_s = WEATHER_TZ_UNKNOWN;
+    }
     strlcpy(s_locations[i].name, name, sizeof(s_locations[i].name));
     s_locations[i].lat = lat;
     s_locations[i].lon = lon;
+    /* Nothing else would select it: on an empty store the first location has
+     * to become the active one, or no weather is ever fetched. */
+    if (s_active < 0) {
+        s_active = i;
+    }
     save();
     xSemaphoreGive(s_lock);
 
@@ -161,4 +172,25 @@ bool weather_store_get_active_location(weather_location_t *out)
     }
     xSemaphoreGive(s_lock);
     return ok;
+}
+
+void weather_store_set_offset(const char *name, int32_t offset_s)
+{
+    if (!name) {
+        return;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    /* By name, not by index: the list may have shifted while the fetch ran.
+     * A location deleted meanwhile is simply not found. */
+    for (int i = 0; i < s_count; i++) {
+        if (strcmp(s_locations[i].name, name) == 0) {
+            if (s_locations[i].utc_offset_s != offset_s) {
+                s_locations[i].utc_offset_s = offset_s;
+                save();
+                ESP_LOGI(TAG, "\"%s\" UTC offset %+d s", name, (int)offset_s);
+            }
+            break;
+        }
+    }
+    xSemaphoreGive(s_lock);
 }

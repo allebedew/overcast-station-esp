@@ -35,8 +35,9 @@ void weather_api_refresh(void);
  * failed one; *out is left as the last known values. */
 bool weather_api_get(weather_api_data_t *out);
 
-/* The active location's UTC offset, 0 while there is no reading. Separate from
- * weather_api_get() so the display clock need not copy the struct per frame. */
+/* The active location's UTC offset: the live reading, else the one stored with
+ * the location, else 0. Separate from weather_api_get() so the display clock
+ * need not copy the struct per frame. */
 int weather_api_utc_offset_s(void);
 
 /* English description of a WMO weather code. Never NULL. */

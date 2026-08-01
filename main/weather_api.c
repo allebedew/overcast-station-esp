@@ -77,7 +77,7 @@ static float jarr0(const cJSON *arr, float dflt)
     return cJSON_IsNumber(it) ? (float)it->valuedouble : dflt;
 }
 
-static bool parse(const char *json)
+static bool parse(const char *json, const weather_location_t *loc)
 {
     cJSON *root = cJSON_Parse(json);
     if (!root) {
@@ -121,6 +121,9 @@ static bool parse(const char *json)
         s_updated_us = esp_timer_get_time();
         taskEXIT_CRITICAL(&s_lock);
         ok = true;
+        /* Outlives the reading: the zone is a property of the place, so the
+         * clock stays right through an outage and across a reboot. */
+        weather_store_set_offset(loc->name, d.utc_offset_s);
         ESP_LOGI(TAG,
                  "updated: %.1f C (feels %.1f, %.1f..%.1f), %.0f%%, %.1f/%.1f hPa, "
                  "UVI %.2f, wind %.1f (gust %.1f) km/h @%d, clouds %d%%, "
@@ -188,7 +191,7 @@ static fetch_result_t fetch(const weather_location_t *loc)
     }
     /* http_event keeps len < cap, so this NUL is always in bounds */
     ctx.buf[ctx.len] = '\0';
-    return parse(ctx.buf) ? FETCH_OK : FETCH_REJECTED;
+    return parse(ctx.buf, loc) ? FETCH_OK : FETCH_REJECTED;
 }
 
 /* Milliseconds since the last successful fetch, UINT32_MAX if there was none. */
@@ -241,11 +244,13 @@ static void weather_api_task(void *arg)
                 retry_ms = WEATHER_API_FIRST_RETRY_MS;
                 break;
             }
-            /* A reading outlives a failed fetch, carrying its age, but past
-             * MAX_AGE it is yesterday's weather and better shown as nothing. */
-            if (age_ms() > WEATHER_API_MAX_AGE_MS) {
-                invalidate();
-            }
+        }
+        /* A reading outlives a failed fetch, carrying its age, but past
+         * MAX_AGE it is yesterday's weather and better shown as nothing.
+         * Outside the branch: why it was not refreshed — the API, or a link
+         * that never came up — does not make it any less stale. */
+        if (age_ms() > WEATHER_API_MAX_AGE_MS) {
+            invalidate();
         }
         /* weather_api_refresh() cuts the wait short on a location change. */
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms));
@@ -283,9 +288,20 @@ bool weather_api_get(weather_api_data_t *out)
 int weather_api_utc_offset_s(void)
 {
     taskENTER_CRITICAL(&s_lock);
-    int offset = s_valid ? s_data.utc_offset_s : 0;
+    bool valid = s_valid;
+    int offset = s_data.utc_offset_s;
     taskEXIT_CRITICAL(&s_lock);
-    return offset;
+    if (valid) {
+        return offset;
+    }
+    /* No reading yet, or the last one expired: what a past fetch stored is
+     * still right, bar the hours around a DST switch. */
+    weather_location_t loc;
+    if (weather_store_get_active_location(&loc) &&
+        loc.utc_offset_s != WEATHER_TZ_UNKNOWN) {
+        return loc.utc_offset_s;
+    }
+    return 0;
 }
 
 const char *weather_api_code_str(int code)
