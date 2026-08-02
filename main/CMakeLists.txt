@@ -17,10 +17,13 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             "sensors/i2c_dev.c" "sensors/scd40.c"
                             "sensors/tmp117.c" "sensors/bmp581.c"
                             "sensors/veml7700.c"
-                       INCLUDE_DIRS "." "sensors" "ui" "web"
+                            # the mmWave tracker, on its own UART
+                            "radar/ld2450.c"
+                       INCLUDE_DIRS "." "sensors" "ui" "web" "radar"
                        PRIV_REQUIRES esp_wifi esp_netif esp_event nvs_flash
                                      esp_http_server esp_http_client mbedtls
                                      esp_driver_tsens esp_driver_i2c
+                                     esp_driver_uart
                                      esp_app_format spi_flash json app_update)
 
 # Web assets are embedded pre-compressed and served with Content-Encoding: gzip

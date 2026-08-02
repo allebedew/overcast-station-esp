@@ -1,5 +1,8 @@
 # Project rules
 
+- **Do not start implementing until the user confirms.** Investigate, then
+  describe what you intend to change — files, approach, anything ambiguous —
+  and wait for an explicit go-ahead before the first edit.
 - Code comments, commit messages and in-repo docs: **English**.
   Conversation with the user: **Russian**.
   (Comments written before 2026-07-17 are in Russian — translate them

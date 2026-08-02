@@ -22,6 +22,7 @@
 #include "led.h"
 #include "ota.h"
 #include "screen_16x2.h"
+#include "ld2450.h"
 #include "sensors.h"
 #include "sysinfo.h"
 #include "timesync.h"
@@ -252,6 +253,26 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     veml7700_data_t veml = { .gain = "" };
     bool veml_ok = sensors_veml7700_get(&veml);
 
+    /* Not on the I2C bus, so it sits beside `sensors` rather than in it. The
+     * targets go out as coordinates because the page plots them; the distance
+     * to the nearest is the module's own arithmetic and goes out once. */
+    ld2450_data_t radar;
+    char radar_json[192] = "null";
+    if (ld2450_get(&radar)) {
+        jbuf_t r;
+        jbuf_init(&r, radar_json, sizeof(radar_json));
+        char near[16];
+        json_num(near, sizeof(near), radar.count > 0, "%.2f", radar.nearest_m);
+        jbuf_printf(&r, "{\"presence\":%s,\"near\":%s,\"targets\":[",
+                    radar.presence ? "true" : "false", near);
+        for (int i = 0; i < radar.count; i++) {
+            const ld2450_target_t *t = &radar.targets[i];
+            jbuf_printf(&r, "%s{\"x\":%d,\"y\":%d}", i ? "," : "", t->x_mm,
+                        t->y_mm);
+        }
+        jbuf_printf(&r, "]}");
+    }
+
     weather_api_data_t weather;
     bool weather_ok = weather_api_get(&weather);
 
@@ -353,7 +374,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
                  sun_phase_str(sun_phase_of(elev)), next);
     }
 
-    static char json[3072];
+    static char json[3584];
     jbuf_t j;
     jbuf_init(&j, json, sizeof(json));
     jbuf_printf(&j,
@@ -370,6 +391,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"veml7700\":{\"ok\":%s,"
         "\"lux\":%.1f,\"white_ratio\":%.2f,"
         "\"gain\":\"%s\",\"it\":%u}},"
+        "\"radar\":%s,"
         "\"weather\":{\"loc\":%s,\"current\":%s},"
         "\"system\":{"
         "\"uptime\":%lld,\"time\":\"%s\",\"time_synced\":%s,"
@@ -394,6 +416,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         veml_ok ? "true" : "false",
         veml.lux, veml.white_ratio,
         veml.gain, veml.it_ms,
+        radar_json,
         wx_loc, wx_cur,
         run.uptime_s,
         time_str,
@@ -417,7 +440,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
 }
 
 /* History as arrays per metric (null = gap); ?p=5m|1h|1d selects the ring
- * (default 1d). Up to ~20 KB, so it is streamed in chunks. */
+ * (default 1d). Tens of KB, so it is streamed in chunks. */
 static esp_err_t history_get_handler(httpd_req_t *req)
 {
     history_tier_t tier = HISTORY_1D;
@@ -438,16 +461,21 @@ static esp_err_t history_get_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
 
     /* Each array is gated on its own bit: a sensor absent for part of the
-     * window leaves nulls only in its own series. */
+     * window leaves nulls only in its own series. The three radar series share
+     * one bit, so the field to read comes from `id` rather than from the bit. */
+    enum { S_CO2, S_TEMP, S_RH, S_PRESS, S_LUX, S_TARGETS, S_NEAR };
     static const struct {
         const char *name;
         uint8_t bit;
+        uint8_t id;
     } series[] = {
-        { "co2",   HISTORY_HAS_CO2 },
-        { "temp",  HISTORY_HAS_TEMP },
-        { "rh",    HISTORY_HAS_RH },
-        { "press", HISTORY_HAS_PRESS },
-        { "lux",   HISTORY_HAS_LUX },
+        { "co2",     HISTORY_HAS_CO2,   S_CO2 },
+        { "temp",    HISTORY_HAS_TEMP,  S_TEMP },
+        { "rh",      HISTORY_HAS_RH,    S_RH },
+        { "press",   HISTORY_HAS_PRESS, S_PRESS },
+        { "lux",     HISTORY_HAS_LUX,   S_LUX },
+        { "targets", HISTORY_HAS_RADAR, S_TARGETS },
+        { "near",    HISTORY_HAS_RADAR, S_NEAR },
     };
 
     jbuf_t j;
@@ -460,22 +488,34 @@ static esp_err_t history_get_handler(httpd_req_t *req)
             history_point_t p;
             char val[16] = "null";
             if (history_get(tier, i, &p) && (p.have & series[m].bit)) {
-                switch (series[m].bit) {
-                case HISTORY_HAS_CO2:
+                switch (series[m].id) {
+                case S_CO2:
                     snprintf(val, sizeof(val), "%u", p.co2_ppm);
                     break;
-                case HISTORY_HAS_TEMP:
+                case S_TEMP:
                     snprintf(val, sizeof(val), "%.2f", p.temp_cx100 / 100.0);
                     break;
-                case HISTORY_HAS_RH:
+                case S_RH:
                     snprintf(val, sizeof(val), "%.1f", p.rh_dpct / 10.0);
                     break;
-                case HISTORY_HAS_PRESS:
+                case S_PRESS:
                     /* Stored as measured, served reduced to sea level: a later
                      * correction to the site altitude re-reduces the whole
                      * history correctly. */
                     snprintf(val, sizeof(val), "%.3f",
                              climate_to_sea_level(p.press_mhpa / 1000.0f));
+                    break;
+                case S_TARGETS:
+                    snprintf(val, sizeof(val), "%u",
+                             HISTORY_RADAR_TARGETS(p.radar));
+                    break;
+                case S_NEAR:
+                    /* An empty fan is a gap in this series alone — the room was
+                     * recorded, there was simply no distance to record. */
+                    if (HISTORY_RADAR_STEPS(p.radar)) {
+                        snprintf(val, sizeof(val), "%.2f",
+                                 HISTORY_RADAR_NEAR_M(p.radar));
+                    }
                     break;
                 default:
                     snprintf(val, sizeof(val), "%.1f", p.lux);

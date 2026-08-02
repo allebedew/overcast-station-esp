@@ -1,77 +1,48 @@
 #include "alerts.h"
 
-#include <math.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_mac.h"
-#include "esp_netif.h"
+#include "esp_timer.h"
+#include "ld2450.h"
 #include "sensors.h"
-#include "sysinfo.h"
 #include "telegram.h"
-#include "wifi.h"
 
 /* --- rules & thresholds ------------------------------------------------- */
 
-#define CHECK_PERIOD_MS 10000
+#define TICK_MS       1000
+#define AIR_PERIOD_MS 10000 /* CO2 moves slowly; presence needs every tick */
 
-/* CO2 zones: 0 = fresh (<800), 1 = stale (800..1200), 2 = bad (>1200). The
- * hysteresis margin keeps sensor noise from flapping around a threshold. */
-static const int CO2_THRESHOLDS[] = { 500, 800, 1200 };
+/* CO2 zones: fresh (<800), stale (800..1200), bad (1200..2000), alarming
+ * (>2000). The hysteresis margin keeps sensor noise from flapping around a
+ * threshold. */
+static const int CO2_THRESHOLDS[] = { 800, 1200, 2000 };
+#define CO2_ZONES (sizeof(CO2_THRESHOLDS) / sizeof(CO2_THRESHOLDS[0]))
 #define CO2_HYST_PPM 25
 
-/* Report temperature/humidity when they drift this far from the last
- * reported value. */
-#define TEMP_DELTA_C 2.0f
-#define RH_DELTA_PCT 10.0f
+static const char *const CO2_EMOJI[] = { "✅", "⚠️", "🔴", "🚨" };
+
+/* The radar loses whoever sits still, so an absence counts only after it has
+ * outlasted plausible motionless sitting. Arrival needs far less: its own
+ * presence flag is already held for seconds, and this only rejects a lone
+ * spurious frame. */
+#define ARRIVE_CONFIRM_MS 3000
+#define LEAVE_CONFIRM_MS  (5 * 60 * 1000)
 
 /* ------------------------------------------------------------------------ */
 
-static bool get_sta_ip(esp_ip4_addr_t *ip)
+static int64_t now_ms(void)
 {
-    if (!wifi_is_connected()) {
-        return false;
-    }
-    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    esp_netif_ip_info_t info;
-    if (!netif || esp_netif_get_ip_info(netif, &info) != ESP_OK) {
-        return false;
-    }
-    *ip = info.ip;
-    return ip->addr != 0;
-}
-
-/* Welcome message on the first IP after boot, then one per IP change. */
-static void check_ip(void)
-{
-    static bool online;
-    static esp_ip4_addr_t last_ip;
-
-    esp_ip4_addr_t ip;
-    if (!get_sta_ip(&ip)) {
-        return;
-    }
-    if (!online) {
-        online = true;
-        wifi_info_t wifi;
-        wifi_get_info(&wifi);
-        telegram_notify("Станция запущена: чип %.1f °C, IP " IPSTR
-                        ", BSSID " MACSTR ", канал %d, RSSI %d дБм",
-                        sysinfo_chip_temp_c(), IP2STR(&ip), MAC2STR(wifi.sta_bssid),
-                        wifi.channel, wifi.rssi);
-    } else if (ip.addr != last_ip.addr) {
-        telegram_notify("IP изменился: " IPSTR " → " IPSTR,
-                        IP2STR(&last_ip), IP2STR(&ip));
-    }
-    last_ip = ip;
+    return esp_timer_get_time() / 1000;
 }
 
 /* Leaving a zone requires clearing its threshold by the hysteresis margin. */
 static int co2_zone(int ppm, int prev)
 {
     int z = prev;
-    while (z < 2 && ppm > CO2_THRESHOLDS[z] + CO2_HYST_PPM) {
+    while (z < (int)CO2_ZONES && ppm > CO2_THRESHOLDS[z] + CO2_HYST_PPM) {
         z++;
     }
     while (z > 0 && ppm < CO2_THRESHOLDS[z - 1] - CO2_HYST_PPM) {
@@ -82,49 +53,99 @@ static int co2_zone(int ppm, int prev)
 
 static void check_air(void)
 {
-    static bool baseline;
+    static bool armed;
     static int zone;
-    static float last_temp, last_rh;
 
     scd40_data_t d;
     if (!sensors_scd40_get(&d)) {
         return;
     }
-    if (!baseline) { /* first reading only arms the rules */
-        baseline = true;
+    if (!armed) { /* first reading only arms the rule */
+        armed = true;
         zone = co2_zone(d.co2_ppm, 0);
-        last_temp = d.temp_c;
-        last_rh = d.rh_pct;
         return;
     }
 
     int z = co2_zone(d.co2_ppm, zone);
     if (z > zone) {
         telegram_notify("%s CO₂ выше %d ppm: %u",
-                        z == 2 ? "🔴" : "⚠️", CO2_THRESHOLDS[z - 1], d.co2_ppm);
+                        CO2_EMOJI[z], CO2_THRESHOLDS[z - 1], d.co2_ppm);
     } else if (z < zone) {
-        telegram_notify("✅ CO₂ ниже %d ppm: %u", CO2_THRESHOLDS[z], d.co2_ppm);
+        telegram_notify("%s CO₂ ниже %d ppm: %u",
+                        CO2_EMOJI[z], CO2_THRESHOLDS[z], d.co2_ppm);
     }
     zone = z;
+}
 
-    if (fabsf(d.temp_c - last_temp) >= TEMP_DELTA_C) {
-        telegram_notify("🌡 Температура %.1f °C (было %.1f)",
-                        d.temp_c, last_temp);
-        last_temp = d.temp_c;
+static void format_span(char *buf, size_t n, int64_t ms)
+{
+    int min = (int)(ms / 60000);
+    if (min < 1) {
+        snprintf(buf, n, "%d с", (int)(ms / 1000));
+    } else if (min < 60) {
+        snprintf(buf, n, "%d мин", min);
+    } else {
+        snprintf(buf, n, "%d ч %02d мин", min / 60, min % 60);
     }
-    if (fabsf(d.rh_pct - last_rh) >= RH_DELTA_PCT) {
-        telegram_notify("💧 Влажность %.0f %% (было %.0f)",
-                        d.rh_pct, last_rh);
-        last_rh = d.rh_pct;
+}
+
+/* Confirmed arrivals and departures. Both edges are dated by when the raw flag
+ * actually flipped, not by when the confirmation window expired, so the
+ * reported durations exclude the window. */
+static void check_presence(void)
+{
+    static bool armed, occupied, since_boot = true;
+    static int64_t since_ms; /* start of the current confirmed state */
+    static int64_t edge_ms;  /* start of the contradicting run, 0 = none */
+
+    ld2450_data_t r;
+    if (!ld2450_get(&r)) { /* radar silent: state unknown, not empty */
+        return;
     }
+
+    int64_t now = now_ms();
+    if (!armed) {
+        armed = true;
+        occupied = r.presence;
+        since_ms = now;
+        return;
+    }
+    if (r.presence == occupied) {
+        edge_ms = 0;
+        return;
+    }
+    if (!edge_ms) {
+        edge_ms = now;
+        return;
+    }
+    if (now - edge_ms < (occupied ? LEAVE_CONFIRM_MS : ARRIVE_CONFIRM_MS)) {
+        return;
+    }
+
+    char span[24];
+    format_span(span, sizeof(span), edge_ms - since_ms);
+    if (occupied) {
+        telegram_notify("🚪 Ушёл, был здесь %s", span);
+    } else if (since_boot) {
+        telegram_notify("👋 Пришёл");
+    } else {
+        telegram_notify("👋 Пришёл, никого не было %s", span);
+    }
+
+    occupied = !occupied;
+    since_ms = edge_ms;
+    edge_ms = 0;
+    since_boot = false;
 }
 
 static void alerts_task(void *arg)
 {
-    for (;;) {
-        check_ip();
-        check_air();
-        vTaskDelay(pdMS_TO_TICKS(CHECK_PERIOD_MS));
+    for (int tick = 0;; tick++) {
+        check_presence();
+        if (tick % (AIR_PERIOD_MS / TICK_MS) == 0) {
+            check_air();
+        }
+        vTaskDelay(pdMS_TO_TICKS(TICK_MS));
     }
 }
 

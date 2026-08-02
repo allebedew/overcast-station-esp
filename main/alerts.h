@@ -1,5 +1,6 @@
 #pragma once
 
-/* Watches sensor readings and network state and sends Telegram messages when
- * thresholds are crossed. Thresholds are in alerts.c. */
+/* Watches the CO2 level and the radar's presence flag and sends a Telegram
+ * message on a confirmed change. Thresholds and confirmation windows are in
+ * alerts.c. */
 void alerts_init(void);

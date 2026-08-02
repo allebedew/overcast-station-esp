@@ -2,7 +2,7 @@
 
 ESP32-C6 firmware (ESP-IDF 5.5, 16 MB flash). Networking, web UI and OTA are
 done; all four I2C sensors feed `/api/status`, the web page, the LCD and the
-history. The alerts are the only consumer still tied to the SCD40 alone.
+history.
 
 ## Implemented
 
@@ -16,17 +16,21 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   AP ↔ STA reconnect, short click browses the display pages.
 - **Web UI** — single page embedded in the firmware (gzipped at build time),
   `http://weather.local` (mDNS), polled every 1 s, bilingual RU/EN from an
-  in-page dictionary. Six sensor cards (temperature, humidity, dew point, CO₂,
-  pressure, illuminance) with trend, min/max and a sparkline; a card per I2C
-  device with a liveness dot; an outside-weather card with a location chip row (a typed
+  in-page dictionary. Five sensor cards (temperature, humidity, CO₂,
+  pressure, illuminance) with trend, min/max and a sparkline, then two radar
+  cards closing the same grid, each quantity read once: the presence card reads
+  the live distance to the nearest target with the window's largest target count
+  beside it, over a chart of distance as a line and target count as columns and
+  under a badge carrying the live held state, and the radar card reads the
+  number of targets with the nearest target's x/y in metres beside it and
+  plots them instead of charting;
+  a card per I2C device with a liveness dot; an outside-weather card with a location chip row (a typed
   city name is geocoded in-browser, so adding one needs internet on the
   client); system, settings and Wi-Fi cards behind the header gear. Settings:
   LED brightness, backlight color, site altitude, SCD40 FRC, history reset.
   Every reading is a fixed slot generated from the tables at the top of the
   script (`SERIES`, `WEATHER_TILES`, `SENSOR_DEVS`) and renders as `--` when
-  absent — adding a metric is a table entry, not markup, and a `SERIES` entry
-  with `calc`/`derive` instead of `src`/`hist` is computed in the page from the
-  other series rather than read from the device. `badge` replaces a card's
+  absent — adding a metric is a table entry, not markup. `badge` replaces a card's
   trend arrow with a chip (CO₂ level, pressure tendency) and `footer` adds a
   line under its chart (the forecast wording). The altitude field is
   written back from the device only once per page load, so the poll cannot
@@ -77,18 +81,41 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
     ALS and white channels are read, with the Vishay correction above 1000 lx.
     The API reports `lux`, the white/lux ratio as a light-source signature, and
     both raw counts.
+- **mmWave radar (HLK-LD2450)** — UART1 at 256000 8N1, module TX on GPIO10,
+  module RX on GPIO11, 5 V. The tracking stream is unprompted, so the only
+  thing ever sent is one configuration sequence: **Bluetooth off**, which the
+  module ships with on and which serves the same target stream to anyone in
+  range with the vendor's app. Sent once — the module keeps the setting in its
+  own flash and cannot be asked whether Bluetooth is on, so a flag in NVS
+  (`settings/radar_bt_off`) is what spares every later boot the write and the
+  module restart it ends with. Clear it by hand after replacing the module. A
+  module that does not answer is left alone, logged, and retried next boot.
+  A 30-byte frame every ~100 ms
+  carries up to three **moving** targets as x/y/speed; coordinates are
+  sign-magnitude, not two's complement. There is no length field or checksum, so
+  framing is by header and tail alone and resync is a byte at a time. The driver
+  publishes the targets with their distance, the distance to the nearest, and
+  `presence` — the target count held for 5 s, because someone who stops moving
+  drops out of the frame for seconds at a time. Silent for 2 s means offline.
+  Logs under the tag `radar`, and only the stream's state, never the readings:
+  coming up, and going silent — which names the pin and the baud rate, and is
+  the wiring check.
+  Shown on its own web card — a plan view of the fan with a dot per target —
+  on its own LCD page, recorded in the history rings beside the climate
+  quantities, and `presence` is what lights the panel.
 - **16x2 LCD** (DFRobot Gravity I2C LCD1602 RGB, DFR0464) — shares the sensor
   bus and its lock; controller at `0x3E`, backlight driver at whichever of
   `0x60` / `0x30` / `0x6B` / `0x2D` the board revision uses. Redrawn at 10 fps;
   an absent panel is re-probed every 5 s. Text is ASCII-only — the ROM has no
   Cyrillic and other bytes show as `?`, the exceptions being the degree sign
-  (`\xDF`) and the solid block (`\xFF`). Six pages, advanced by a short BOOT
+  (`\xDF`) and the solid block (`\xFF`). Seven pages, advanced by a short BOOT
   click and remembered in NVS (`settings/screen_page`):
 
   | Page | Rows |
   |---|---|
   | indoor + headline | `23.46° 45% 1250` / `12.3°  Overcast` |
   | indoor precise | `23.46° 16.8 1250` / `1013.250  999.9x` |
+  | radar | `Radar 2   1.85m` / `X-0.42  -1.42m/s` |
   | outdoor detail | `12.3° 8..17 C3` / `78% 1013 NW15 U3` |
   | zambretti | `1013.2 hPa v2.1` / `Chgable, rain` |
   | sun | `Day 05:25 20:59` / `Sun+32.4° v13:45` |
@@ -115,6 +142,12 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   lit at the bottom end. No setting; a missing reading means full brightness.
   The scale eases into a new level a few units per frame instead of jumping, so
   a passing shadow does not flicker the panel.
+
+  On top of that scale the radar gates the panel: lit while someone is in the
+  fan, dark for an empty room, faded either way — up in 1.6 s, out in 6.4 s.
+  The fade starts as soon as presence drops; the only hold is the radar's own
+  5 s, which covers whoever stops moving. A silent or absent module leaves the
+  panel lit.
 - **Climate** — the room as opposed to the chips. One source per quantity and
   **no fallbacks**: temperature from the TMP117, humidity and CO₂ from the
   SCD40, pressure from the BMP581, illuminance from the VEML7700. The SCD40 and
@@ -130,11 +163,9 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   the way out — so a later altitude correction re-reduces the whole history.
   The **dew point** (Magnus-Tetens) is the one derived quantity, from the
   SCD40's own temperature and humidity — its warm offset cancels there, and the
-  driver computes it. Follows the humidity. Shown on the SCD40 card and on the
-  precise LCD page in place of the humidity. It is not in the history, so its
-  main card is the one exception to the card-and-chart rule: the page computes
-  that column itself, from the recorded TMP117 temperature and SCD40 humidity,
-  and it reads a few tenths off the device's own figure on the SCD40 card.
+  driver computes it. Follows the humidity. Not in the history: shown on the
+  SCD40 card and on the precise LCD page in place of the humidity, and nowhere
+  else.
 - **Site altitude** — metres above sea level, −500…9000, NVS
   `settings/altitude_m` (default 0). A wrong altitude shifts every pressure
   readout and chart, never the stored history.
@@ -153,12 +184,20 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   | dew point | 0.1 °C | SCD40 | `%.1f` |
   | illuminance | 0.1 lx | VEML7700 | `%.1f` |
 
-- **History & charts** — five quantities in three rings: 5 min of 1 s samples
-  (RAM only), 1 h of 5 s points, 24 h of 1-min averages — 38 KB plus a 23 KB
-  staging buffer. Filled by **sampling** `climate_get()` once a second, so each
-  quantity is recorded for as long as its own sensor lives and validity is per
-  quantity. Points are 16 bytes: fixed-point for the four bounded quantities,
-  float for illuminance.
+- **History & charts** — five climate quantities and the radar in three rings:
+  5 min of 1 s samples (RAM only), 1 h of 5 s points, 24 h of 1-min averages —
+  38 KB plus a 23 KB staging buffer. Filled by **sampling** `climate_get()` and
+  `ld2450_get()` once a second, so each quantity is recorded for as long as its
+  own sensor lives and validity is per quantity. Points are 16 bytes:
+  fixed-point for the bounded quantities, float for illuminance.
+  The radar rides in the one byte the layout had spare, which is what keeps the
+  point at 16: the **largest number of targets** the slot saw (2 bits) and the
+  **mean distance to the nearest** of them (5 bits, a quarter of a metre per
+  step, 0 for an empty fan). Max for the count and mean for the distance, each
+  against its own failure — a person who stops moving drops out of the frame
+  and would dent a mean count, one ghost frame would pull a minimum distance to
+  the sensor. Occupancy is not stored: the share of a window that held anyone
+  follows from the counts, and the page computes it.
   The two longer rings are snapshotted to LittleFS (`/data/hist_1h.bin` every
   5 min, `/data/history.bin` every 10 min, both on graceful shutdown / OTA
   reboot) and restored on boot; downtime shows as a gap anchored via SNTP time.
@@ -195,9 +234,11 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
   into wall-clock time. Without it the angle, the day's length and the countdown
   still stand and only the two clock times read `--:--`. Shown as a line on the
   weather card and on its own LCD page, which counts down to the next crossing.
-- **Telegram notifications** — push-only bot: welcome on boot, IP change, and
-  air alerts from the SCD40 — CO₂ crossing 800/1200 ppm (±25 ppm hysteresis),
-  temperature drift ≥2 °C, humidity drift ≥10 %. Token and chat id are
+- **Telegram notifications** — push-only bot, two rules: the SCD40 CO₂ level
+  crossing 800/1200/2000 ppm (±25 ppm hysteresis), and arrival/departure from
+  the radar's presence flag, reported with how long the previous state lasted.
+  A departure counts only after 5 min of confirmed absence, since the radar
+  loses whoever sits still; an arrival after 3 s. Token and chat id are
   compile-time constants in `telegram.c`; left empty, the module disables
   itself.
 - **Outside weather (Open-Meteo)** — the active location fetched over HTTPS
@@ -236,6 +277,7 @@ history. The alerts are the only consumer still tied to the SCD40 alone.
 `app_main` (main.c) only initializes modules and exits; everything runs in
 tasks and callbacks. Modules live under `main/`, each with a small public
 header, grouped by what they face: `main/sensors/` talks to the I2C bus,
+`main/radar/` to the UART tracker,
 `main/ui/` drives the station's own hardware, `main/web/` serves HTTP
 (including the page itself, `web/index.html`). Every subdirectory is in the
 component's `INCLUDE_DIRS`, so includes stay flat (`#include "screen_16x2.h"`).
@@ -257,20 +299,21 @@ card belongs in that device's module, not in the caller — dew point in
 | `sensors/scd40.c` | Sensirion command protocol with CRC-8, phased start, pressure compensation, FRC, dew point |
 | `sensors/tmp117.c` | address auto-detection, device-ID check, config, temperature register |
 | `sensors/bmp581.c` | address auto-detection, chip-ID check, soft reset out of deep standby, DSP/IIR + OSR/ODR setup, 6-byte burst read |
+| `radar/ld2450.c` | LD2450 on its own UART: reader task, frame resync and decode, the published snapshot with presence and the nearest target |
 | `sensors/veml7700.c` | command registers, auto-ranging table with its settle deadline, lux conversion with the >1000 lx correction, white/ALS ratio |
 | `sysinfo.c` | the station's own health: a boot-time snapshot of what cannot change plus live counters, the SoC temperature sensor, reset reason. CPU load is measured in one 1 s window shared by all callers |
-| `ui/screen_16x2.c` | six button-advanced pages plus the OTA one that pre-empts them, 10 fps loop, backlight dimmed to the ambient light. Sized for 16x2 |
+| `ui/screen_16x2.c` | seven button-advanced pages plus the OTA one that pre-empts them, 10 fps loop, backlight dimmed to the ambient light and gated by radar presence. Sized for 16x2 |
 | `ui/lcd1602_rgb.c` | DFR0464 transport: character output, backlight registers, revision detection, hot-plug recovery. The only file tied to this display |
 | `timesync.c` | SNTP client; `timesync_is_synced()` and `timesync_format()` |
 | `sensors/climate.c` | the room-level view over the devices, plus the reduction to sea level and the site-altitude setting. Its header carries the reading resolutions |
-| `history.c` | three rings sampled from a 1 s esp_timer; the two longer ones persist to `/data` with a versioned header |
+| `history.c` | three rings sampled from a 1 s esp_timer, climate and radar alike; the two longer ones persist to `/data` with a versioned header |
 | `storage.c` | mounts the LittleFS `storage` partition at `/data` |
 | `telegram.c` | message queue + sender task; `telegram_notify(fmt, ...)` |
 | `weather_api.c` | Open-Meteo client; own task fetches the active location hourly, `weather_api_refresh()` forces a reload |
 | `weather_store.c` | saved locations + their UTC offset + active index in NVS (`weather_loc`), mutex-protected |
 | `sun.c` | sunrise/sunset/elevation for the active location; `sun_next_event()` is the countdown the display shows |
 | `zambretti.c` | 3 h barometric tendency fitted over the 1 d ring, and the Zambretti wording it selects with the sea-level pressure |
-| `alerts.c` | notification rules and thresholds; own task polls every 10 s |
+| `alerts.c` | notification rules and thresholds; own task ticks every 1 s, air every 10 s |
 | `settings.c` | thin u8/u32/i32 get/set over the NVS namespace `settings` |
 
 ## HTTP API
@@ -278,8 +321,8 @@ card belongs in that device's module, not in the caller — dew point in
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (gzipped) |
-| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `phase` `day`/`golden`/`civil`/`nautical`/`astro`/`night`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system`, `settings` (`led_brightness`, `backlight_rgb`, read-only `backlight_scale`, `altitude`) |
-| `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`); `{period, co2, temp, rh, press, lux}`, each series gated on its own quantity so `null` is a gap in that series alone. `press` comes out reduced to sea level |
+| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `phase` `day`/`golden`/`civil`/`nautical`/`astro`/`night`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `radar` (`presence`, `near` — metres to the closest target — and `targets`, `x` / `y` in mm, up to three, plotted by the page; `null` while the LD2450 is silent), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system`, `settings` (`led_brightness`, `backlight_rgb`, read-only `backlight_scale`, `altitude`) |
+| `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`); `{period, co2, temp, rh, press, lux, targets, near}`, each series gated on its own quantity so `null` is a gap in that series alone. `press` comes out reduced to sea level; `targets` is the slot's largest target count, `near` metres in quarter-metre steps and `null` for a slot with nobody in the fan |
 | `/api/history/reset` | POST | wipe all tiers, RAM rings and flash snapshots |
 | `/api/scan` | GET | Wi-Fi scan, `[{ssid, bssid, ch, rssi, auth}]`, one entry per BSSID |
 | `/api/networks` | GET / POST / DELETE | saved networks; POST `{"ssid", "password", "bssid"}` (bssid optional — pins to that AP), DELETE `{"ssid"}` |

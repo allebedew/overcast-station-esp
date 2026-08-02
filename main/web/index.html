@@ -25,7 +25,7 @@
                 --co2-bad: #ff6b6b;
                 --press: #a78bfa;
                 --lux: #ffc94d;
-                --dew: #38d9c0;
+                --radar: #38d9c0;
                 --ok: #3fb950;
                 --radius: 12px;
                 --font:
@@ -60,8 +60,20 @@
                 display: flex;
                 align-items: center;
                 flex-wrap: wrap;
-                gap: 8px;
+                gap: 10px;
                 padding: 6px 2px 14px;
+            }
+            /* the three controls wrap as one block, so a narrow screen never
+             * splits them across two rows */
+            .hdr-title,
+            .hdr-ctl {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                min-height: 34px;
+            }
+            .hdr-ctl {
+                margin-left: auto;
             }
             /* every control in the header row is the same height, so the
              * period switch, the language switch and the gear read as one
@@ -76,8 +88,18 @@
                 font-size: 16px;
                 font-weight: 600;
             }
-            .spacer {
-                flex: 1;
+            @media (max-width: 560px) {
+                .hdr-ctl {
+                    width: 100%;
+                    margin-left: 0;
+                }
+                .hdr-ctl .seg#periodSeg {
+                    flex: 1;
+                }
+                .hdr-ctl .seg#periodSeg button {
+                    flex: 1;
+                    padding: 4px 6px;
+                }
             }
             /* link state, in front of the title: green while the polling
              * keeps succeeding, red once it goes stale, blinking either way */
@@ -85,7 +107,6 @@
                 flex: none;
                 width: 11px;
                 height: 11px;
-                margin-right: 2px;
                 border-radius: 50%;
                 background: var(--ok);
                 animation: pulse 2s infinite;
@@ -178,6 +199,9 @@
                 font-weight: 700;
                 letter-spacing: -0.02em;
                 font-variant-numeric: tabular-nums;
+                /* the body line-height would pad the digits with ~7px of
+                   leading on both sides, which reads as a gap */
+                line-height: 1.05;
             }
             .sensor .unit {
                 font-size: 15px;
@@ -224,14 +248,22 @@
                 display: flex;
                 flex-direction: column;
             }
+            .card.sensor h2 {
+                margin-bottom: 6px;
+            }
             .sensor canvas {
                 width: 100%;
                 height: 112px;
                 flex: none;
-                margin-top: 8px;
+                margin-top: 4px;
                 display: block;
                 touch-action: pan-y;
                 cursor: crosshair;
+            }
+            /* The radar plot has no hover readout — the pointer must not
+               promise one. */
+            #rPlot {
+                cursor: default;
             }
             .badge {
                 font-size: 10.5px;
@@ -561,8 +593,13 @@
                 background: var(--panel);
                 color: var(--text-dim);
                 cursor: pointer;
-                display: grid;
-                place-items: center;
+                /* inline-flex + explicit padding: Safari does not centre the
+                 * content of a grid/flex <button> reliably */
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                padding: 0;
+                line-height: 0;
                 transition:
                     border-color 0.15s,
                     background 0.15s,
@@ -1021,6 +1058,7 @@
                 display: block;
             }
             #tip span {
+                display: block;
                 color: var(--text-dim);
                 font-size: 11px;
             }
@@ -1031,43 +1069,46 @@
         <div class="wrap">
             <!-- HEADER -->
             <header>
-                <span class="dot" id="connDot"></span>
-                <h1 data-i18n="appName">Метеостанция</h1>
-                <div class="spacer"></div>
-                <div class="seg" id="periodSeg">
-                    <button data-p="5m" class="active" data-i18n="p5m">
-                        5 мин
-                    </button>
-                    <button data-p="1h" data-i18n="p1h">1 час</button>
-                    <button data-p="1d" data-i18n="p1d">Сутки</button>
+                <div class="hdr-title">
+                    <span class="dot" id="connDot"></span>
+                    <h1 data-i18n="appName">Метеостанция</h1>
                 </div>
-                <div class="seg lang" id="langSeg">
-                    <button data-l="ru">RU</button>
-                    <button data-l="en">EN</button>
-                </div>
-                <button
-                    class="icon-btn"
-                    id="panelsBtn"
-                    data-i18n-title="panelsToggle"
-                    title="Показать/скрыть систему, Wi-Fi и настройки"
-                >
-                    <!-- flat gear (Feather Icons, MIT) -->
-                    <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
+                <div class="hdr-ctl">
+                    <div class="seg" id="periodSeg">
+                        <button data-p="5m" class="active" data-i18n="p5m">
+                            5 мин
+                        </button>
+                        <button data-p="1h" data-i18n="p1h">1 час</button>
+                        <button data-p="1d" data-i18n="p1d">Сутки</button>
+                    </div>
+                    <div class="seg lang" id="langSeg">
+                        <button data-l="ru">RU</button>
+                        <button data-l="en">EN</button>
+                    </div>
+                    <button
+                        class="icon-btn"
+                        id="panelsBtn"
+                        data-i18n-title="panelsToggle"
+                        title="Показать/скрыть систему, Wi-Fi и настройки"
                     >
-                        <circle cx="12" cy="12" r="3" />
-                        <path
-                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
-                        />
-                    </svg>
-                </button>
+                        <!-- flat gear (Feather Icons, MIT) -->
+                        <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <circle cx="12" cy="12" r="3" />
+                            <path
+                                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+                            />
+                        </svg>
+                    </button>
+                </div>
             </header>
 
             <!-- SENSORS — one card per series, built from SERIES at startup;
@@ -1403,6 +1444,13 @@
                     sensOff: "Нет ответа",
                     co2: "CO₂",
                     sensDew: "Точка росы",
+                    radarTitle: "Радар",
+                    radarPresent: "Присутствие",
+                    radarEmpty: "Пусто",
+                    radarTargets: "цели",
+                    radarMaxT: "макс. целей",
+                    presenceTitle: "Присутствие",
+                    uM: "м",
                     sensPress: "Давление",
                     sensLux: "Освещённость",
                     altitude: "Высота над уровнем моря",
@@ -1617,6 +1665,13 @@
                     sensOff: "No response",
                     co2: "CO₂",
                     sensDew: "Dew point",
+                    radarTitle: "Radar",
+                    radarPresent: "Presence",
+                    radarEmpty: "Clear",
+                    radarTargets: "targets",
+                    radarMaxT: "max targets",
+                    presenceTitle: "Presence",
+                    uM: "m",
                     sensPress: "Pressure",
                     sensLux: "Illuminance",
                     altitude: "Altitude above sea level",
@@ -2303,16 +2358,6 @@
              * make the same value read differently here and in the API. */
             const fmtLux = (v) => v.toFixed(1);
 
-            /* Magnus-Tetens, WMO coefficients — the formula scd40.c uses, on
-             * the page's own inputs. RH is clamped off zero: log(0) is -inf. */
-            function dewPoint(tC, rhPct) {
-                const b = 17.62,
-                    c = 243.12;
-                const rh = Math.max(rhPct, 1);
-                const gamma = Math.log(rh / 100) + (b * tC) / (c + tC);
-                return (c * gamma) / (b - gamma);
-            }
-
             function co2Level(ppm) {
                 if (ppm < 800)
                     return {
@@ -2411,8 +2456,7 @@
                  * it can never disagree. */
                 const cl = s.climate || {};
                 SERIES.forEach((sr) => {
-                    const v = sr.calc ? sr.calc(cl) : cl[sr.src];
-                    $(sr.k + "Val").textContent = num(v, sr.fmt);
+                    $(sr.k + "Val").textContent = num(cl[sr.src], sr.fmt);
                 });
 
                 /* Cards whose badge replaces the window trend arrow: the CO₂
@@ -2436,6 +2480,7 @@
                 renderWeather(s.weather || {});
                 renderSun(s.sun, (s.weather && s.weather.loc) || {});
                 renderSensors(sn);
+                renderRadar(s.radar);
 
                 /* system card: Wi-Fi station and access point shown as
                  * separate sections (in APSTA both can be up at once). The
@@ -2576,10 +2621,7 @@
              * names the field in /api/status `climate`, `hist` the array in
              * /api/history. `span`/`trendFmt` fall back to `fmt`.
              * `scale: "log"` is for illuminance only — a linear axis over six
-             * decades leaves everything below noon flat on the baseline.
-             * A series computed in the page replaces the two with `calc`
-             * (from the `climate` object) and `derive` (from the history
-             * reply). */
+             * decades leaves everything below noon flat on the baseline. */
             const SERIES = [
                 {
                     k: "t",
@@ -2600,31 +2642,6 @@
                     color: "--hum",
                     fmt: (v) => v.toFixed(1),
                     span: (v) => v.toFixed(1) + "%",
-                },
-                {
-                    /* Derived here rather than in the firmware: the TMP117
-                     * temperature and the SCD40 humidity, the same pair the
-                     * cards above show. The SCD40 card carries the device's
-                     * own dew point instead, off its own warmer temperature —
-                     * the two read a few tenths apart. */
-                    k: "d",
-                    calc: (cl) =>
-                        typeof cl.temp === "number" && typeof cl.rh === "number"
-                            ? dewPoint(cl.temp, cl.rh)
-                            : null,
-                    derive: (hd) => {
-                        const rh = hd.rh || [];
-                        return (hd.temp || []).map((v, i) =>
-                            v != null && rh[i] != null
-                                ? dewPoint(v, rh[i])
-                                : null,
-                        );
-                    },
-                    title: "sensDew",
-                    unit: "°C",
-                    color: "--dew",
-                    fmt: (v) => v.toFixed(1),
-                    span: (v) => v.toFixed(1) + "°",
                 },
                 {
                     k: "c",
@@ -2692,20 +2709,18 @@
                         (_, i) => now - (n - 1 - i) * step,
                     ),
                 };
-                SERIES.forEach(
-                    (sr) =>
-                        (out[sr.k] = padTo(
-                            sr.derive ? sr.derive(hd) : hd[sr.hist],
-                            n,
-                        )),
-                );
+                SERIES.forEach((sr) => (out[sr.k] = padTo(hd[sr.hist], n)));
+                /* Charted together on the presence card, but neither is a
+                 * series: no live reading, no trend, no card of its own. */
+                out.o = padTo(hd.targets, n);
+                out.oNear = padTo(hd.near, n);
                 return out;
             }
 
             /* Cards are generated once and then only their text changes, so a
              * sensor that never reports still holds its place with NA. */
             function buildSensorCards() {
-                $("sensorCards").innerHTML = SERIES.map((sr) => {
+                const cards = SERIES.map((sr) => {
                     /* data-i18n on the badge is only the "no data" starting
                      * text; renderStatus() overwrites it right after
                      * applyLang() on every poll and on a language switch */
@@ -2728,9 +2743,160 @@
                             : "") +
                         "</div>"
                     );
-                }).join("");
+                });
+                /* Last, after the climate: neither is a series — no live
+                 * reading on `climate`, no trend — so both are written out
+                 * rather than generated. */
+                cards.push(
+                    /* Charted like the climate above it and so first: distance
+                     * to the nearest target as the line, target count as
+                     * columns under it. The live distance heads the card, and
+                     * the held state its badge — the card is named for it. */
+                    '<div class="card sensor"><h2>' +
+                        '<span data-i18n="presenceTitle"></span>' +
+                        '<span class="badge off" id="oBadge" data-i18n="noData"></span></h2>' +
+                        '<div class="reading">' +
+                        `<span class="value" id="oVal">${NA}</span>` +
+                        '<span class="unit" data-i18n="uM"></span>' +
+                        '<div class="minmax">' +
+                        `<span><span data-i18n="radarMaxT"></span> <b id="oMax">${NA}</b></span>` +
+                        "</div></div>" +
+                        '<canvas id="oChart"></canvas></div>',
+                    /* The plan view closes the grid — the one card that plots
+                     * instead of charting. */
+                    '<div class="card sensor"><h2>' +
+                        '<span data-i18n="radarTitle"></span></h2>' +
+                        '<div class="reading">' +
+                        `<span class="value" id="rCount">${NA}</span>` +
+                        '<span class="unit" data-i18n="radarTargets"></span>' +
+                        '<div class="minmax">' +
+                        `<span>x <b id="rX">${NA}</b></span>` +
+                        `<span>y <b id="rY">${NA}</b></span>` +
+                        "</div></div>" +
+                        '<canvas id="rPlot"></canvas></div>',
+                );
+                $("sensorCards").innerHTML = cards.join("");
             }
             buildSensorCards(); /* before charts: they look the canvases up */
+
+            /* ---------- radar plan view ----------
+             * The module sits at the bottom centre of the canvas looking up it:
+             * range rings, the fan it can see, a dot per tracked target. Drawn
+             * from the last reply held here, so a resize or a language switch
+             * repaints without waiting for the next poll. */
+            const RADAR_RANGE_M = 6; /* the module's rated reach */
+            const RADAR_RING_M = 2;
+            const RADAR_FOV_DEG = 60;
+            let radarLast = null;
+
+            function drawRadar() {
+                const canvas = $("rPlot");
+                const w = canvas.clientWidth,
+                    h = canvas.clientHeight;
+                if (!w) return;
+                const dpr = window.devicePixelRatio || 1;
+                const bw = Math.round(w * dpr),
+                    bh = Math.round(h * dpr);
+                if (canvas.width !== bw || canvas.height !== bh) {
+                    canvas.width = bw;
+                    canvas.height = bh;
+                }
+                const ctx = canvas.getContext("2d");
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                ctx.clearRect(0, 0, w, h);
+                ctx.font = "10px " + css("--font");
+
+                const fov = (RADAR_FOV_DEG * Math.PI) / 180;
+                const cx = w / 2,
+                    cy = h - 3;
+                /* As large as both axes allow: the fan is `range * sin(fov)`
+                 * wide either side of the origin and `range` tall, and the pad
+                 * leaves room for the range labels. */
+                const pad = 12;
+                const scale = Math.min(
+                    (w / 2 - pad) / (RADAR_RANGE_M * Math.sin(fov)),
+                    (h - pad) / RADAR_RANGE_M,
+                );
+
+                ctx.strokeStyle = css("--border");
+                ctx.lineWidth = 1;
+                ctx.fillStyle = css("--text-faint");
+                ctx.textAlign = "center";
+                ctx.textBaseline = "bottom";
+                for (let m = RADAR_RING_M; m <= RADAR_RANGE_M; m += RADAR_RING_M) {
+                    ctx.beginPath();
+                    /* straight up is -90°, and the fan opens either side of it */
+                    ctx.arc(cx, cy, m * scale, -Math.PI / 2 - fov, -Math.PI / 2 + fov);
+                    ctx.stroke();
+                    ctx.fillText(m + " " + t("uM"), cx, cy - m * scale - 2);
+                }
+                for (const side of [-1, 1]) {
+                    ctx.beginPath();
+                    ctx.moveTo(cx, cy);
+                    ctx.lineTo(
+                        cx + side * RADAR_RANGE_M * Math.sin(fov) * scale,
+                        cy - RADAR_RANGE_M * Math.cos(fov) * scale,
+                    );
+                    ctx.stroke();
+                }
+
+                const targets = (radarLast && radarLast.targets) || [];
+                if (!targets.length) {
+                    /* An empty fan is a reading and the badge already says so;
+                     * only a dead module gets a word across the plot. */
+                    if (!radarLast) {
+                        ctx.fillStyle = css("--text-faint");
+                        ctx.textBaseline = "middle";
+                        ctx.fillText(t("chartNoData"), cx, h / 2);
+                    }
+                    return;
+                }
+
+                ctx.fillStyle = css("--radar");
+                targets.forEach((tg) => {
+                    /* Held to the outer ring rather than dropped off the canvas:
+                     * the module reports past its rated range now and then. */
+                    const d = Math.hypot(tg.x, tg.y) / 1000 || 1;
+                    const k = Math.min(1, RADAR_RANGE_M / d);
+                    const x = cx + ((tg.x / 1000) * k) * scale,
+                        y = cy - ((tg.y / 1000) * k) * scale;
+                    ctx.globalAlpha = 0.18;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 11, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalAlpha = 1;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
+
+            function renderRadar(r) {
+                radarLast = r || null;
+                $("rCount").textContent = r ? String(r.targets.length) : NA;
+                /* Coordinates of the nearest target, in metres like the rings.
+                 * `near` is the module's own distance and need not belong to
+                 * the target closest in the plane, so pick that one here. */
+                const near = ((r && r.targets) || []).reduce(
+                    (a, b) =>
+                        !a || Math.hypot(b.x, b.y) < Math.hypot(a.x, a.y) ? b : a,
+                    null,
+                );
+                $("rX").textContent = num(near && near.x / 1000, (v) => v.toFixed(2));
+                $("rY").textContent = num(near && near.y / 1000, (v) => v.toFixed(2));
+                /* The presence card charts the history, but its badge and its
+                 * reading are live — the reading null while nobody is moving in
+                 * the fan, the badge held for a few seconds past that. */
+                const b = $("oBadge");
+                b.className = "badge " + (r && r.presence ? "good" : "off");
+                b.textContent = !r
+                    ? t("noData")
+                    : r.presence
+                      ? t("radarPresent")
+                      : t("radarEmpty");
+                $("oVal").textContent = num(r && r.near, (v) => v.toFixed(2));
+                drawRadar();
+            }
 
             /* One record per chart, keyed like SERIES; data/times/stroke are
              * refreshed by renderCharts(). */
@@ -2743,6 +2909,17 @@
                     scale: sr.scale,
                 };
             });
+            /* Presence is charted like a series without being one, and it is
+             * two quantities: the line is the distance to the nearest target,
+             * the columns under it the number of targets. `unit` follows the
+             * language, so renderCharts() sets it. */
+            charts.o = {
+                canvas: $("oChart"),
+                unit: "",
+                fmt: (v) => v.toFixed(2),
+                barMax: 3, /* the module tracks no more than three */
+                empty: "radarEmpty", /* an unoccupied window is a recording */
+            };
             const M = {
                 l: 36,
                 r: 6,
@@ -2804,12 +2981,29 @@
 
                 const ph = h - M.t - M.b;
 
+                /* Columns rising from the baseline, `barMax` filling the plot.
+                 * A count is 0..3 and makes a poor line; as a strip under the
+                 * distance it reads as one picture. */
+                function bars(x) {
+                    if (!ch.bars) return;
+                    const bw = Math.max(1, ((ch.pw || 0) / ch.bars.length) * 0.8);
+                    ctx.fillStyle = ch.stroke + "2e";
+                    ch.bars.forEach((v, i) => {
+                        if (!v) return;
+                        const bh = (Math.min(v, ch.barMax) / ch.barMax) * ph;
+                        ctx.fillRect(x(i) - bw / 2, M.t + ph - bh, bw, bh);
+                    });
+                }
+
                 const vals = data.filter((v) => v != null);
                 if (vals.length < 2) {
+                    ch.ml = M.l;
+                    ch.pw = w - M.l - M.r;
+                    bars((i) => M.l + (i / (data.length - 1)) * ch.pw);
                     ctx.fillStyle = css("--text-faint");
                     ctx.textAlign = "center";
                     ctx.textBaseline = "middle";
-                    ctx.fillText(t("chartNoData"), w / 2, h / 2);
+                    ctx.fillText(t(ch.empty || "chartNoData"), w / 2, h / 2);
                     return;
                 }
 
@@ -2940,6 +3134,8 @@
                     ctx.fillText(fmtTick(tt), xx, M.t + ph + 4);
                 }
 
+                bars(x);
+
                 /* split into contiguous segments: nulls (offline periods) break the line */
                 const segments = [];
                 let seg = [];
@@ -2983,22 +3179,25 @@
                 ctx.fillStyle = ch.stroke;
                 ctx.fill();
 
-                /* hover crosshair */
-                if (ch.hover != null && data[ch.hover] != null) {
-                    const hx = x(ch.hover),
-                        hy = y(data[ch.hover]);
+                /* hover crosshair: the line alone over a slot with no value,
+                 * which on the presence chart is an empty room rather than a
+                 * gap in the recording */
+                if (ch.hover != null) {
+                    const hx = x(ch.hover);
                     ctx.strokeStyle = "rgba(139,152,169,.5)";
                     ctx.lineWidth = 1;
                     ctx.beginPath();
                     ctx.moveTo(hx, M.t);
                     ctx.lineTo(hx, M.t + ph);
                     ctx.stroke();
-                    ctx.beginPath();
-                    ctx.arc(hx, hy, 3.5, 0, 2 * Math.PI);
-                    ctx.fillStyle = ch.stroke;
-                    ctx.fill();
-                    ctx.strokeStyle = css("--bg");
-                    ctx.stroke();
+                    if (data[ch.hover] != null) {
+                        ctx.beginPath();
+                        ctx.arc(hx, y(data[ch.hover]), 3.5, 0, 2 * Math.PI);
+                        ctx.fillStyle = ch.stroke;
+                        ctx.fill();
+                        ctx.strokeStyle = css("--bg");
+                        ctx.stroke();
+                    }
                 }
             }
 
@@ -3011,7 +3210,9 @@
                         (ch.data.length - 1),
                 );
                 i = Math.max(0, Math.min(ch.data.length - 1, i));
-                if (ch.data[i] == null) {
+                /* A slot with bars but no value was recorded and has something
+                 * to say ("nobody, 0 targets"), so it is not a gap to skip. */
+                if (ch.data[i] == null && !(ch.bars && ch.bars[i] != null)) {
                     /* over a gap: snap to the nearest measured point */
                     let found = -1;
                     for (let d = 1; d < 30 && found < 0; d++) {
@@ -3028,9 +3229,12 @@
                 drawSoon(ch);
 
                 const tip = $("tip");
-                const shown = ch.fmt(ch.data[i]);
+                const v = ch.data[i];
                 tip.innerHTML =
-                    `<b>${shown} ${ch.unit}</b>` +
+                    `<b>${v == null ? t(ch.empty || "chartNoData") : ch.fmt(v) + " " + ch.unit}</b>` +
+                    (ch.bars
+                        ? `<span>${ch.bars[i] ?? 0} ${t("radarTargets")}</span>`
+                        : "") +
                     `<span>${fmtTipTime(ch.times[i])}</span>`;
                 tip.style.display = "block";
                 let tx = ev.clientX + 14;
@@ -3121,6 +3325,24 @@
                             : css(sr.color);
                     draw(ch);
                 });
+                /* The radar canvas sits in the same grid and needs the same
+                 * repaint on a resize or a language switch. */
+                drawRadar();
+
+                /* The presence card's reading is live (renderRadar); the window
+                 * gives it only the busiest moment in the period. */
+                const hd = hists[period] || {};
+                const seen = (hd.targets || []).filter((v) => v != null);
+                $("oMax").textContent = seen.length
+                    ? String(Math.max(...seen))
+                    : NA;
+                const och = charts.o;
+                och.data = s.oNear;
+                och.bars = s.o;
+                och.times = s.times;
+                och.unit = t("uM");
+                och.stroke = css("--radar");
+                draw(och);
             }
 
             $("periodSeg").addEventListener("click", (e) => {

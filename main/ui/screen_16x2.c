@@ -13,6 +13,7 @@
 
 #include "lcd1602_rgb.h"
 #include "climate.h"
+#include "ld2450.h"
 #include "zambretti.h"
 #include "ota.h"
 #include "settings.h"
@@ -45,6 +46,13 @@
 
 #define BL_SLEW 4 /* scale units per frame */
 
+/* The panel lights for whoever is in front of it and starts going out the
+ * moment the radar drops presence — the only hold left is the module's own 5 s.
+ * Faster on than off: walking in should not be a wait, walking out should not
+ * be a blink. */
+#define BL_GATE_UP   16 /* 255 in 1.6 s at 10 fps */
+#define BL_GATE_DOWN 4  /* and out in 6.4 s */
+
 /* Panel character ROM codes; the UTF-8 degree sign would show up as garbage. */
 #define DEG   "\xDF"
 #define BLOCK '\xFF'
@@ -55,6 +63,7 @@
 typedef enum {
     PAGE_INDOOR,    /* what the station measures, plus the outdoor headline */
     PAGE_PRECISE,   /* the same air at the sensors' full resolution */
+    PAGE_RADAR,     /* who is in front of it, and where */
     PAGE_OUTDOOR,   /* the rest of the Open-Meteo reading */
     PAGE_ZAMBRETTI, /* what the station's own barometer expects */
     PAGE_SUN,       /* the day's length and where the sun is in it */
@@ -134,6 +143,39 @@ static void render_precise(char *l0, char *l1)
 
     snprintf(l0, RENDER_BUF, "%s %s %s", temp, dew, co2);
     snprintf(l1, RENDER_BUF, "%s  %s", press, lux);
+}
+
+/*   Radar 2   1.85m  (targets tracked, metres to the nearest — sixteen exactly)
+ *   X-0.42  -1.42m/s (that one right of the module, and its speed, negative
+ *                     toward it; the depth follows from the two, so the row
+ *                     spends its width on the speed instead — also sixteen) */
+static void render_radar(char *l0, char *l1)
+{
+    ld2450_data_t r;
+    if (!ld2450_get(&r)) {
+        snprintf(l0, RENDER_BUF, "no radar data");
+        l1[0] = '\0';
+        return;
+    }
+
+    char near[12];
+    fmt_or(near, sizeof(near), r.count > 0, "--.--", "%5.2f", r.nearest_m);
+    snprintf(l0, RENDER_BUF, "Radar %u   %sm", r.count, near);
+
+    if (r.count == 0) {
+        /* The held state, not the count: this is what the backlight follows. */
+        snprintf(l1, RENDER_BUF, "%s", r.presence ? "presence held" : "nobody");
+        return;
+    }
+
+    const ld2450_target_t *n = &r.targets[0];
+    for (int i = 1; i < r.count; i++) {
+        if (r.targets[i].dist_m < n->dist_m) {
+            n = &r.targets[i];
+        }
+    }
+    snprintf(l1, RENDER_BUF, "X%+5.2f %+6.2fm/s", n->x_mm / 1000.0f,
+             n->speed_cms / 100.0f);
 }
 
 /* Each point covers 45°; +22 rounds the reading into its sector. */
@@ -285,6 +327,7 @@ static void render_page(char *l0, char *l1)
     switch (s_page) {
     case PAGE_INDOOR:   render_indoor(l0, l1); break;
     case PAGE_PRECISE:  render_precise(l0, l1); break;
+    case PAGE_RADAR:    render_radar(l0, l1); break;
     case PAGE_OUTDOOR:  render_outdoor(l0, l1); break;
     case PAGE_ZAMBRETTI: render_zambretti(l0, l1); break;
     case PAGE_SUN:      render_sun(l0, l1); break;
@@ -292,11 +335,12 @@ static void render_page(char *l0, char *l1)
     }
 }
 
-/* Scaling a channel to zero would shift the hue, so a lit channel stays lit. */
+/* Scaling a channel to zero would shift the hue, so a lit channel stays lit —
+ * unless the whole backlight is off, which is a state of its own. */
 static uint8_t scale8(uint8_t c, uint8_t k)
 {
     uint8_t v = (uint16_t)c * k / 255;
-    return (v == 0 && c != 0) ? 1 : v;
+    return (v == 0 && c != 0 && k != 0) ? 1 : v;
 }
 
 /* Target scale, 0-255. Without a reading the colour is left alone: a dimmed
@@ -336,6 +380,28 @@ static uint8_t backlight_ramp(uint8_t target)
     return (uint8_t)k;
 }
 
+/* Presence gate, 0-255, faded rather than switched. A radar that is silent or
+ * absent leaves the panel lit — the room is not empty just because the module
+ * is. */
+static uint8_t backlight_gate(void)
+{
+    static int g = 255;
+
+    ld2450_data_t r;
+    bool lit = !ld2450_get(&r) || r.presence;
+
+    int target = lit ? 255 : 0;
+    int slew = target > g ? BL_GATE_UP : BL_GATE_DOWN;
+    int step = target - g;
+    if (step > slew) {
+        step = slew;
+    } else if (step < -slew) {
+        step = -slew;
+    }
+    g += step;
+    return (uint8_t)g;
+}
+
 static void screen_task(void *arg)
 {
     for (;;) {
@@ -344,6 +410,7 @@ static void screen_task(void *arg)
         climate_t c;
         climate_get(&c);
         uint8_t k = backlight_ramp(backlight_target(c.lux, c.lux_ok));
+        k = (uint8_t)((uint16_t)k * backlight_gate() / 255);
         s_bl_scale = k; /* before rendering: the system page prints it */
 
         char l0[RENDER_BUF] = "", l1[RENDER_BUF] = "";

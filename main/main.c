@@ -5,6 +5,7 @@
 #include "climate.h"
 #include "history.h"
 #include "i2c_bus.h"
+#include "ld2450.h"
 #include "led.h"
 #include "ota.h"
 #include "screen_16x2.h"
@@ -40,6 +41,7 @@ void app_main(void)
     /* Before anything that talks on it, and while the log is still quiet. */
     i2c_bus_init();
     sensors_init();
+    ld2450_init(); /* own UART, unrelated to the I2C bus above */
 
     timesync_init();
     telegram_init();
