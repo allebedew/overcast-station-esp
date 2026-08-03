@@ -46,6 +46,9 @@ bool weather_api_get(weather_api_data_t *out);
  * need not copy the struct per frame. */
 int weather_api_utc_offset_s(void);
 
+/* Wind direction as a single cardinal letter, "N" / "E" / "S" / "W". */
+const char *weather_api_wind_dir_str(int deg);
+
 /* English description of a WMO weather code. Never NULL. */
 const char *weather_api_code_str(int weather_code);
 

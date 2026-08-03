@@ -1,0 +1,16 @@
+[
+  {
+    "label": "gui sim: run",
+    "command": "make -C main/gui/sim run",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "always",
+    "use_new_terminal": false
+  },
+  {
+    "label": "gui sim: clean",
+    "command": "make -C main/gui/sim clean",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "always",
+    "use_new_terminal": false
+  }
+]

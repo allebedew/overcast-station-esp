@@ -136,6 +136,27 @@ void gfx_vline(gfx_canvas_t *c, int x, int y, int len, gfx_level_t level, uint8_
     }
 }
 
+void gfx_checker(gfx_canvas_t *c, gfx_rect_t r, gfx_level_t level, gfx_level_t bg, int cell)
+{
+    if (r.w <= 0 || r.h <= 0 || cell < 0) {
+        return;
+    }
+    if (cell == 0) {
+        for (int y = 0; y < r.h; y++) {
+            gfx_hline(c, r.x, r.y + y, r.w, level, GFX_SOLID, 0);
+        }
+        return;
+    }
+    // Anchored to the rect, so the top-left square is always a set one.
+    for (int y = 0; y < r.h; y++) {
+        for (int x = 0; x < r.w; x += cell) {
+            int len = r.w - x < cell ? r.w - x : cell;
+            gfx_level_t l = ((x / cell + y / cell) & 1) ? bg : level;
+            gfx_hline(c, r.x + x, r.y + y, len, l, GFX_SOLID, 0);
+        }
+    }
+}
+
 void gfx_rect(gfx_canvas_t *c, gfx_rect_t r, gfx_level_t stroke, gfx_level_t fill, uint8_t dash)
 {
     if (r.w <= 0 || r.h <= 0) {

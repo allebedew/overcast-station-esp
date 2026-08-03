@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "gfx_canvas.h"
 #include "gfx_text.h"
@@ -422,6 +424,15 @@ static void selftest(void)
 // No sensors on the host, so the snapshot is written out here. Values are the
 // widest plausible ones -- a negative outdoor temperature, four-digit CO2 -- so
 // the layout is judged at its worst, not at its prettiest.
+// weather_api.c is firmware-only (HTTP, NVS); the screen needs just this one
+// pure function out of it, so the host restates it.
+const char *weather_api_wind_dir_str(int deg)
+{
+    static const char *const PTS[] = { "N", "E", "S", "W" };
+    int d = ((deg % 360) + 360) % 360;
+    return PTS[((d + 45) / 90) % 4];
+}
+
 static void scene_screen_now(gfx_canvas_t *c)
 {
     static ui_model_t m;
@@ -439,6 +450,8 @@ static void scene_screen_now(gfx_canvas_t *c)
 
     m.out_ok   = true;
     m.out      = (weather_api_data_t){ .temp_c = 25.8f, .feels_c = -7.1f, .wind_kmh = 12.0f,
+                                       .humidity_pct = 35.0f, .pressure_msl_hpa = 1018.0f,
+                                       .uvi = 5.25f, .wind_dir_deg = 265,
                                        .weather_code = 0 };
     m.out_cond = "Clear sky";   // the longest weather_api_code_short() returns
 
@@ -483,6 +496,11 @@ int main(int argc, char **argv)
 {
     static gfx_canvas_t canvas;
     const int scale = argc > 1 ? atoi(argv[1]) : 4;
+
+    // So a re-run draws different random picks (the bottom animal) instead of
+    // rand()'s fixed default sequence. The pid is in there because two runs
+    // within the same second would otherwise get the same seed.
+    srand((unsigned)time(NULL) ^ (unsigned)getpid());
 
     selftest();
     measure();

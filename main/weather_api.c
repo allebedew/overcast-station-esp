@@ -359,6 +359,13 @@ const char *weather_api_code_str(int code)
     }
 }
 
+const char *weather_api_wind_dir_str(int deg)
+{
+    static const char *const PTS[] = { "N", "E", "S", "W" };
+    int d = ((deg % 360) + 360) % 360;
+    return PTS[((d + 45) / 90) % 4];
+}
+
 const char *weather_api_code_short(int code)
 {
     switch (code) {

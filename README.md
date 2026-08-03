@@ -309,7 +309,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `gui/gfx/gfx_fonts.c` | generated: the u8g2 fonts actually linked, sliced by `gui/tools/extract_fonts.py` |
 | `gui/ui_model.c` | one snapshot of everything a frame may read, taken before it starts drawing, so no reading changes mid-frame and no lock is held across one |
 | `gui/ui.c` | the immediate-mode layer over the canvas: the text styles, a vertical layout cursor, separators |
-| `gui/screens/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; currently the clock row and its rule |
+| `gui/screens/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; currently the clock, the outdoor block (icon, temperature, conditions) and the pressure / humidity / UVI / wind rows |
 | `timesync.c` | SNTP client; `timesync_is_synced()` and `timesync_format()` |
 | `sensors/climate.c` | the room-level view over the devices, plus the reduction to sea level and the site-altitude setting. Its header carries the reading resolutions |
 | `history.c` | three rings sampled from a 1 s esp_timer, climate and radar alike; the two longer ones persist to `/data` with a versioned header |

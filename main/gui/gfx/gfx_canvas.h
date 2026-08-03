@@ -63,3 +63,10 @@ void gfx_vline(gfx_canvas_t *c, int x, int y, int len, gfx_level_t level, uint8_
 // fill covers the whole rect, stroke is then drawn on its 1px border; either may
 // be GFX_NONE.
 void gfx_rect(gfx_canvas_t *c, gfx_rect_t r, gfx_level_t stroke, gfx_level_t fill, uint8_t dash);
+
+// Checkerboard of cell x cell squares: level for the top-left square and its
+// diagonal, bg for the other one (GFX_NONE leaves those pixels alone). A cell of
+// 1 is the finest halftone the panel can hold, 0 means a solid `level` fill; the
+// pattern is anchored to the rect, not to the screen, so two rects never
+// disagree about where a square starts.
+void gfx_checker(gfx_canvas_t *c, gfx_rect_t r, gfx_level_t level, gfx_level_t bg, int cell);
