@@ -305,7 +305,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `display16x2/screen_16x2.c` | seven button-advanced pages plus the OTA one that pre-empts them, 10 fps loop, backlight dimmed to the ambient light and gated by radar presence. Sized for 16x2 |
 | `display16x2/lcd1602_rgb.c` | DFR0464 transport: character output, backlight registers, revision detection, hot-plug recovery. The only file tied to this display |
 | `gui/gfx/gfx_canvas.c` | drawing surface for the planned SSD1322 panel: a 64x256 portrait framebuffer already packed the way the controller wants it, a viewport stack carrying origin and clip, points, dashed h/v lines, rectangles |
-| `gui/gfx/gfx_text.c` | text at a given level and alignment, baseline-positioned. Drives u8g2's font decoder through its own `u8g2_cb_t`, so glyphs land in the canvas at the caller's gray level with no compositing pass |
+| `gui/gfx/gfx_text.c` | text at a given level and alignment, baseline-positioned, optionally over a filled line box (`gfx_text_bg`). Drives u8g2's font decoder through its own `u8g2_cb_t`, so glyphs land in the canvas at the caller's gray level with no compositing pass |
 | `gui/gfx/gfx_fonts.c` | generated: the u8g2 fonts actually linked, sliced by `gui/tools/extract_fonts.py` |
 | `gui/ui_model.c` | one snapshot of everything a frame may read, taken before it starts drawing, so no reading changes mid-frame and no lock is held across one |
 | `gui/ui.c` | the immediate-mode layer over the canvas: the text styles, a vertical layout cursor, separators |

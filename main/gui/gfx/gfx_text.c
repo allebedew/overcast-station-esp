@@ -132,6 +132,34 @@ int gfx_textf(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st, 
     return gfx_text(c, x, baseline, st, buf);
 }
 
+int gfx_text_bg(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st,
+                gfx_level_t bg, const char *s)
+{
+    select_font(st->font);
+    int w = (int)u8g2_GetUTF8Width(&g.u8g2, s);
+
+    if (bg != GFX_NONE) {
+        int8_t ascent  = g.u8g2.font_ref_ascent;
+        gfx_rect_t box = {
+            (int16_t)align_x(x, st, w), (int16_t)(baseline - ascent - 1),
+            (int16_t)w,                 (int16_t)(ascent + 2),
+        };
+        gfx_rect(c, box, GFX_NONE, bg, GFX_SOLID);
+    }
+    return gfx_text(c, x, baseline, st, s);
+}
+
+int gfx_textf_bg(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st,
+                 gfx_level_t bg, const char *fmt, ...)
+{
+    char buf[64];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    return gfx_text_bg(c, x, baseline, st, bg, buf);
+}
+
 // u8g2 decodes UTF-8, so a code point goes back through the same path.
 static void encode(unsigned cp, char out[5])
 {

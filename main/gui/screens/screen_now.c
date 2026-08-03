@@ -1,8 +1,10 @@
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "gfx_canvas.h"
 #include "ui.h"
 
 /* The main screen, built up one element at a time. */
@@ -40,8 +42,8 @@ static bool wx_icon(int code, const uint8_t **font, unsigned *cp, int *dy)
 }
 
 /* Current conditions as one block: the icon on the left edge, the temperature
- * and the conditions stacked to its right. The icon is the tallest of the three
- * and sets the height of the whole block; the cursor is left below it. */
+ * and the conditions stacked to its right. The two text rows set the height of
+ * the block; a taller icon hangs past the cursor. */
 static void wx_now(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
 {
     (void)m;   // placeholders for now
@@ -69,10 +71,10 @@ static void wx_now(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
 
     int baseline = top + fm.ascent;
     int tw = gfx_text(c, x, baseline, &UI_BOLD, temp);
-    ui_degree(c, x + tw + 1, top);
+    ui_degree(c, x + tw + 1, baseline, &UI_BOLD);
     gfx_text(c, x, baseline + UI_GAP + cm.ascent, &UI_TEXT, cond);
 
-    ui_gap(cur, WX_ICON_H + UI_GAP);
+    ui_gap(cur, fm.ascent + UI_GAP + cm.line_height);
 }
 
 /* One row per day: weekday, the day's low, a bar, the day's high. The bar's dim
@@ -126,35 +128,68 @@ static void wx_forecast(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
     }
 }
 
+/* The chart between two tiny rows: the quantity and the window it covers above,
+ * the range it was scaled to below — the low on the left, the high on the right,
+ * at the ends of the box the plot maps them to. */
+static void wx_chart(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
+{
+    (void)m;   // placeholders for now
+
+    float v[UI_CHART_MAX];
+    for (int i = 0; i < UI_CHART_MAX; i++) {
+        v[i] = sinf(i * 0.2f) * 3.0f + i * 0.05f;
+    }
+
+    int baseline = ui_row(cur, &UI_TEXT);
+    gfx_text_bg(c, 0,  baseline, &UI_TEXT, GFX_HL, "Press");
+    gfx_text_bg(c, UI_RX, baseline, &UI_TEXT_R, GFX_HL, "5m");
+
+    float lo, hi;
+    ui_chart(c, cur, v, UI_CHART_MAX, &lo, &hi);
+
+    baseline = ui_row(cur, &UI_TINY);
+    if (isfinite(lo)) {
+        gfx_textf(c, UI_CHART_X, baseline, &UI_TINY, "%.1f", lo);
+    }
+    if (isfinite(hi)) {
+        gfx_textf(c, UI_RX - UI_CHART_X, baseline, &UI_TINY_R, "%.1f", hi);
+    }
+}
+
 // на этом экране пока накидывает текст и графику без привязки к модели
 // чтобы посмотреть как это будет выглядеть
 void screen_now(gfx_canvas_t *c, const ui_model_t *m)
 {
+    // Background fill
+
     gfx_clear(c, GFX_OFF);
-    gfx_checker(c, (gfx_rect_t){ 0, 0, GFX_W, GFX_H }, (gfx_level_t)1, GFX_NONE, 1);
+    // gfx_checker(c, (gfx_rect_t){ 0, 0, GFX_W, GFX_H }, (gfx_level_t)1, GFX_NONE, 1);
 
     ui_cursor_t cur = { 0 };
 
-    int baseline = ui_row(&cur, &UI_TEXT);
-    gfx_text(c, 0, baseline, &UI_TEXT, "Mon 11:52");
+    // Status bar
 
-    ui_signal(c, GFX_W, baseline, 3);
+    int baseline = ui_row(&cur, &UI_TEXT);
+    gfx_text(c, 0, baseline, &UI_TEXT, "Mon");
+    gfx_text(c, UI_RX/2, baseline, &UI_TEXT_C, "11:52");
+    ui_signal(c, UI_RX, baseline, 2);
+    ui_battery(c, UI_RX - UI_SIGNAL_W - 3, baseline, 0);
 
     baseline = ui_row(&cur, &UI_TEXT);
-    gfx_text(c, 0, baseline, &UI_TEXT, "Yalta");
+    gfx_text_bg(c, 0, baseline, &UI_TEXT, GFX_HL, "Abcdefg");
     gfx_text(c, GFX_W, baseline, &UI_TEXT_R, "1m");
-
     ui_rule(c, &cur);
 
-    gfx_font_metrics_t cm;
-    gfx_font_metrics(UI_TEXT.font, &cm);
+    // Conditions with Icon
 
     wx_now(c, &cur, m);
     ui_rule(c, &cur);
 
+    // Condition Labels
+
     baseline = ui_row(&cur, &UI_TEXT);
     int fl = gfx_text(c, 0, baseline, &UI_TEXT, "FL 32.1");
-    ui_degree(c, fl + 1, baseline - cm.ascent);
+    ui_degree(c, fl + 1, baseline, &UI_TEXT);
     gfx_text(c, UI_RX, baseline, &UI_TEXT_R, "1017.1");
 
     baseline = ui_row(&cur, &UI_TEXT);
@@ -167,13 +202,16 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m)
 
     ui_rule(c, &cur);
 
-    wx_forecast(c, &cur, m);
+    // Forecast
 
+    wx_forecast(c, &cur, m);
     ui_rule(c, &cur);
+
+    // Sensor Labels
 
     baseline = ui_row(&cur, &UI_TEXT);
     int rt = gfx_text(c, 0, baseline, &UI_TEXT, "25.63");
-    ui_degree(c, rt + 1, baseline - cm.ascent);
+    ui_degree(c, rt + 1, baseline, &UI_TEXT);
     gfx_text(c, UI_RX, baseline, &UI_TEXT_R, "1017.744");
 
     baseline = ui_row(&cur, &UI_TEXT);
@@ -183,18 +221,25 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m)
     baseline = ui_row(&cur, &UI_TEXT);
     gfx_text(c, 0,     baseline, &UI_TEXT,   "Lx 183");
     gfx_text(c, UI_RX - UI_DEG_W - 1, baseline, &UI_TEXT_R, "DW 14.4");
-    ui_degree(c, UI_RX - UI_DEG_W, baseline - cm.ascent);
+    ui_degree(c, UI_RX - UI_DEG_W, baseline, &UI_TEXT);
 
     ui_rule(c, &cur);
+
+    // Chart
+
+    wx_chart(c, &cur, m);
+    ui_rule(c, &cur);
+
+    // Sun Position
 
     baseline = ui_row(&cur, &UI_TEXT);
-    gfx_text(c, 0,     baseline, &UI_TEXT,   "--CHART--");
-
+    gfx_text(c, 0,     baseline, &UI_TEXT,   "--ZAMBRETTI--");
     ui_rule(c, &cur);
+
+    // Sun Position
 
     baseline = ui_row(&cur, &UI_TEXT);
     gfx_text(c, 0,     baseline, &UI_TEXT,   "--SUN--");
-
     ui_rule(c, &cur);
 
     // A random animal pinned to the bottom edge. unifont_t_animals carries one

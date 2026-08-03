@@ -10,7 +10,7 @@
 
 /* 7-bit address space minus the reserved ranges. A missing device NACKs at
  * once, so a short timeout keeps a full sweep under a second. */
-#define I2C_SCAN_FIRST_ADDR 0x08
+#define I2C_SCAN_FIRST_ADDR 0x01
 #define I2C_SCAN_LAST_ADDR  0x77
 #define I2C_SCAN_TIMEOUT_MS 20
 

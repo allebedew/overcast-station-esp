@@ -19,7 +19,8 @@
 typedef int8_t gfx_level_t;
 #define GFX_NONE  ((gfx_level_t)-1)
 #define GFX_OFF   ((gfx_level_t)0)
-#define GFX_DIM   ((gfx_level_t)6)
+#define GFX_HL    ((gfx_level_t)4)   // background plate a full-level string stays readable on
+#define GFX_DIM   ((gfx_level_t)3)
 #define GFX_FULL  ((gfx_level_t)15)
 
 // Repeating 8-pixel dash mask; bit 0 is the first pixel of the pattern.

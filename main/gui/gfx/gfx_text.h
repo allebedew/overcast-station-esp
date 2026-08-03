@@ -38,6 +38,15 @@ int gfx_text(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st, c
 int gfx_textf(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st, const char *fmt, ...)
     __attribute__((format(printf, 5, 6)));
 
+/* The same, over a filled box: the string's advance width by the font's line
+ * box, so two strings in one font get plates of equal height whatever letters
+ * they happen to contain. */
+int gfx_text_bg(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st,
+                gfx_level_t bg, const char *s);
+int gfx_textf_bg(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st,
+                 gfx_level_t bg, const char *fmt, ...)
+    __attribute__((format(printf, 6, 7)));
+
 /* One glyph by code point, for icon fonts whose glyphs are picked by number
  * rather than typed. */
 int  gfx_glyph(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st, unsigned cp);
