@@ -291,7 +291,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `wifi_store.c` | saved credentials in NVS (`wifi_creds`), mutex-protected |
 | `web/webserver.c` | esp_http_server + mDNS; routes in one table, handlers through a wrapper that logs and blinks the LED; replies via a bounded appender that truncates rather than overrunning |
 | `ota.c` | `POST /api/ota` + rollback confirmation; publishes `ota_is_active()` and `ota_progress_percent()` |
-| `ui/led.c` | LED task: polls wifi/sensors/ota each tick, picks the pattern; persisted brightness |
+| `led.c` | LED task: polls wifi/sensors/ota each tick, picks the pattern; persisted brightness |
 | `button.c` | BOOT button: click → next page, 1.5 s hold → AP toggle |
 | `sensors/sensors.c` | one task polling all four sensors at their own periods through a shared hot-plug state machine; owns the snapshots and the cross-sensor wiring (BMP581 pressure → SCD40 compensation) |
 | `sensors/i2c_bus.c` | the I2C master bus and the recursive lock arbitrating it, for sensors and display alike |
@@ -302,8 +302,14 @@ card belongs in that device's module, not in the caller — dew point in
 | `radar/ld2450.c` | LD2450 on its own UART: reader task, frame resync and decode, the published snapshot with presence and the nearest target |
 | `sensors/veml7700.c` | command registers, auto-ranging table with its settle deadline, lux conversion with the >1000 lx correction, white/ALS ratio |
 | `sysinfo.c` | the station's own health: a boot-time snapshot of what cannot change plus live counters, the SoC temperature sensor, reset reason. CPU load is measured in one 1 s window shared by all callers |
-| `ui/screen_16x2.c` | seven button-advanced pages plus the OTA one that pre-empts them, 10 fps loop, backlight dimmed to the ambient light and gated by radar presence. Sized for 16x2 |
-| `ui/lcd1602_rgb.c` | DFR0464 transport: character output, backlight registers, revision detection, hot-plug recovery. The only file tied to this display |
+| `display16x2/screen_16x2.c` | seven button-advanced pages plus the OTA one that pre-empts them, 10 fps loop, backlight dimmed to the ambient light and gated by radar presence. Sized for 16x2 |
+| `display16x2/lcd1602_rgb.c` | DFR0464 transport: character output, backlight registers, revision detection, hot-plug recovery. The only file tied to this display |
+| `gui/gfx/gfx_canvas.c` | drawing surface for the planned SSD1322 panel: a 64x256 portrait framebuffer already packed the way the controller wants it, a viewport stack carrying origin and clip, points, dashed h/v lines, rectangles |
+| `gui/gfx/gfx_text.c` | text at a given level and alignment, baseline-positioned. Drives u8g2's font decoder through its own `u8g2_cb_t`, so glyphs land in the canvas at the caller's gray level with no compositing pass |
+| `gui/gfx/gfx_fonts.c` | generated: the u8g2 fonts actually linked, sliced by `gui/tools/extract_fonts.py` |
+| `gui/ui_model.c` | one snapshot of everything a frame may read, taken before it starts drawing, so no reading changes mid-frame and no lock is held across one |
+| `gui/ui.c` | the immediate-mode layer over the canvas: the text styles, a vertical layout cursor, separators |
+| `gui/screens/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; currently the clock row and its rule |
 | `timesync.c` | SNTP client; `timesync_is_synced()` and `timesync_format()` |
 | `sensors/climate.c` | the room-level view over the devices, plus the reduction to sea level and the site-altitude setting. Its header carries the reading resolutions |
 | `history.c` | three rings sampled from a 1 s esp_timer, climate and radar alike; the two longer ones persist to `/data` with a versioned header |
@@ -339,6 +345,18 @@ card belongs in that device's module, not in the caller — dew point in
 ./build.sh                     # build
 ./build.sh flash monitor       # first time (partition table changed) — by cable
 ./flash-ota.sh                 # afterwards — over the network
+```
+
+The drawing framework and the screens above it also build on the host, which is
+how fonts and layouts are judged without the panel — `ui_model.c` stays out of
+that build (it reads the sensor modules), so the harness fills a `ui_model_t`
+by hand:
+
+```sh
+cd main/gui/sim && make run   # self-tests, the width table, then out/*.png at 4x
+./sim 1                       # 1:1, the size the panel really is
+
+python3 main/gui/tools/extract_fonts.py   # after editing FONTS in that script
 ```
 
 `build.sh` sources `$IDF_PATH/export.sh` (defaults to `~/esp/esp-idf`) and

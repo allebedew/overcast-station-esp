@@ -3,9 +3,20 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             "timesync.c" "telegram.c" "alerts.c" "history.c"
                             "zambretti.c" "sun.c"
                             "storage.c" "weather_api.c" "weather_store.c"
-                            # what the station shows: the status LED, the
-                            # display's layouts and the panel's transport
-                            "ui/led.c" "ui/screen_16x2.c" "ui/lcd1602_rgb.c"
+                            "led.c"
+                            # the character display: its page layouts and the
+                            # panel's transport
+                            "display16x2/screen_16x2.c"
+                            "display16x2/lcd1602_rgb.c"
+                            # everything for the graphical SSD1322 panel: the
+                            # drawing framework (canvas, text over u8g2 fonts,
+                            # the fonts gui/tools/extract_fonts.py sliced out)
+                            # and the layer above it -- the per-frame snapshot
+                            # of the station's data and the screens drawn from
+                            # it. gui/sim/ is the host build, not compiled here
+                            "gui/gfx/gfx_canvas.c" "gui/gfx/gfx_text.c"
+                            "gui/gfx/gfx_fonts.c"
+                            "gui/ui_model.c" "gui/ui.c" "gui/screens/screen_now.c"
                             # what it serves: the HTTP API and the page in
                             # web/index.html
                             "web/webserver.c"
@@ -19,8 +30,10 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             "sensors/veml7700.c"
                             # the mmWave tracker, on its own UART
                             "radar/ld2450.c"
-                       INCLUDE_DIRS "." "sensors" "ui" "web" "radar"
-                       PRIV_REQUIRES esp_wifi esp_netif esp_event nvs_flash
+                       INCLUDE_DIRS "." "sensors" "display16x2" "gui" "gui/gfx"
+                                    "web" "radar"
+                       PRIV_REQUIRES u8g2
+                                     esp_wifi esp_netif esp_event nvs_flash
                                      esp_http_server esp_http_client mbedtls
                                      esp_driver_tsens esp_driver_i2c
                                      esp_driver_uart
