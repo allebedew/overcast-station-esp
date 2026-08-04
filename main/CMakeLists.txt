@@ -1,4 +1,5 @@
 idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
+                            "encoder.c"
                             "settings.c" "sysinfo.c" "ota.c"
                             "timesync.c" "telegram.c" "alerts.c" "history.c"
                             "zambretti.c" "sun.c"
@@ -36,7 +37,7 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                                      esp_wifi esp_netif esp_event nvs_flash
                                      esp_http_server esp_http_client mbedtls
                                      esp_driver_tsens esp_driver_i2c
-                                     esp_driver_uart
+                                     esp_driver_uart esp_driver_pcnt
                                      esp_app_format spi_flash json app_update)
 
 # Web assets are embedded pre-compressed and served with Content-Encoding: gzip

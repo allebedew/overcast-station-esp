@@ -13,6 +13,7 @@
 
 #include "lcd1602_rgb.h"
 #include "climate.h"
+#include "encoder.h"
 #include "ld2450.h"
 #include "zambretti.h"
 #include "ota.h"
@@ -32,6 +33,10 @@
 #define RENDER_BUF 64
 
 #define DEFAULT_RGB 0x00AAFF
+
+/* Per detent, on a channel of 0-255: 33 detents cross the range, and both ends
+ * are reachable exactly because the value clamps rather than wraps. */
+#define BL_STEP 4
 
 /* The stored colour is what a lit room gets; below BL_LUX_BRIGHT it is scaled
  * down logarithmically to BL_MIN at BL_LUX_DARK. */
@@ -79,6 +84,11 @@ static int s_stored_page;   /* what NVS already holds, screen task only */
 /* Screen task writes, button task reads: a press has nothing to advance while
  * an override is up. */
 static volatile bool s_override_active;
+
+/* The one screen the knob reaches instead of the pages: a long press enters it,
+ * a long press leaves. Screen task only. */
+static bool s_bl_edit;
+static int  s_bl_chan; /* 0 R, 1 G, 2 B — which one the knob is turning */
 
 static volatile uint32_t s_rgb = DEFAULT_RGB; /* written from the web handler */
 static volatile uint8_t s_bl_scale = 255;     /* published for the API */
@@ -297,6 +307,22 @@ static void render_system(char *l0, char *l1)
              (unsigned)(esp_get_free_heap_size() / 1024), s_bl_scale);
 }
 
+/*   Backlight 00AAFF
+ *   >R  0 G170 B255   ('>' marks the channel the knob turns; the panel itself
+ *                      is the preview, repainted as it goes) */
+static void render_backlight(char *l0, char *l1)
+{
+    uint32_t rgb = s_rgb & 0xFFFFFF;
+    snprintf(l0, RENDER_BUF, "Backlight %06X", (unsigned)rgb);
+
+    static const char CHAN[] = "RGB";
+    char *p = l1;
+    for (int i = 0; i < 3; i++) {
+        p += sprintf(p, "%c%c%3u", i == s_bl_chan ? '>' : ' ', CHAN[i],
+                     (unsigned)((rgb >> (8 * (2 - i))) & 0xFF));
+    }
+}
+
 /* One cell per 6.25 %: the ROM has no partial blocks and this transport
  * defines no custom characters. */
 static void render_ota(char *l0, char *l1)
@@ -314,7 +340,60 @@ static void render_ota(char *l0, char *l1)
     l1[LCD1602_COLS] = '\0';
 }
 
-/* The OTA page pre-empts the selected one; Wi-Fi state is reported by the LED. */
+static int wrap(int v, int n)
+{
+    v %= n;
+    return v < 0 ? v + n : v;
+}
+
+static uint32_t rgb_nudge(uint32_t rgb, int chan, int by)
+{
+    int shift = 8 * (2 - chan);
+    int v = (int)((rgb >> shift) & 0xFF) + by * BL_STEP;
+    v = v < 0 ? 0 : (v > 255 ? 255 : v);
+    return (rgb & ~(0xFFu << shift)) | ((uint32_t)v << shift);
+}
+
+/* The knob, classic mode: turning browses the pages, a long press opens the
+ * one screen that edits and another closes it, and inside it a click moves
+ * between the channels. Drained every frame even when the input goes nowhere,
+ * so nothing piles up. */
+static void input_apply(void)
+{
+    encoder_input_t in;
+    encoder_take(&in);
+
+    /* Set by the previous frame; steering what the OTA page hides would
+     * surprise whoever turned. */
+    if (s_override_active) {
+        return;
+    }
+
+    int turn = in.cw - in.ccw;
+    if (s_bl_edit) {
+        if (turn) {
+            /* Live, persisted on the way out. */
+            s_rgb = rgb_nudge(s_rgb, s_bl_chan, turn);
+        }
+        s_bl_chan = (s_bl_chan + in.click) % 3;
+    } else if (turn) {
+        s_page = wrap(s_page + turn, PAGE_COUNT);
+    }
+
+    /* An even number of long presses in one frame lands where it started. */
+    if (in.long_press % 2) {
+        s_bl_edit = !s_bl_edit;
+        if (s_bl_edit) {
+            s_bl_chan = 0;
+        } else {
+            /* One NVS write per visit, not one per detent. */
+            screen_16x2_set_backlight(s_rgb);
+        }
+    }
+}
+
+/* The OTA page pre-empts everything, the backlight screen pre-empts the pages;
+ * Wi-Fi state is reported by the LED. */
 static void render_page(char *l0, char *l1)
 {
     if (ota_is_active()) {
@@ -322,8 +401,13 @@ static void render_page(char *l0, char *l1)
         render_ota(l0, l1);
         return;
     }
-
     s_override_active = false;
+
+    if (s_bl_edit) {
+        render_backlight(l0, l1);
+        return;
+    }
+
     switch (s_page) {
     case PAGE_INDOOR:   render_indoor(l0, l1); break;
     case PAGE_PRECISE:  render_precise(l0, l1); break;
@@ -407,6 +491,8 @@ static void screen_task(void *arg)
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(FRAME_MS));
 
+        input_apply();
+
         climate_t c;
         climate_get(&c);
         uint8_t k = backlight_ramp(backlight_target(c.lux, c.lux_ok));
@@ -435,7 +521,7 @@ static void screen_task(void *arg)
 void screen_16x2_next_page(void)
 {
     /* Changing the selection out of sight would surprise whoever pressed. */
-    if (s_override_active) {
+    if (s_override_active || s_bl_edit) {
         return;
     }
     s_page = (s_page + 1) % PAGE_COUNT;

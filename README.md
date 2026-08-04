@@ -103,13 +103,32 @@ history.
   Shown on its own web card — a plan view of the fan with a dot per target —
   on its own LCD page, recorded in the history rings beside the climate
   quantities, and `presence` is what lights the panel.
+- **Rotary encoder (DFRobot SEN0235, EC11)** — A on GPIO23, B on GPIO22, button
+  on GPIO21; four wires, no supply. The module's own 47 kΩ pull-ups (R1–R3) are
+  **desoldered** — without VCC they would drag the three lines through a
+  floating rail — and the pull-ups in use are the chip's internal ones, which
+  both PCNT and `iot_button` enable themselves. A/B are decoded by PCNT in full
+  quadrature, four counts per detent: the hardware glitch filter tops out near
+  12.8 µs on this chip while contact bounce lasts milliseconds, so what rejects
+  bounce is the quadrature itself — a chattering contact counts +1/−1 around the
+  detent and cancels out. A 10 ms timer converts counts to detents and files
+  each one by direction *and* by whether the button was down; a frame drawn
+  100 ms later could not work that out. The button is the same polled
+  `iot_button` as BOOT, no interrupt; a turn with it held suppresses the click
+  that would otherwise end the gesture. `encoder_take()` hands over everything
+  since the last call and clears it — `cw`/`ccw`, `cw_held`/`ccw_held`, click,
+  double-click and long-press counts, plus the live held state. No interaction
+  scheme is implied: mapping turns to selection, editing or a menu belongs to
+  the screens. On the LCD that scheme is the classic one: turning browses the
+  pages either way, a 0.8 s hold opens the backlight screen and another leaves
+  it, and a click inside it moves between the channels.
 - **16x2 LCD** (DFRobot Gravity I2C LCD1602 RGB, DFR0464) — shares the sensor
   bus and its lock; controller at `0x3E`, backlight driver at whichever of
   `0x60` / `0x30` / `0x6B` / `0x2D` the board revision uses. Redrawn at 10 fps;
   an absent panel is re-probed every 5 s. Text is ASCII-only — the ROM has no
   Cyrillic and other bytes show as `?`, the exceptions being the degree sign
-  (`\xDF`) and the solid block (`\xFF`). Seven pages, advanced by a short BOOT
-  click and remembered in NVS (`settings/screen_page`):
+  (`\xDF`) and the solid block (`\xFF`). Seven pages, browsed by the encoder or
+  advanced by a short BOOT click, remembered in NVS (`settings/screen_page`):
 
   | Page | Rows |
   |---|---|
@@ -127,15 +146,22 @@ history.
   1000 lx, then drops to whole lux and to kilolux — the one place in the
   firmware that shows fewer digits than the standard resolution.
 
-  One page outside that rotation pre-empts whatever is selected; the button
-  cannot reach it and it is not stored, so the chosen page returns.
+  Two screens outside that rotation pre-empt whatever is selected; neither is
+  stored, so the chosen page returns.
   - OTA update — `Updating...  67%` over a progress bar, one cell per 6.25 %.
-    Stays at 100 % until the reboot, disappears on a failed upload
+    Stays at 100 % until the reboot, disappears on a failed upload. Reachable
+    by nothing, and it blocks the knob and the button while it is up
+  - Backlight — `Backlight 00AAFF` / `>R  0 G170 B255`. Opened and closed by a
+    0.8 s hold of the encoder; a click steps `>` between R, G and B, turning
+    moves that channel by 8 per detent and clamps at the ends, and the panel
+    repaints as it goes — it is its own preview. NVS is written once, on the
+    way out
 
   Wi-Fi state is reported by the LED only.
 
   The backlight color is stored as plain RGB (NVS `bl_rgb`, default `00AAFF`) —
-  the device knows nothing about hue or color models. What reaches the panel is
+  the device knows nothing about hue or color models: the encoder edits the
+  three channels themselves. What reaches the panel is
   that color scaled by the ambient light, 0-255: mapped logarithmically from
   1 lx and below, where the scale sits at its floor of 10 (dim, never dark), up
   to 70 lx and above, where the color goes out untouched. A lit channel stays
@@ -293,6 +319,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `ota.c` | `POST /api/ota` + rollback confirmation; publishes `ota_is_active()` and `ota_progress_percent()` |
 | `led.c` | LED task: polls wifi/sensors/ota each tick, picks the pattern; persisted brightness |
 | `button.c` | BOOT button: click → next page, 1.5 s hold → AP toggle |
+| `encoder.c` | EC11 knob: PCNT quadrature behind a 10 ms poll, the button on `iot_button`; publishes raw detents and press events through `encoder_take()`, no interaction scheme of its own. Its header is esp-free so the GUI simulator can drive screens with it |
 | `sensors/sensors.c` | one task polling all four sensors at their own periods through a shared hot-plug state machine; owns the snapshots and the cross-sensor wiring (BMP581 pressure → SCD40 compensation) |
 | `sensors/i2c_bus.c` | the I2C master bus and the recursive lock arbitrating it, for sensors and display alike |
 | `sensors/i2c_dev.c` | shared register access: attach, probe, raw transfers, u8/u16 reads and writes |
@@ -302,7 +329,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `radar/ld2450.c` | LD2450 on its own UART: reader task, frame resync and decode, the published snapshot with presence and the nearest target |
 | `sensors/veml7700.c` | command registers, auto-ranging table with its settle deadline, lux conversion with the >1000 lx correction, white/ALS ratio |
 | `sysinfo.c` | the station's own health: a boot-time snapshot of what cannot change plus live counters, the SoC temperature sensor, reset reason. CPU load is measured in one 1 s window shared by all callers |
-| `display16x2/screen_16x2.c` | seven button-advanced pages plus the OTA one that pre-empts them, 10 fps loop, backlight dimmed to the ambient light and gated by radar presence. Sized for 16x2 |
+| `display16x2/screen_16x2.c` | seven knob-browsed pages plus the backlight and OTA screens outside the rotation, the encoder drained once per frame, 10 fps loop, backlight dimmed to the ambient light and gated by radar presence. Sized for 16x2 |
 | `display16x2/lcd1602_rgb.c` | DFR0464 transport: character output, backlight registers, revision detection, hot-plug recovery. The only file tied to this display |
 | `gui/gfx/gfx_canvas.c` | drawing surface for the planned SSD1322 panel: a 64x256 portrait framebuffer already packed the way the controller wants it, a viewport stack carrying origin and clip, points, dashed h/v lines, rectangles |
 | `gui/gfx/gfx_text.c` | text at a given level and alignment, baseline-positioned, optionally over a filled line box (`gfx_text_bg`). Drives u8g2's font decoder through its own `u8g2_cb_t`, so glyphs land in the canvas at the caller's gray level with no compositing pass |

@@ -3,6 +3,7 @@
 #include "alerts.h"
 #include "button.h"
 #include "climate.h"
+#include "encoder.h"
 #include "history.h"
 #include "i2c_bus.h"
 #include "ld2450.h"
@@ -31,6 +32,7 @@ void app_main(void)
 
     led_init();
     button_init();
+    encoder_init();
 
     ESP_ERROR_CHECK(wifi_connect());
     storage_init();
