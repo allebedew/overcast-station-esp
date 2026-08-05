@@ -44,6 +44,20 @@ history.
   the first 12 s after boot); blue — AP mode, pulsing off N times every 3 s for
   N clients; green blinking — connecting; solid — connected, color by CO₂
   (green ≤400, yellow 800, red ≥1200 ppm), dipping off on every HTTP request.
+- **Buzzer** (passive piezo KPT-1410 on GPIO19, straight on the pin) — one LEDC
+  channel, nineteen tunes, a new one cuts off whatever is playing: three clicks
+  at different pitches, two bare tones well below resonance (2.5 and 1.5 kHz,
+  there to be listened to), `OK`/`WARN`/`ALARM`/`ERROR`, one per CO₂ zone edge in
+  each direction (the motif repeats once per zone crossed, rising going up and
+  falling coming down), `STORM`, `ARRIVE`/`LEAVE` and the boot chirp. The
+  element resonates at 4 kHz and drops off
+  steeply either side, so tunes differ by rhythm inside 3.5–4.5 kHz, not by
+  pitch. Volume is the PWM duty, 1–50 % of full swing (the fundamental goes as
+  sin(π·duty), so 50 % is the loudest the element gets), set on the buzzer page
+  and kept in NVS (`settings/buzz_vol`). The pin is pulled down and left alone
+  for 10 ms before LEDC claims it — driving 10 nF straight to ground clicks.
+  Nothing beeps on its own yet; what triggers which tune is a separate module
+  still to come.
 - **I2C sensors** — SDA GPIO2 / SCL GPIO3, all of it in `main/sensors/`: the
   bus, one transport file per device, and a single task ticking at 10 ms that
   brings each sensor up at its own period through one hot-plug state machine —
@@ -119,15 +133,17 @@ history.
   since the last call and clears it — `cw`/`ccw`, `cw_held`/`ccw_held`, click,
   double-click and long-press counts, plus the live held state. No interaction
   scheme is implied: mapping turns to selection, editing or a menu belongs to
-  the screens. On the LCD that scheme is the classic one: turning browses the
-  pages either way, a 0.8 s hold opens the backlight screen and another leaves
-  it, and a click inside it moves between the channels.
+  the screens. On the LCD that scheme is browse-then-enter: turning walks the
+  pages either way, a click enters the page it stops on if that page has
+  anything to edit (the others ignore it), a 0.8 s hold leaves. Inside a page a
+  click picks the field and a turn changes it; edits are live and hit NVS once,
+  on the way out.
 - **16x2 LCD** (DFRobot Gravity I2C LCD1602 RGB, DFR0464) — shares the sensor
   bus and its lock; controller at `0x3E`, backlight driver at whichever of
   `0x60` / `0x30` / `0x6B` / `0x2D` the board revision uses. Redrawn at 10 fps;
   an absent panel is re-probed every 5 s. Text is ASCII-only — the ROM has no
   Cyrillic and other bytes show as `?`, the exceptions being the degree sign
-  (`\xDF`) and the solid block (`\xFF`). Seven pages, browsed by the encoder or
+  (`\xDF`) and the solid block (`\xFF`). Nine pages, browsed by the encoder or
   advanced by a short BOOT click, remembered in NVS (`settings/screen_page`):
 
   | Page | Rows |
@@ -139,6 +155,8 @@ history.
   | zambretti | `1013.2 hPa v2.1` / `Chgable, rain` |
   | sun | `Day 05:25 20:59` / `Sun+32.4° v13:45` |
   | system | `17:27:40 28.07` / `12% 184k BL184` |
+  | backlight (editable) | `Backlight 00AAFF` / `>R  0 G170 B255` |
+  | buzzer (editable) | `>Buzzer  vol 10` / ` Tune      Alarm` |
 
   Sixteen characters are the whole constraint: the humidity is whole percent on
   the headline page and gives up its slot to the dew point on the precise one,
@@ -318,6 +336,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `web/webserver.c` | esp_http_server + mDNS; routes in one table, handlers through a wrapper that logs and blinks the LED; replies via a bounded appender that truncates rather than overrunning |
 | `ota.c` | `POST /api/ota` + rollback confirmation; publishes `ota_is_active()` and `ota_progress_percent()` |
 | `led.c` | LED task: polls wifi/sensors/ota each tick, picks the pattern; persisted brightness |
+| `buzzer.c` | passive piezo on one LEDC channel: the tune table and a task that plays it, waiting out each note on its request queue so a new tune preempts mid-note |
 | `button.c` | BOOT button: click → next page, 1.5 s hold → AP toggle |
 | `encoder.c` | EC11 knob: PCNT quadrature behind a 10 ms poll, the button on `iot_button`; publishes raw detents and press events through `encoder_take()`, no interaction scheme of its own. Its header is esp-free so the GUI simulator can drive screens with it |
 | `sensors/sensors.c` | one task polling all four sensors at their own periods through a shared hot-plug state machine; owns the snapshots and the cross-sensor wiring (BMP581 pressure → SCD40 compensation) |
@@ -329,7 +348,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `radar/ld2450.c` | LD2450 on its own UART: reader task, frame resync and decode, the published snapshot with presence and the nearest target |
 | `sensors/veml7700.c` | command registers, auto-ranging table with its settle deadline, lux conversion with the >1000 lx correction, white/ALS ratio |
 | `sysinfo.c` | the station's own health: a boot-time snapshot of what cannot change plus live counters, the SoC temperature sensor, reset reason. CPU load is measured in one 1 s window shared by all callers |
-| `display16x2/screen_16x2.c` | seven knob-browsed pages plus the backlight and OTA screens outside the rotation, the encoder drained once per frame, 10 fps loop, backlight dimmed to the ambient light and gated by radar presence. Sized for 16x2 |
+| `display16x2/screen_16x2.c` | nine knob-browsed pages in one table, each with its own optional input handler, plus the OTA screen outside the rotation; the browse/enter/leave shell, the encoder drained once per frame, 10 fps loop, backlight dimmed to the ambient light and gated by radar presence. Sized for 16x2 |
 | `display16x2/lcd1602_rgb.c` | DFR0464 transport: character output, backlight registers, revision detection, hot-plug recovery. The only file tied to this display |
 | `gui/gfx/gfx_canvas.c` | drawing surface for the planned SSD1322 panel: a 64x256 portrait framebuffer already packed the way the controller wants it, a viewport stack carrying origin and clip, points, dashed h/v lines, rectangles |
 | `gui/gfx/gfx_text.c` | text at a given level and alignment, baseline-positioned, optionally over a filled line box (`gfx_text_bg`). Drives u8g2's font decoder through its own `u8g2_cb_t`, so glyphs land in the canvas at the caller's gray level with no compositing pass |

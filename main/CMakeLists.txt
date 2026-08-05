@@ -4,7 +4,7 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             "timesync.c" "telegram.c" "alerts.c" "history.c"
                             "zambretti.c" "sun.c"
                             "storage.c" "weather_api.c" "weather_store.c"
-                            "led.c"
+                            "led.c" "buzzer.c"
                             # the character display: its page layouts and the
                             # panel's transport
                             "display16x2/screen_16x2.c"
@@ -38,6 +38,7 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                                      esp_http_server esp_http_client mbedtls
                                      esp_driver_tsens esp_driver_i2c
                                      esp_driver_uart esp_driver_pcnt
+                                     esp_driver_ledc
                                      esp_app_format spi_flash json app_update)
 
 # Web assets are embedded pre-compressed and served with Content-Encoding: gzip

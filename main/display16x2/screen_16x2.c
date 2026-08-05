@@ -12,6 +12,7 @@
 #include "esp_system.h"
 
 #include "lcd1602_rgb.h"
+#include "buzzer.h"
 #include "climate.h"
 #include "encoder.h"
 #include "ld2450.h"
@@ -73,6 +74,8 @@ typedef enum {
     PAGE_ZAMBRETTI, /* what the station's own barometer expects */
     PAGE_SUN,       /* the day's length and where the sun is in it */
     PAGE_SYSTEM,    /* clock and how the station itself is doing */
+    PAGE_BACKLIGHT, /* the settings pages last, past everything readable */
+    PAGE_BUZZER,
     PAGE_COUNT,
 } page_t;
 
@@ -82,13 +85,13 @@ static volatile int s_page; /* advanced from the button task */
 static int s_stored_page;   /* what NVS already holds, screen task only */
 
 /* Screen task writes, button task reads: a press has nothing to advance while
- * an override is up. */
+ * an override is up, or while the knob is working inside a page. */
 static volatile bool s_override_active;
+static volatile bool s_inside;
 
-/* The one screen the knob reaches instead of the pages: a long press enters it,
- * a long press leaves. Screen task only. */
-static bool s_bl_edit;
-static int  s_bl_chan; /* 0 R, 1 G, 2 B — which one the knob is turning */
+static int s_bl_chan;  /* 0 R, 1 G, 2 B — the channel the knob is turning */
+static int s_bz_field; /* 0 volume, 1 tune */
+static int s_bz_tune;  /* which tune the buzzer page auditions */
 
 static volatile uint32_t s_rgb = DEFAULT_RGB; /* written from the web handler */
 static volatile uint8_t s_bl_scale = 255;     /* published for the API */
@@ -308,8 +311,9 @@ static void render_system(char *l0, char *l1)
 }
 
 /*   Backlight 00AAFF
- *   >R  0 G170 B255   ('>' marks the channel the knob turns; the panel itself
- *                      is the preview, repainted as it goes) */
+ *   >R  0 G170 B255   ('>' marks the channel the knob turns, and only shows
+ *                      once the page is entered; the panel itself is the
+ *                      preview, repainted as it goes) */
 static void render_backlight(char *l0, char *l1)
 {
     uint32_t rgb = s_rgb & 0xFFFFFF;
@@ -318,9 +322,20 @@ static void render_backlight(char *l0, char *l1)
     static const char CHAN[] = "RGB";
     char *p = l1;
     for (int i = 0; i < 3; i++) {
-        p += sprintf(p, "%c%c%3u", i == s_bl_chan ? '>' : ' ', CHAN[i],
-                     (unsigned)((rgb >> (8 * (2 - i))) & 0xFF));
+        p += sprintf(p, "%c%c%3u", s_inside && i == s_bl_chan ? '>' : ' ',
+                     CHAN[i], (unsigned)((rgb >> (8 * (2 - i))) & 0xFF));
     }
+}
+
+/*   >Buzzer  vol 10  (sixteen exactly, both rows)
+ *    Tune      Alarm  ('>' marks the field the knob changes; turning the tune
+ *                      field plays what it lands on, so browsing is testing) */
+static void render_buzzer(char *l0, char *l1)
+{
+    snprintf(l0, RENDER_BUF, "%cBuzzer  vol%3u", s_inside && !s_bz_field ? '>' : ' ',
+             buzzer_get_volume());
+    snprintf(l1, RENDER_BUF, "%cTune %10s", s_inside && s_bz_field ? '>' : ' ',
+             buzzer_tune_name(s_bz_tune));
 }
 
 /* One cell per 6.25 %: the ROM has no partial blocks and this transport
@@ -354,10 +369,78 @@ static uint32_t rgb_nudge(uint32_t rgb, int chan, int by)
     return (rgb & ~(0xFFu << shift)) | ((uint32_t)v << shift);
 }
 
-/* The knob, classic mode: turning browses the pages, a long press opens the
- * one screen that edits and another closes it, and inside it a click moves
- * between the channels. Drained every frame even when the input goes nowhere,
- * so nothing piles up. */
+/* ---------------- what the knob does inside a page ---------------- */
+
+/* Both editable pages work the same way: a click picks the field, a turn
+ * changes it. Values are live and written to NVS on the way out — one write per
+ * visit, not one per detent. */
+
+static void backlight_enter(void)
+{
+    s_bl_chan = 0;
+}
+
+static void backlight_input(const encoder_input_t *in)
+{
+    int turn = in->cw - in->ccw;
+    if (turn) {
+        s_rgb = rgb_nudge(s_rgb, s_bl_chan, turn);
+    }
+    s_bl_chan = (s_bl_chan + in->click) % 3;
+}
+
+static void backlight_leave(void)
+{
+    screen_16x2_set_backlight(s_rgb);
+}
+
+static void buzzer_enter(void)
+{
+    s_bz_field = 0;
+}
+
+static void buzzer_input(const encoder_input_t *in)
+{
+    int turn = in->cw - in->ccw;
+    if (turn && s_bz_field) {
+        s_bz_tune = wrap(s_bz_tune + turn, BUZZER_TUNE_COUNT);
+        buzzer_play(s_bz_tune); /* landing on a tune is how it gets auditioned */
+    } else if (turn) {
+        int vol = buzzer_get_volume() + turn;
+        vol = vol < BUZZER_VOL_MIN ? BUZZER_VOL_MIN
+                                   : (vol > BUZZER_VOL_MAX ? BUZZER_VOL_MAX : vol);
+        buzzer_set_volume((uint8_t)vol);
+        buzzer_play(BUZZER_CLICK); /* a volume step is worth nothing unheard */
+    }
+    s_bz_field = (s_bz_field + in->click) % 2;
+}
+
+typedef struct {
+    void (*render)(char *l0, char *l1);
+    void (*input)(const encoder_input_t *in); /* NULL: nothing to enter */
+    void (*enter)(void);
+    void (*leave)(void);
+} screen_t;
+
+static const screen_t SCREENS[PAGE_COUNT] = {
+    [PAGE_INDOOR]    = { .render = render_indoor },
+    [PAGE_PRECISE]   = { .render = render_precise },
+    [PAGE_RADAR]     = { .render = render_radar },
+    [PAGE_OUTDOOR]   = { .render = render_outdoor },
+    [PAGE_ZAMBRETTI] = { .render = render_zambretti },
+    [PAGE_SUN]       = { .render = render_sun },
+    [PAGE_SYSTEM]    = { .render = render_system },
+    [PAGE_BACKLIGHT] = { render_backlight, backlight_input, backlight_enter,
+                         backlight_leave },
+    [PAGE_BUZZER]    = { render_buzzer, buzzer_input, buzzer_enter,
+                         buzzer_save_volume },
+};
+
+/* The knob: turning browses the pages, a click enters the one it stops on if
+ * that page has anything to work with, a long press leaves again. Inside,
+ * every event goes to the page — what a turn and a click mean there is its own
+ * business. Drained every frame even when the input goes nowhere, so nothing
+ * piles up. */
 static void input_apply(void)
 {
     encoder_input_t in;
@@ -369,31 +452,33 @@ static void input_apply(void)
         return;
     }
 
-    int turn = in.cw - in.ccw;
-    if (s_bl_edit) {
-        if (turn) {
-            /* Live, persisted on the way out. */
-            s_rgb = rgb_nudge(s_rgb, s_bl_chan, turn);
+    if (s_inside) {
+        /* An even number of long presses in one frame lands where it started. */
+        if (in.long_press % 2) {
+            if (SCREENS[s_page].leave) {
+                SCREENS[s_page].leave();
+            }
+            s_inside = false;
+            return;
         }
-        s_bl_chan = (s_bl_chan + in.click) % 3;
-    } else if (turn) {
-        s_page = wrap(s_page + turn, PAGE_COUNT);
+        SCREENS[s_page].input(&in);
+        return;
     }
 
-    /* An even number of long presses in one frame lands where it started. */
-    if (in.long_press % 2) {
-        s_bl_edit = !s_bl_edit;
-        if (s_bl_edit) {
-            s_bl_chan = 0;
-        } else {
-            /* One NVS write per visit, not one per detent. */
-            screen_16x2_set_backlight(s_rgb);
+    int turn = in.cw - in.ccw;
+    if (turn) {
+        s_page = wrap(s_page + turn, PAGE_COUNT);
+    }
+    if (in.click && SCREENS[s_page].input) {
+        if (SCREENS[s_page].enter) {
+            SCREENS[s_page].enter();
         }
+        s_inside = true;
     }
 }
 
-/* The OTA page pre-empts everything, the backlight screen pre-empts the pages;
- * Wi-Fi state is reported by the LED. */
+/* The OTA page pre-empts everything, including a page being edited; Wi-Fi state
+ * is reported by the LED. */
 static void render_page(char *l0, char *l1)
 {
     if (ota_is_active()) {
@@ -402,21 +487,7 @@ static void render_page(char *l0, char *l1)
         return;
     }
     s_override_active = false;
-
-    if (s_bl_edit) {
-        render_backlight(l0, l1);
-        return;
-    }
-
-    switch (s_page) {
-    case PAGE_INDOOR:   render_indoor(l0, l1); break;
-    case PAGE_PRECISE:  render_precise(l0, l1); break;
-    case PAGE_RADAR:    render_radar(l0, l1); break;
-    case PAGE_OUTDOOR:  render_outdoor(l0, l1); break;
-    case PAGE_ZAMBRETTI: render_zambretti(l0, l1); break;
-    case PAGE_SUN:      render_sun(l0, l1); break;
-    default:            render_system(l0, l1); break;
-    }
+    SCREENS[s_page].render(l0, l1);
 }
 
 /* Scaling a channel to zero would shift the hue, so a lit channel stays lit —
@@ -521,7 +592,7 @@ static void screen_task(void *arg)
 void screen_16x2_next_page(void)
 {
     /* Changing the selection out of sight would surprise whoever pressed. */
-    if (s_override_active || s_bl_edit) {
+    if (s_override_active || s_inside) {
         return;
     }
     s_page = (s_page + 1) % PAGE_COUNT;
@@ -554,6 +625,6 @@ void screen_16x2_init(void)
     lcd1602_rgb_init(); /* absent display is not an error */
     xTaskCreate(screen_task, "screen", 3072, NULL, 2, NULL);
 
-    ESP_LOGI(TAG, "Screen task started, %d pages (+2 conditional) at %d fps",
+    ESP_LOGI(TAG, "Screen task started, %d pages (+1 conditional) at %d fps",
              PAGE_COUNT, FPS);
 }

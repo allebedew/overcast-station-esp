@@ -2,6 +2,7 @@
 #include "nvs_flash.h"
 #include "alerts.h"
 #include "button.h"
+#include "buzzer.h"
 #include "climate.h"
 #include "encoder.h"
 #include "history.h"
@@ -31,6 +32,7 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     led_init();
+    buzzer_init();
     button_init();
     encoder_init();
 
@@ -59,6 +61,7 @@ void app_main(void)
 
     /* Init went through — mark the image valid, cancelling the OTA rollback. */
     ota_confirm_running_image();
+    buzzer_play(BUZZER_BOOT); /* at the end, so it means "came up", not "powered" */
 
     sysinfo_log_tasks();
     /* app_main returns; the led and wifi tasks carry on. */
