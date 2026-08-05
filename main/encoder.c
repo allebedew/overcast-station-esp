@@ -61,8 +61,16 @@ static void poll(void *arg)
 
     int total = 0;
     pcnt_unit_get_count(s_unit, &total);
-    remainder += total - last;
+    int delta = total - last;
     last = total;
+
+    /* The resting phase need not align with the counter's zero, so a fraction
+     * of a detent can sit in the remainder for good. Left there it is a half
+     * detent of hysteresis that eats the first click after every reversal. */
+    if ((remainder > 0 && delta < 0) || (remainder < 0 && delta > 0)) {
+        remainder = 0;
+    }
+    remainder += delta;
 
     int detents = remainder / DETENT; /* truncates toward zero, both signs */
     if (detents == 0) {
