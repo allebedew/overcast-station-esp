@@ -9,7 +9,6 @@
 #include "esp_log.h"
 
 #include "gfx_target.h"
-#include "gfx_text.h"
 
 static const char *TAG = "ssd1322";
 
@@ -165,50 +164,21 @@ void ssd1322_init(void)
     ESP_LOGI(TAG, "panel up on SPI%d, %d MHz", SPI_HOST_ID + 1, SPI_HZ / 1000000);
 }
 
-/* Asymmetric on both axes, so it settles orientation as well as mirroring: the
- * block sits at the canvas origin and the ramp runs from black at the top to
- * full at the bottom. */
-static void orientation_scene(gfx_canvas_t *c)
-{
-    gfx_init(c);
-
-    gfx_rect(c, (gfx_rect_t){ 0, 0, GFX_W, GFX_H }, GFX_DIM, GFX_NONE, GFX_SOLID);
-    gfx_rect(c, (gfx_rect_t){ 2, 2, 8, 8 }, GFX_NONE, GFX_FULL, GFX_SOLID);
-
-    const gfx_text_style_t st = { u8g2_font_04b_03_tr, GFX_FULL, GFX_LEFT };
-    gfx_text(c, 14, 10, &st, "TOP");
-
-    for (int i = 0; i < 16; i++) {
-        gfx_rect(c, (gfx_rect_t){ 40, (int16_t)(20 + i * 8), 20, 8 },
-                 GFX_NONE, (gfx_level_t)i, GFX_SOLID);
-    }
-}
-
 void ssd1322_selftest(int pattern)
 {
     /* One row at a time: a full-screen constant needs no 8 KB buffer of its own,
      * and RAM is written in the same order gfx_present() uses. */
     static const uint8_t row[ROW_BYTES] = { [0 ... ROW_BYTES - 1] = 0xFF };
 
-    /* Static: 8 KB is far past what a task stack here can hold. */
-    static gfx_canvas_t canvas;
-
-    switch (pattern) {
-    case 0:
+    if (pattern == 0) {
         cmd(CMD_MODE_ALLON);
-        break;
-    case 1:
-        cmd(CMD_MODE_NORM);
-        set_window(0, GFX_W - 1);
-        for (int i = 0; i < GFX_W; i++) {
-            tx(row, sizeof(row), 1);
-        }
-        break;
-    default:
-        cmd(CMD_MODE_NORM);
-        orientation_scene(&canvas);
-        gfx_present(&canvas);
-        break;
+        return;
+    }
+
+    cmd(CMD_MODE_NORM);
+    set_window(0, GFX_W - 1);
+    for (int i = 0; i < GFX_W; i++) {
+        tx(row, sizeof(row), 1);
     }
 }
 

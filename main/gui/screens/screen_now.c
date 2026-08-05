@@ -7,7 +7,157 @@
 #include "gfx_canvas.h"
 #include "ui.h"
 
-/* The main screen, built up one element at a time. */
+/* The main screen, built up one element at a time. The widgets below are here
+ * rather than in ui.c because nothing else draws them yet; the first screen that
+ * wants one is the reason to move it up. */
+
+/* A degree sign, drawn rather than typed: no linked font carries U+00B0, and
+ * 04b_03 has no Latin-1 variant upstream at all. Sits on the cap line of the run
+ * it follows, so it takes that run's baseline and style. */
+#define DEG_W 3
+
+static void degree(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st)
+{
+    gfx_font_metrics_t m;
+    gfx_font_metrics(st->font, &m);
+    int top = baseline - m.cap;
+
+    gfx_px(c, x + 1, top,     GFX_FULL);
+    gfx_px(c, x,     top + 1, GFX_FULL);
+    gfx_px(c, x + 2, top + 1, GFX_FULL);
+    gfx_px(c, x + 1, top + 2, GFX_FULL);
+}
+
+/* Signal strength: bars of rising height, the leftmost `lit` of them at full
+ * brightness and the rest dim. `right` is the anchor the way UI_RX is for text —
+ * one past the last inked column — and the bars stand one row above `baseline`. */
+#define SIG_BARS 4
+#define SIG_W (2 * SIG_BARS - 1)   /* 1 px bars, 1 px apart */
+#define SIG_H 5
+
+static void bars(gfx_canvas_t *c, int right, int baseline, int lit)
+{
+    for (int i = 0; i < SIG_BARS; i++) {
+        int h = SIG_H - SIG_BARS + 1 + i;   // 2..SIG_H
+        gfx_vline(c, right - 1 - 2 * (SIG_BARS - 1 - i), baseline - h, h,
+                  i < lit ? GFX_FULL : GFX_DIM, GFX_SOLID, 0);
+    }
+}
+
+/* Battery: a dim shell filled to `pct` at full brightness. Same anchor as
+ * bars(), so the two line up on one row. */
+#define BATT_W 7
+#define BATT_H 4
+
+static void battery(gfx_canvas_t *c, int right, int baseline, int pct)
+{
+    if (pct < 0)   { pct = 0; }
+    if (pct > 100) { pct = 100; }
+
+    int x     = right - BATT_W;
+    int y     = baseline - BATT_H;
+    int shell = BATT_W - 1;   // the nub is the last of the BATT_W columns
+
+    // The charge is the outline itself lit over the first `fill` columns; the
+    // inside stays empty, so at this size the level reads off the length of a
+    // wall rather than an area two pixels tall. Rounding down keeps the nub --
+    // the last column -- for a true 100%, and any charge at all is worth one.
+    int fill = pct == 100 ? BATT_W : pct * BATT_W / 100;
+    if (fill == 0 && pct > 0) {
+        fill = 1;
+    }
+    int walls = fill < shell ? fill : shell;
+
+    gfx_rect(c, (gfx_rect_t){ (int16_t)x, (int16_t)y, (int16_t)shell, BATT_H },
+             GFX_DIM, GFX_NONE, GFX_SOLID);
+
+    // A single column cannot hold a partial level, so the shell's right wall and
+    // the nub are each either reached or not.
+    gfx_vline(c, x + shell - 1, y + 1, BATT_H - 2,
+              fill >= shell ? GFX_FULL : GFX_DIM, GFX_SOLID, 0);
+    gfx_vline(c, right - 1, y + 1, BATT_H - 2,
+              fill >= BATT_W ? GFX_FULL : GFX_DIM, GFX_SOLID, 0);
+
+    if (walls > 0) {
+        gfx_hline(c, x, y,              walls, GFX_FULL, GFX_SOLID, 0);
+        gfx_hline(c, x, y + BATT_H - 1, walls, GFX_FULL, GFX_SOLID, 0);
+        gfx_vline(c, x, y, BATT_H, GFX_FULL, GFX_SOLID, 0);
+    }
+}
+
+/* Chart: a plot area inset from the side edges. Drawn at the cursor, like
+ * ui_rule(), and leaves the standard gap below it.
+ *
+ * One value per column, oldest on the left; a longer series keeps its newest
+ * values, a shorter one is pushed to the right edge. NAN is a gap and draws
+ * nothing — history records them, and a zero in their place would flatten the
+ * rest. The vertical range is the series' own min..max, so the plot fills the
+ * height and shows shape, not absolute level. That range is handed back through
+ * lo_out/hi_out — NAN when the series holds no finite value — so a caller that
+ * labels the chart does not scan the series again. Either may be NULL. */
+#define CHART_X 2
+#define CHART_W (GFX_W - 2 * CHART_X)   /* 60 */
+#define CHART_H 24
+#define CHART_MAX CHART_W
+
+/* The fill under the line, brightest at the top of the box and fading down.
+ * CHART_GRAD 0 leaves the line bare; CHART_GRAD_CHECKER inks every other pixel
+ * instead of every one, thinning the fill on top of the fade. */
+#define CHART_GRAD         1
+#define CHART_GRAD_CHECKER 1
+#define CHART_GRAD_TOP     6
+#define CHART_GRAD_BOT     0
+
+static void chart(gfx_canvas_t *c, ui_cursor_t *cur, const float *v, int n,
+                  float *lo_out, float *hi_out)
+{
+    int top = cur->y;
+    ui_gap(cur, CHART_H + UI_GAP);
+
+    if (n > CHART_MAX) {
+        v += n - CHART_MAX;
+        n  = CHART_MAX;
+    }
+
+    float lo = 0, hi = 0;
+    bool  any = false;
+    for (int i = 0; i < n; i++) {
+        if (!isfinite(v[i])) { continue; }
+        if (!any || v[i] < lo) { lo = v[i]; }
+        if (!any || v[i] > hi) { hi = v[i]; }
+        any = true;
+    }
+    if (lo_out) { *lo_out = any ? lo : NAN; }
+    if (hi_out) { *hi_out = any ? hi : NAN; }
+    if (!any) { return; }
+
+    float span   = hi - lo;
+    int   bottom = top + CHART_H - 1;
+    int   x      = CHART_X + CHART_W - n;   // newest value on the right edge
+
+    for (int i = 0; i < n; i++) {
+        if (!isfinite(v[i])) { continue; }
+        int y = span > 0
+                    ? bottom - (int)lroundf((v[i] - lo) / span * (CHART_H - 1))
+                    : top + (CHART_H - 1) / 2;
+
+#if CHART_GRAD
+        // Anchored to the box, not to the line, so the columns add up to one
+        // gradient instead of a wedge under every point.
+        for (int r = y + 1; r <= bottom; r++) {
+#if CHART_GRAD_CHECKER
+            // Anchored to the box's own corner, so the pattern does not shift
+            // with where the series happens to start.
+            if ((((x + i - CHART_X) + (r - top)) & 1) != 0) { continue; }
+#endif
+            gfx_px(c, x + i, r,
+                   (gfx_level_t)(CHART_GRAD_TOP - (r - top) * (CHART_GRAD_TOP - CHART_GRAD_BOT)
+                                                      / (CHART_H - 1)));
+        }
+#endif
+        gfx_px(c, x + i, y, GFX_FULL);
+    }
+}
 
 /* WMO code to a glyph. unifont_t_weather re-encodes its icons into the ASCII
  * range, so '.' is the sun there; the snowman it has no glyph for and comes
@@ -71,7 +221,7 @@ static void wx_now(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
 
     int baseline = top + fm.ascent;
     int tw = gfx_text(c, x, baseline, &UI_BOLD, temp);
-    ui_degree(c, x + tw + 1, baseline, &UI_BOLD);
+    degree(c, x + tw + 1, baseline, &UI_BOLD);
     gfx_text(c, x, baseline + UI_GAP + cm.ascent, &UI_TEXT, cond);
 
     ui_gap(cur, fm.ascent + UI_GAP + cm.line_height);
@@ -135,8 +285,8 @@ static void wx_chart(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
 {
     (void)m;   // placeholders for now
 
-    float v[UI_CHART_MAX];
-    for (int i = 0; i < UI_CHART_MAX; i++) {
+    float v[CHART_MAX];
+    for (int i = 0; i < CHART_MAX; i++) {
         v[i] = sinf(i * 0.2f) * 3.0f + i * 0.05f;
     }
 
@@ -145,19 +295,19 @@ static void wx_chart(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
     gfx_text_bg(c, UI_RX, baseline, &UI_TEXT_R, GFX_HL, "5m");
 
     float lo, hi;
-    ui_chart(c, cur, v, UI_CHART_MAX, &lo, &hi);
+    chart(c, cur, v, CHART_MAX, &lo, &hi);
 
     baseline = ui_row(cur, &UI_TINY);
     if (isfinite(lo)) {
-        gfx_textf(c, UI_CHART_X, baseline, &UI_TINY, "%.1f", lo);
+        gfx_textf(c, CHART_X, baseline, &UI_TINY, "%.1f", lo);
     }
     if (isfinite(hi)) {
-        gfx_textf(c, UI_RX - UI_CHART_X, baseline, &UI_TINY_R, "%.1f", hi);
+        gfx_textf(c, UI_RX - CHART_X, baseline, &UI_TINY_R, "%.1f", hi);
     }
 }
 
-// на этом экране пока накидывает текст и графику без привязки к модели
-// чтобы посмотреть как это будет выглядеть
+// Text and graphics roughed in without the model behind them yet, to see how it
+// will look.
 void screen_now(gfx_canvas_t *c, const ui_model_t *m)
 {
     // Background fill
@@ -172,8 +322,8 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m)
     int baseline = ui_row(&cur, &UI_TEXT);
     gfx_text(c, 0, baseline, &UI_TEXT, "Mon");
     gfx_text(c, UI_RX/2, baseline, &UI_TEXT_C, "11:52");
-    ui_signal(c, UI_RX, baseline, 2);
-    ui_battery(c, UI_RX - UI_SIGNAL_W - 3, baseline, 0);
+    bars(c, UI_RX, baseline, 2);
+    battery(c, UI_RX - SIG_W - 3, baseline, 0);
 
     baseline = ui_row(&cur, &UI_TEXT);
     gfx_text_bg(c, 0, baseline, &UI_TEXT, GFX_HL, "Abcdefg");
@@ -189,7 +339,7 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m)
 
     baseline = ui_row(&cur, &UI_TEXT);
     int fl = gfx_text(c, 0, baseline, &UI_TEXT, "FL 32.1");
-    ui_degree(c, fl + 1, baseline, &UI_TEXT);
+    degree(c, fl + 1, baseline, &UI_TEXT);
     gfx_text(c, UI_RX, baseline, &UI_TEXT_R, "1017.1");
 
     baseline = ui_row(&cur, &UI_TEXT);
@@ -211,7 +361,7 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m)
 
     baseline = ui_row(&cur, &UI_TEXT);
     int rt = gfx_text(c, 0, baseline, &UI_TEXT, "25.63");
-    ui_degree(c, rt + 1, baseline, &UI_TEXT);
+    degree(c, rt + 1, baseline, &UI_TEXT);
     gfx_text(c, UI_RX, baseline, &UI_TEXT_R, "1017.744");
 
     baseline = ui_row(&cur, &UI_TEXT);
@@ -220,8 +370,8 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m)
 
     baseline = ui_row(&cur, &UI_TEXT);
     gfx_text(c, 0,     baseline, &UI_TEXT,   "Lx 183");
-    gfx_text(c, UI_RX - UI_DEG_W - 1, baseline, &UI_TEXT_R, "DW 14.4");
-    ui_degree(c, UI_RX - UI_DEG_W, baseline, &UI_TEXT);
+    gfx_text(c, UI_RX - DEG_W - 1, baseline, &UI_TEXT_R, "DW 14.4");
+    degree(c, UI_RX - DEG_W, baseline, &UI_TEXT);
 
     ui_rule(c, &cur);
 

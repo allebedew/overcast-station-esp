@@ -60,6 +60,7 @@ typedef struct {
 
     /* poll-task private */
     bool running;
+    bool announced; /* its absence is already in the log */
     int errors;
     int64_t next_us;
     int64_t probe_at_us;
@@ -160,6 +161,18 @@ static void bmp581_published(const sensor_reading_t *r)
 
 /* ---------------- polling ---------------- */
 
+/* One line per disappearance, not one per probe: an empty bus would otherwise
+ * fill the log every PROBE_PERIOD_MS, and it is the boot log that gets read. */
+static void announce_absent(sensor_t *s, esp_err_t err)
+{
+    if (s->announced) {
+        return;
+    }
+    s->announced = true;
+    ESP_LOGE(TAG, "%s absent (%s), probing every %d s", s->name,
+             esp_err_to_name(err), PROBE_PERIOD_MS / 1000);
+}
+
 static void set_offline(sensor_t *s, int64_t now)
 {
     taskENTER_CRITICAL(&s_lock);
@@ -189,11 +202,13 @@ static bool sensor_step(sensor_t *s)
             return true;
         }
         if (err != ESP_OK) {
+            announce_absent(s, err);
             set_offline(s, now);
             return false;
         }
         s->running = true;
         s->errors = 0;
+        s->announced = false;
         if (s->on_start) {
             s->on_start();
         }
@@ -212,8 +227,7 @@ static bool sensor_step(sensor_t *s)
     }
     if (err != ESP_OK) {
         if (++s->errors >= MAX_ERRORS) {
-            ESP_LOGW(TAG, "%s not responding (%s), will re-probe", s->name,
-                     esp_err_to_name(err));
+            announce_absent(s, err);
             set_offline(s, now);
         }
         return false;

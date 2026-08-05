@@ -13,7 +13,7 @@
 void ssd1322_init(void);
 
 /* Test patterns, wired to nothing above: 0 turns every pixel on through a single
- * command (no RAM involved), 1 fills RAM instead, and 2 presents a canvas that
- * is asymmetric on both axes. The first two separate a dead command path from a
- * dead data path; the third settles orientation, mirroring and the gray scale. */
+ * command (no RAM involved), 1 fills RAM instead. Together they separate a dead
+ * command path from a dead data path. Orientation and mirroring are settled by
+ * drawing a scene instead — screen_test is where that goes. */
 void ssd1322_selftest(int pattern);

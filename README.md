@@ -63,7 +63,10 @@ history.
   brings each sensor up at its own period through one hot-plug state machine —
   probe until it answers, then read; 3 consecutive failures drop it back to
   probing every 5 s. Setup failures are diagnosed from the log: each driver
-  names the address, the step it gave up on and the I2C error.
+  names the address, the step it gave up on and the I2C error. Going offline —
+  whether the device answered once and stopped or was never there — is one
+  error line per disappearance, not one per probe, so an empty bus says so at
+  boot and then keeps quiet.
   The bus lock lives in `i2c_bus.c` and is recursive, so a driver helper and a
   caller bracketing a longer sequence compose. Waits the *device* needs stay
   outside it: a step returns `ESP_ERR_NOT_FINISHED` and resumes on the next
@@ -366,6 +369,9 @@ card belongs in that device's module, not in the caller — dew point in
 ./build.sh flash monitor       # first time (partition table changed) — by cable
 ./flash-ota.sh                 # afterwards — over the network
 ```
+
+The same commands are Zed tasks (`esp: …` in `.zed/tasks.json`); the OTA task
+always targets the default `weather.local`.
 
 The drawing framework and the screens above it also build on the host, which is
 how fonts and layouts are judged without the panel — `ui_model.c` stays out of
