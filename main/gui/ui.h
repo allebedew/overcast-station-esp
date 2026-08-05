@@ -82,3 +82,6 @@ void ui_chart(gfx_canvas_t *c, ui_cursor_t *cur, const float *v, int n,
 void ui_render(gfx_canvas_t *c, const ui_model_t *m);
 
 void screen_now(gfx_canvas_t *c, const ui_model_t *m);
+
+/* Scratch scene for panel experiments, model-free by design. */
+void screen_test(gfx_canvas_t *c);

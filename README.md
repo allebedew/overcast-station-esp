@@ -192,6 +192,35 @@ history.
   The fade starts as soon as presence drops; the only hold is the radar's own
   5 s, which covers whoever stops moving. A silent or absent module leaves the
   panel lit.
+- **256x64 OLED** (Newhaven NHD-5.5-25664UCG3, SSD1322) — 4-wire SPI on SPI2 at
+  8 MHz, mounted rotated so everything above the transport works in portrait
+  64x256. Experiment stage: `gui_init()` puts one static frame on the panel —
+  `screen_test`, the scratch scene — and there is no render task and no model
+  behind it yet.
+
+  | Panel pin | To |
+  |---|---|
+  | 1, 5 (VSS) | GND, both wires of the supply cable |
+  | 2 (VDD) | 3.3 V, logic only |
+  | 3 (BC_VDD) | 5 V, boost converter — 220 mA typ at 100 % pixels |
+  | 4 (D/C) | GPIO4 |
+  | 7 (SCLK) | GPIO6 (IOMUX FSPICLK) |
+  | 8 (SDIN) | GPIO7 (IOMUX FSPID) |
+  | 16 (/RES) | GPIO5 |
+  | 17 (/CS) | GND — the display is alone on the bus |
+
+  Module jumpers: **R3, R5, R8 closed, R2, R4, R6, R9, R10 open**. R3/R5 pull
+  BS0/BS1 low for 4-wire SPI; R8 with R9 removed is the datasheet's Jumper
+  Option #1, which splits the supplies — the logic then draws 280 µA from 3.3 V
+  instead of the 350 mA the single-supply default pulls through the on-board
+  boost converter. Pin 18 (BC_CTRL) enables that converter and is left floating:
+  it measures 29 kΩ to ground rather than to VDD, which reads like a pull-down,
+  but the converter does come up on its own. A dark panel means a wire from 18
+  to 2 before anything else is suspected.
+
+  /CS on ground costs the only thing that re-syncs the controller's bit counter,
+  so /RES is pulsed at init and is the way back from a bus glitch; SSD1322 has
+  no software reset.
 - **Climate** — the room as opposed to the chips. One source per quantity and
   **no fallbacks**: temperature from the TMP117, humidity and CO₂ from the
   SCD40, pressure from the BMP581, illuminance from the VEML7700. The SCD40 and
@@ -350,11 +379,14 @@ card belongs in that device's module, not in the caller — dew point in
 | `sysinfo.c` | the station's own health: a boot-time snapshot of what cannot change plus live counters, the SoC temperature sensor, reset reason. CPU load is measured in one 1 s window shared by all callers |
 | `display16x2/screen_16x2.c` | nine knob-browsed pages in one table, each with its own optional input handler, plus the OTA screen outside the rotation; the browse/enter/leave shell, the encoder drained once per frame, 10 fps loop, backlight dimmed to the ambient light and gated by radar presence. Sized for 16x2 |
 | `display16x2/lcd1602_rgb.c` | DFR0464 transport: character output, backlight registers, revision detection, hot-plug recovery. The only file tied to this display |
-| `gui/gfx/gfx_canvas.c` | drawing surface for the planned SSD1322 panel: a 64x256 portrait framebuffer already packed the way the controller wants it, a viewport stack carrying origin and clip, points, dashed h/v lines, rectangles |
+| `gui/gfx/ssd1322.c` | the panel's transport and the only implementation of `gfx_target.h`: SPI setup, reset, the datasheet's init sequence, and a present that is one 8 KB DMA write because the canvas is packed the way the controller scans. The only file tied to this display |
+| `gui/gfx/gfx_canvas.c` | drawing surface for the SSD1322 panel: a 64x256 portrait framebuffer already packed the way the controller wants it, a viewport stack carrying origin and clip, points, dashed h/v lines, rectangles |
 | `gui/gfx/gfx_text.c` | text at a given level and alignment, baseline-positioned, optionally over a filled line box (`gfx_text_bg`). Drives u8g2's font decoder through its own `u8g2_cb_t`, so glyphs land in the canvas at the caller's gray level with no compositing pass |
 | `gui/gfx/gfx_fonts.c` | generated: the u8g2 fonts actually linked, sliced by `gui/tools/extract_fonts.py` |
 | `gui/ui_model.c` | one snapshot of everything a frame may read, taken before it starts drawing, so no reading changes mid-frame and no lock is held across one |
 | `gui/ui.c` | the immediate-mode layer over the canvas: the text styles, a vertical layout cursor, separators |
+| `gui/gui.c` | the panel as the rest of the firmware sees it: owns the single 8 KB canvas, brings up the transport, draws a frame. The only firmware-only file in `gui/` |
+| `gui/screens/screen_test.c` | scratch scene for panel experiments, model-free; rendered by both the firmware and the simulator |
 | `gui/screens/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; currently the clock, the outdoor block (icon, temperature, conditions) and the pressure / humidity / UVI / wind rows |
 | `timesync.c` | SNTP client; `timesync_is_synced()` and `timesync_format()` |
 | `sensors/climate.c` | the room-level view over the devices, plus the reduction to sea level and the site-altitude setting. Its header carries the reading resolutions |

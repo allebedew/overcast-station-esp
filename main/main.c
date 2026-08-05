@@ -5,6 +5,7 @@
 #include "buzzer.h"
 #include "climate.h"
 #include "encoder.h"
+#include "gui.h"
 #include "history.h"
 #include "i2c_bus.h"
 #include "ld2450.h"
@@ -55,6 +56,8 @@ void app_main(void)
 
     /* After the data modules, so the display starts on real readings. */
     screen_16x2_init();
+
+    gui_init();
 
     /* Last: the handlers read from every module above. */
     webserver_start();

@@ -39,7 +39,8 @@ typedef struct {
     // Column-major, two vertically adjacent pixels per byte, high nibble = even y.
     // After the 90 degree rotation this is byte-identical to the SSD1322's own
     // layout, so flushing is a copy with no transpose.
-    uint8_t        buf[GFX_W][GFX_H / 2];
+    // Aligned because it is handed to SPI DMA as-is, without a bounce buffer.
+    uint8_t        buf[GFX_W][GFX_H / 2] __attribute__((aligned(4)));
     gfx_viewport_t vp[GFX_VP_DEPTH];
     uint8_t        depth;
 } gfx_canvas_t;

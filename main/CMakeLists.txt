@@ -16,8 +16,9 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             # of the station's data and the screens drawn from
                             # it. gui/sim/ is the host build, not compiled here
                             "gui/gfx/gfx_canvas.c" "gui/gfx/gfx_text.c"
-                            "gui/gfx/gfx_fonts.c"
-                            "gui/ui_model.c" "gui/ui.c" "gui/screens/screen_now.c"
+                            "gui/gfx/gfx_fonts.c" "gui/gfx/ssd1322.c"
+                            "gui/ui_model.c" "gui/ui.c" "gui/gui.c"
+                            "gui/screens/screen_now.c" "gui/screens/screen_test.c"
                             # what it serves: the HTTP API and the page in
                             # web/index.html
                             "web/webserver.c"
@@ -38,7 +39,7 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                                      esp_http_server esp_http_client mbedtls
                                      esp_driver_tsens esp_driver_i2c
                                      esp_driver_uart esp_driver_pcnt
-                                     esp_driver_ledc
+                                     esp_driver_ledc esp_driver_spi
                                      esp_app_format spi_flash json app_update)
 
 # Web assets are embedded pre-compressed and served with Content-Encoding: gzip

@@ -513,6 +513,7 @@ int main(int argc, char **argv)
         { "align",      scene_align },
         { "primitives", scene_primitives },
         { "screen_now", scene_screen_now },
+        { "screen_test", screen_test },   // the scratch scene, as the panel gets it
     };
 
     char path[128];
