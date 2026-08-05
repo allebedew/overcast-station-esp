@@ -35,6 +35,18 @@ static void degree(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t 
 #define SIG_W (2 * SIG_BARS - 1)   /* 1 px bars, 1 px apart */
 #define SIG_H 5
 
+/* RSSI to lit bars. The thresholds are the usual client-side ones: -55 dBm and
+ * up is as good as the link ever gets indoors, below -75 it starts dropping
+ * rates. No link is no bars, and an associated but weak link still shows one. */
+static int sig_bars(bool link, int rssi)
+{
+    if (!link)       { return 0; }
+    if (rssi >= -55) { return 4; }
+    if (rssi >= -65) { return 3; }
+    if (rssi >= -75) { return 2; }
+    return 1;
+}
+
 static void bars(gfx_canvas_t *c, int right, int baseline, int lit)
 {
     for (int i = 0; i < SIG_BARS; i++) {
@@ -82,6 +94,63 @@ static void battery(gfx_canvas_t *c, int right, int baseline, int pct)
         gfx_hline(c, x, y,              walls, GFX_FULL, GFX_SOLID, 0);
         gfx_hline(c, x, y + BATT_H - 1, walls, GFX_FULL, GFX_SOLID, 0);
         gfx_vline(c, x, y, BATT_H, GFX_FULL, GFX_SOLID, 0);
+    }
+}
+
+/* Local time of the weather location: the clock runs in UTC and the offset is
+ * applied by hand, so gmtime_r() over the shifted stamp gives local fields.
+ * False before the first SNTP sync, when there is no time to show at all. */
+static bool local_tm(const ui_model_t *m, struct tm *out)
+{
+    if (m->now == 0) {
+        return false;
+    }
+    time_t t = m->now + m->utc_off_s;
+    gmtime_r(&t, out);
+    return true;
+}
+
+/* How old a reading is, in the largest unit that fits. A negative age is a
+ * fetch that has never succeeded. */
+static void age_str(char *buf, size_t n, int32_t s)
+{
+    if (s < 0) {
+        snprintf(buf, n, "--");
+    } else if (s < 60) {
+        snprintf(buf, n, "%ds", (int)s);
+    } else if (s < 3600) {
+        snprintf(buf, n, "%dm", (int)(s / 60));
+    } else if (s < 86400) {
+        snprintf(buf, n, "%dh", (int)(s / 3600));
+    } else {
+        snprintf(buf, n, "%dd", (int)(s / 86400));
+    }
+}
+
+/* A reading formatted for a row, or dashes when its source has nothing to
+ * report — every quantity on this screen carries such a flag, so the check
+ * belongs with the formatting rather than around every draw. */
+static const char *num(char *buf, size_t n, bool ok, const char *fmt, double v)
+{
+    if (ok) {
+        snprintf(buf, n, fmt, v);
+    } else {
+        snprintf(buf, n, "--");
+    }
+    return buf;
+}
+
+/* Illuminance spans five decades and the row has three characters for it:
+ * tenths below 1 lx, whole lux up to 1000, thousands above. The stored
+ * resolution is 0.1 lx throughout — this row is the one that drops digits. */
+static void lux_str(char *buf, size_t n, float lx)
+{
+    if (lx < 1.0f) {
+        snprintf(buf, n, "%.1f", lx);
+    } else if (lx < 1000.0f) {
+        snprintf(buf, n, "%.0f", lx);
+    } else {
+        snprintf(buf, n, "%.1fk", lx / 1000.0f);
     }
 }
 
@@ -161,8 +230,9 @@ static void chart(gfx_canvas_t *c, ui_cursor_t *cur, const float *v, int n,
 
 /* WMO code to a glyph. unifont_t_weather re-encodes its icons into the ASCII
  * range, so '.' is the sun there; the snowman it has no glyph for and comes
- * from unifont_t_77 instead. Both are 16x16. A code that is not here draws no
- * icon. */
+ * from unifont_t_77 instead. Both are 16x16. The table is filled in code by
+ * code, so a code not in it yet — and no reading at all — falls back to the
+ * first entry, the sun. */
 #define WX_ICON_H 16
 
 static const struct {
@@ -178,17 +248,18 @@ static const struct {
     { 75, u8g2_font_unifont_t_77,      9924, -2 },
 };
 
-static bool wx_icon(int code, const uint8_t **font, unsigned *cp, int *dy)
+static void wx_icon(int code, const uint8_t **font, unsigned *cp, int *dy)
 {
-    for (size_t i = 0; i < sizeof(WX_ICONS) / sizeof(WX_ICONS[0]); i++) {
+    size_t hit = 0;
+    for (size_t i = 1; i < sizeof(WX_ICONS) / sizeof(WX_ICONS[0]); i++) {
         if (WX_ICONS[i].code == code) {
-            *font = WX_ICONS[i].font;
-            *cp   = WX_ICONS[i].cp;
-            *dy   = WX_ICONS[i].dy;
-            return true;
+            hit = i;
+            break;
         }
     }
-    return false;
+    *font = WX_ICONS[hit].font;
+    *cp   = WX_ICONS[hit].cp;
+    *dy   = WX_ICONS[hit].dy;
 }
 
 /* Current conditions as one block: the icon on the left edge, the temperature
@@ -196,32 +267,42 @@ static bool wx_icon(int code, const uint8_t **font, unsigned *cp, int *dy)
  * the block; a taller icon hangs past the cursor. */
 static void wx_now(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
 {
-    (void)m;   // placeholders for now
+    char temp[8];
+    char cond[16];
 
-    const char *temp = "28.4";
-    const char *cond = "CLEAR SKY";
-    const int   code = 0;
+    if (m->out_ok) {
+        snprintf(temp, sizeof(temp), "%.1f", m->out.temp_c);
+        size_t i = 0;
+        for (; m->out_cond[i] && i < sizeof(cond) - 1; i++) {
+            cond[i] = (char)toupper((unsigned char)m->out_cond[i]);
+        }
+        cond[i] = '\0';
+    } else {
+        snprintf(temp, sizeof(temp), "--");
+        snprintf(cond, sizeof(cond), "NO DATA");
+    }
+    const int code = m->out_ok ? m->out.weather_code : -1;
 
     gfx_font_metrics_t fm, cm;
     gfx_font_metrics(UI_BOLD.font, &fm);
     gfx_font_metrics(UI_TEXT.font, &cm);
 
-    const uint8_t *icon_font = NULL;
-    unsigned       icon_cp   = 0;
-    int            icon_dy   = 0;
-    bool icon = wx_icon(code, &icon_font, &icon_cp, &icon_dy);
+    const uint8_t *icon_font;
+    unsigned       icon_cp;
+    int            icon_dy;
+    wx_icon(code, &icon_font, &icon_cp, &icon_dy);
 
     gfx_text_style_t is = { icon_font, GFX_FULL, GFX_LEFT };
     int top = cur->y;
-    int x   = icon ? gfx_glyph_w(&is, icon_cp) + UI_GAP : 0;
+    int x   = gfx_glyph_w(&is, icon_cp) + UI_GAP;
 
-    if (icon) {
-        gfx_glyph(c, 0, top + WX_ICON_H + icon_dy, &is, icon_cp);
-    }
+    gfx_glyph(c, 0, top + WX_ICON_H + icon_dy, &is, icon_cp);
 
     int baseline = top + fm.ascent;
     int tw = gfx_text(c, x, baseline, &UI_BOLD, temp);
-    degree(c, x + tw + 1, baseline, &UI_BOLD);
+    if (m->out_ok) {
+        degree(c, x + tw + 1, baseline, &UI_BOLD);
+    }
     gfx_text(c, x, baseline + UI_GAP + cm.ascent, &UI_TEXT, cond);
 
     ui_gap(cur, fm.ascent + UI_GAP + cm.line_height);
@@ -306,8 +387,8 @@ static void wx_chart(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
     }
 }
 
-// Text and graphics roughed in without the model behind them yet, to see how it
-// will look.
+// Built up element by element: what is drawn here reads the model, the blocks
+// still commented out are roughed-in layout waiting for theirs.
 void screen_now(gfx_canvas_t *c, const ui_model_t *m)
 {
     // Background fill
@@ -319,15 +400,30 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m)
 
     // Status bar
 
+    struct tm tm;
+    char day[4]   = "---";
+    char hhmm[6]  = "--:--";
+    if (local_tm(m, &tm)) {
+        strftime(day,  sizeof(day),  "%a",    &tm);
+        strftime(hhmm, sizeof(hhmm), "%H:%M", &tm);
+    }
+
     int baseline = ui_row(&cur, &UI_TEXT);
-    gfx_text(c, 0, baseline, &UI_TEXT, "Mon");
-    gfx_text(c, UI_RX/2, baseline, &UI_TEXT_C, "11:52");
-    bars(c, UI_RX, baseline, 2);
-    battery(c, UI_RX - SIG_W - 3, baseline, 0);
+    gfx_text(c, 0, baseline, &UI_TEXT, day);
+    gfx_text(c, UI_RX/2, baseline, &UI_TEXT_C, hhmm);
+    bars(c, UI_RX, baseline, sig_bars(m->link, m->rssi));
+    battery(c, UI_RX - SIG_W - 3, baseline, 0);   // no charge source on the board yet
+
+    char age[8];
+    age_str(age, sizeof(age), m->out.age_s);
 
     baseline = ui_row(&cur, &UI_TEXT);
-    gfx_text_bg(c, 0, baseline, &UI_TEXT, GFX_HL, "Abcdefg");
-    gfx_text(c, GFX_W, baseline, &UI_TEXT_R, "1m");
+    int aw = gfx_text(c, GFX_W, baseline, &UI_TEXT_R, age);
+    // The location name is whatever the user typed, so it is clipped rather than
+    // trusted to fit next to the age.
+    gfx_push(c, (gfx_rect_t){ 0, 0, (int16_t)(UI_RX - aw - 2), GFX_H });
+    gfx_text_bg(c, 0, baseline, &UI_TEXT, GFX_NONE, m->loc[0] ? m->loc : "No loc");
+    gfx_pop(c);
     ui_rule(c, &cur);
 
     // Conditions with Icon
@@ -337,44 +433,80 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m)
 
     // Condition Labels
 
-    baseline = ui_row(&cur, &UI_TEXT);
-    int fl = gfx_text(c, 0, baseline, &UI_TEXT, "FL 32.1");
-    degree(c, fl + 1, baseline, &UI_TEXT);
-    gfx_text(c, UI_RX, baseline, &UI_TEXT_R, "1017.1");
+    char b[16];
+    bool ok = m->out_ok;
 
     baseline = ui_row(&cur, &UI_TEXT);
-    gfx_text(c, 0,     baseline, &UI_TEXT,   "52%");
-    gfx_text(c, UI_RX, baseline, &UI_TEXT_R, "W12-20");
+    int fl = gfx_text(c, 0, baseline, &UI_TEXT,
+                      num(b, sizeof(b), ok, "FL %.1f", m->out.feels_c));
+    if (ok) {
+        degree(c, fl + 1, baseline, &UI_TEXT);
+    }
+    gfx_text(c, UI_RX, baseline, &UI_TEXT_R,
+             num(b, sizeof(b), ok, "%.1f", m->out.pressure_msl_hpa));
 
     baseline = ui_row(&cur, &UI_TEXT);
-    gfx_text(c, 0,     baseline, &UI_TEXT,   "UV 6.3");
-    gfx_text(c, UI_RX, baseline, &UI_TEXT_R, "CL 0%");
+    gfx_text(c, 0, baseline, &UI_TEXT,
+             num(b, sizeof(b), ok, "%.0f%%", m->out.humidity_pct));
+    // Speed and gusts as one range, in the units the API reports.
+    if (ok) {
+        gfx_textf(c, UI_RX, baseline, &UI_TEXT_R, "%s%.0f-%.0f",
+                  weather_api_wind_dir_str(m->out.wind_dir_deg),
+                  m->out.wind_kmh, m->out.gust_kmh);
+    } else {
+        gfx_text(c, UI_RX, baseline, &UI_TEXT_R, "--");
+    }
+
+    baseline = ui_row(&cur, &UI_TEXT);
+    gfx_text(c, 0, baseline, &UI_TEXT,
+             num(b, sizeof(b), ok, "UV %.1f", m->out.uvi));
+    gfx_text(c, UI_RX, baseline, &UI_TEXT_R,
+             num(b, sizeof(b), ok, "CL %.0f%%", (double)m->out.cloud_pct));
 
     ui_rule(c, &cur);
-
+/*
     // Forecast
 
     wx_forecast(c, &cur, m);
     ui_rule(c, &cur);
 
     // Sensor Labels
+*/
+    const climate_t *cl = &m->climate;
 
     baseline = ui_row(&cur, &UI_TEXT);
-    int rt = gfx_text(c, 0, baseline, &UI_TEXT, "25.63");
-    degree(c, rt + 1, baseline, &UI_TEXT);
-    gfx_text(c, UI_RX, baseline, &UI_TEXT_R, "1017.744");
+    int rt = gfx_text(c, 0, baseline, &UI_TEXT,
+                      num(b, sizeof(b), cl->temp_ok, "%.2f", cl->temp_c));
+    if (cl->temp_ok) {
+        degree(c, rt + 1, baseline, &UI_TEXT);
+    }
+    gfx_text(c, UI_RX, baseline, &UI_TEXT_R,
+             num(b, sizeof(b), cl->press_ok, "%.3f", cl->press_msl_hpa));
 
     baseline = ui_row(&cur, &UI_TEXT);
-    gfx_text(c, 0,     baseline, &UI_TEXT,   "69.9%");
-    gfx_text(c, UI_RX, baseline, &UI_TEXT_R, "CO2 1264");
+    gfx_text(c, 0, baseline, &UI_TEXT,
+             num(b, sizeof(b), cl->rh_ok, "%.1f%%", cl->rh_pct));
+    gfx_text(c, UI_RX, baseline, &UI_TEXT_R,
+             num(b, sizeof(b), cl->co2_ok, "CO2 %.0f", (double)cl->co2_ppm));
 
     baseline = ui_row(&cur, &UI_TEXT);
-    gfx_text(c, 0,     baseline, &UI_TEXT,   "Lx 183");
-    gfx_text(c, UI_RX - DEG_W - 1, baseline, &UI_TEXT_R, "DW 14.4");
-    degree(c, UI_RX - DEG_W, baseline, &UI_TEXT);
+    if (cl->lux_ok) {
+        char lx[8];
+        lux_str(lx, sizeof(lx), cl->lux);
+        gfx_textf(c, 0, baseline, &UI_TEXT, "Lx %s", lx);
+    } else {
+        gfx_text(c, 0, baseline, &UI_TEXT, "--");
+    }
+    // The degree sits past the run, so the dew point gives up its own width at
+    // the right edge -- and takes it back when there is nothing to sign.
+    gfx_text(c, cl->rh_ok ? UI_RX - DEG_W - 1 : UI_RX, baseline, &UI_TEXT_R,
+             num(b, sizeof(b), cl->rh_ok, "DW %.1f", cl->dew_c));
+    if (cl->rh_ok) {
+        degree(c, UI_RX - DEG_W, baseline, &UI_TEXT);
+    }
 
     ui_rule(c, &cur);
-
+/*
     // Chart
 
     wx_chart(c, &cur, m);
@@ -394,7 +526,15 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m)
 
     // A random animal pinned to the bottom edge. unifont_t_animals carries one
     // unbroken run of glyphs from 0x20, and its ink sits one row below the
-    // baseline, which is what puts the last row on GFX_H - 1
+    // baseline, which is what puts the last row on GFX_H - 1. Drawn once and
+    // kept: rolled per frame it would be a different animal ten times a second.
+    static unsigned cp;
+    if (cp == 0) {
+        cp = 0x20 + (unsigned)(rand() % 99);
+    }
+
     const gfx_text_style_t zoo = { u8g2_font_unifont_t_animals, GFX_FULL, GFX_CENTER };
-    gfx_glyph(c, GFX_W / 2, GFX_H - 2, &zoo, 0x20 + (unsigned)(rand() % 99));
+    gfx_glyph(c, GFX_W / 2, GFX_H - 2, &zoo, cp);
+
+    */
 }

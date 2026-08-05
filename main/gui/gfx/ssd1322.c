@@ -31,6 +31,9 @@ static const char *TAG = "ssd1322";
 
 #define ROW_BYTES (GFX_H / 2) /* 128: one panel row, two pixels per byte */
 
+/* Low nibble of 0xB1: the reset phase, 5 DCLK. */
+#define PHASE1 0x02
+
 #define CMD_COL_ADDR   0x15
 #define CMD_WRITE_RAM  0x5C
 #define CMD_ROW_ADDR   0x75
@@ -75,9 +78,24 @@ static void cmd_args(uint8_t c, const uint8_t *args, size_t n)
 }
 
 /* Newhaven's sequence from the module datasheet, flattened to <command, count,
- * args...>. Two values are ours to revisit: the re-map byte decides which
- * physical edge is the top of the portrait screen, and contrast sets how hard
- * the panel is driven. */
+ * args...>, with the re-map byte and the whole brightness group replaced.
+ *
+ * Brightness: the datasheet's pre-charge settings light the pixel outside the
+ * phase the contrast current controls, and their floor was bright enough that
+ * contrast and master current together could barely dim the panel. Measured on
+ * the panel and frozen here: phase 2 at 9 clocks and a pre-charge voltage of 5
+ * drop that floor far enough that contrast alone covers the useful range, with
+ * master current left as the one knob above. The second pre-charge period must
+ * be at least 1 -- a 0 there does not shorten the phase, it jumps the panel to
+ * bright.
+ *
+ * Contrast is the other half of the same product (I_SEG = contrast/256 * I_REF *
+ * current * 2) and is fixed at the top of its range, which makes it the ceiling
+ * the master current then scales down from. Lower it to take the whole
+ * brightness scale down with it.
+ *
+ * The four values are gfx_target.h's, not this file's, so screen_panel starts
+ * from what the panel is actually running. */
 static const uint8_t INIT_SCRIPT[] = {
     0xFD, 1, 0x12,             /* unlock the basic command set */
     0xAE, 0,                   /* display off while it is configured */
@@ -94,13 +112,13 @@ static const uint8_t INIT_SCRIPT[] = {
     0xB5, 1, 0x00,             /* GPIO inputs disabled */
     0xAB, 1, 0x01,             /* internal VDD regulator */
     0xB4, 2, 0xA0, 0xFD,       /* external VSL, present on this module */
-    0xC1, 1, 0x9F,             /* contrast */
-    0xC7, 1, 0x0F,             /* master current */
+    0xC1, 1, GFX_CONTRAST_DEFAULT,
+    0xC7, 1, GFX_BRIGHTNESS_DEFAULT,
     0xB9, 0,                   /* default linear grayscale table */
-    0xB1, 1, 0xE2,             /* phase 1 = 5 clocks, phase 2 = 14 */
+    0xB1, 1, GFX_PHASE2_DEFAULT << 4 | PHASE1,   /* phase 1 = 5 clocks */
     0xD1, 2, 0xA2, 0x20,       /* enhanced driving scheme */
-    0xBB, 1, 0x1F,             /* pre-charge voltage 0.60 * VCC */
-    0xB6, 1, 0x08,             /* second pre-charge period */
+    0xBB, 1, GFX_VPRECHG_DEFAULT,
+    0xB6, 1, GFX_PRECHG2_DEFAULT,
     0xBE, 1, 0x07,             /* VCOMH 0.86 * VCC */
     CMD_MODE_NORM, 0,
     0xA9, 0,                   /* partial display off */
@@ -195,4 +213,29 @@ void gfx_present_cols(const gfx_canvas_t *c, int x0, int x1)
 
     set_window(x0, x1);
     tx(c->buf[x0], (size_t)(x1 - x0 + 1) * ROW_BYTES, 1);
+}
+
+void gfx_set_brightness(uint8_t level)
+{
+    const uint8_t current = level & 0x0F;
+
+    cmd_args(0xC7, &current, 1);
+}
+
+void gfx_set_contrast(uint8_t contrast)
+{
+    cmd_args(0xC1, &contrast, 1);
+}
+
+void gfx_set_precharge(uint8_t phase2, uint8_t second, uint8_t voltage)
+{
+    /* Phase 1 is the reset phase and has nothing to do with brightness, so it
+     * keeps the init script's value and only phase 2 is under the knob. */
+    const uint8_t phase = (uint8_t)((phase2 & 0x0F) << 4 | PHASE1);
+    const uint8_t sec   = (uint8_t)(second & 0x0F);
+    const uint8_t volt  = (uint8_t)(voltage & 0x1F);
+
+    cmd_args(0xB1, &phase, 1);
+    cmd_args(0xB6, &sec, 1);
+    cmd_args(0xBB, &volt, 1);
 }

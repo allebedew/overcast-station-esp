@@ -11,9 +11,29 @@
 #include <unistd.h>
 
 #include "gfx_canvas.h"
+#include "gfx_target.h"
 #include "gfx_text.h"
 #include "sim_png.h"
 #include "ui.h"
+
+// The host half of gfx_target.h: a PNG has no drive level. gfx_present() is not
+// implemented here at all -- sim_write_png() takes the canvas directly.
+void gfx_set_brightness(uint8_t level)
+{
+    (void)level;
+}
+
+void gfx_set_contrast(uint8_t contrast)
+{
+    (void)contrast;
+}
+
+void gfx_set_precharge(uint8_t phase2, uint8_t second, uint8_t voltage)
+{
+    (void)phase2;
+    (void)second;
+    (void)voltage;
+}
 
 static const uint8_t *F_TINY  = u8g2_font_4x6_tr;
 static const uint8_t *F_TEXT  = u8g2_font_6x10_mr;
@@ -445,17 +465,30 @@ static void scene_screen_now(gfx_canvas_t *c)
         .rh_ok   = true,  .rh_pct   = 48.3f,  .dew_c = 10.2f,
         .co2_ok  = true,  .co2_ppm  = 1284,
         .press_ok = true, .press_msl_hpa = 1013.2f,
-        .lux_ok  = true,  .lux      = 145.0f,
+        .lux_ok  = true,  .lux      = 12345.0f,
     };
 
     m.out_ok   = true;
     m.out      = (weather_api_data_t){ .temp_c = 25.8f, .feels_c = -7.1f, .wind_kmh = 12.0f,
-                                       .humidity_pct = 35.0f, .pressure_msl_hpa = 1018.0f,
+                                       .gust_kmh = 20.0f, .humidity_pct = 35.0f,
+                                       .pressure_msl_hpa = 1018.0f, .cloud_pct = 100,
                                        .uvi = 5.25f, .wind_dir_deg = 265,
                                        .weather_code = 0 };
     m.out_cond = "Clear sky";   // the longest weather_api_code_short() returns
+    m.out.age_s = 63 * 60;
+
+    snprintf(m.loc, sizeof(m.loc), "Vozdvizhenka");   // a name long enough to crowd the age
+    m.link = true;
+    m.rssi = -68;
 
     ui_render(c, &m);
+}
+
+// The tuning screen as the panel gets it: its state is its own, and untouched
+// here it holds the values the transport comes up with.
+static void scene_screen_panel(gfx_canvas_t *c)
+{
+    screen_panel(c);
 }
 
 static void measure(void)
@@ -513,7 +546,8 @@ int main(int argc, char **argv)
         { "align",      scene_align },
         { "primitives", scene_primitives },
         { "screen_now", scene_screen_now },
-        { "screen_test", screen_test },   // the scratch scene, as the panel gets it
+        { "screen_panel", scene_screen_panel },
+        { "screen_test",  screen_test },
     };
 
     char path[128];

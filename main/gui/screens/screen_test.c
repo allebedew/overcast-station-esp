@@ -7,8 +7,6 @@ void screen_test(gfx_canvas_t *c)
 {
     ui_cursor_t cur = { 4 };
 
-    /* Every pixel lit: the panel's worst case for current and for the boost
-     * converter, with the text knocked out of it rather than drawn on it. */
     gfx_clear(c, GFX_OFF);
 
     const gfx_text_style_t st = { UI_TEXT_C.font, 1, GFX_CENTER };

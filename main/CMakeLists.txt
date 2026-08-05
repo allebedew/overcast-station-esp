@@ -13,8 +13,9 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             # it. gui/sim/ is the host build, not compiled here
                             "gui/gfx/gfx_canvas.c" "gui/gfx/gfx_text.c"
                             "gui/gfx/gfx_fonts.c" "gui/gfx/ssd1322.c"
-                            "gui/ui_model.c" "gui/ui.c" "gui/gui.c"
-                            "gui/screens/screen_now.c" "gui/screens/screen_test.c"
+                            "gui/ui_model.c" "gui/ui_state.c" "gui/ui.c" "gui/gui.c"
+                            "gui/screens/screen_now.c" "gui/screens/screen_panel.c"
+                            "gui/screens/screen_test.c"
                             # what it serves: the HTTP API and the page in
                             # web/index.html
                             "web/webserver.c"

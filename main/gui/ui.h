@@ -3,6 +3,7 @@
 #include "gfx_canvas.h"
 #include "gfx_text.h"
 #include "ui_model.h"
+#include "ui_state.h"
 
 /* The layer between the drawing framework and the station's data: styles, a
  * vertical layout cursor and the screens themselves.
@@ -45,6 +46,16 @@ void ui_rule(gfx_canvas_t *c, ui_cursor_t *cur);
 void ui_render(gfx_canvas_t *c, const ui_model_t *m);
 
 void screen_now(gfx_canvas_t *c, const ui_model_t *m);
+
+/* The panel's own drive settings under the encoder, over a ramp of every gray
+ * level. A tuning screen, not part of the station's UI, and the first one to
+ * own its state and its input instead of leaving them to the caller. */
+void       screen_panel(gfx_canvas_t *c);
+ui_event_t screen_panel_input(const encoder_input_t *in);
+
+/* Every field on one line, for the log — the only way a session's findings
+ * leave the device. */
+void screen_panel_format(char *buf, int n);
 
 /* Scratch scene for panel experiments, model-free by design. */
 void screen_test(gfx_canvas_t *c);

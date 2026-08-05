@@ -29,6 +29,12 @@ typedef struct {
     weather_api_data_t out;      /* the fetched forecast */
     bool               out_ok;
     const char        *out_cond; /* its WMO code as words, never NULL */
+    char               loc[33];  /* active location's name; "" when none is set */
+
+    /* The link, unpacked rather than embedded: wifi.h pulls in esp_err.h, and
+     * this header also compiles on the host for the simulator. */
+    bool link;   /* station associated and holding an IP */
+    int  rssi;   /* dBm; meaningless unless link */
 } ui_model_t;
 
 void ui_model_refresh(ui_model_t *out);

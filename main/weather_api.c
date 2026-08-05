@@ -11,6 +11,7 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "buzzer.h"
 #include "cJSON.h"
 #include "weather_store.h"
 #include "wifi.h"
@@ -139,6 +140,7 @@ static bool parse(const char *json, const weather_location_t *loc)
         s_updated_us = esp_timer_get_time();
         taskEXIT_CRITICAL(&s_lock);
         ok = true;
+        buzzer_play(BUZZER_CLICK);   /* one tick per fetch that landed */
         /* Outlives the reading: the zone is a property of the place, so the
          * clock stays right through an outage and across a reboot. */
         weather_store_set_offset(loc->name, d.utc_offset_s);

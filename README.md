@@ -56,8 +56,9 @@ history.
   sin(π·duty), so 50 % is the loudest the element gets), set on the buzzer page
   and kept in NVS (`settings/buzz_vol`). The pin is pulled down and left alone
   for 10 ms before LEDC claims it — driving 10 nF straight to ground clicks.
-  Nothing beeps on its own yet; what triggers which tune is a separate module
-  still to come.
+  The three clicks are wired to the encoder on the panel, and a fetch that
+  lands ticks once (`CLICK`); the layer that arbitrates a UI click against an
+  alarm is still to come — `buzzer_play()` cuts off whatever is playing.
 - **I2C sensors** — SDA GPIO2 / SCL GPIO3, all of it in `main/sensors/`: the
   bus, one transport file per device, and a single task ticking at 10 ms that
   brings each sensor up at its own period through one hot-plug state machine —
@@ -136,13 +137,38 @@ history.
   since the last call and clears it — `cw`/`ccw`, `cw_held`/`ccw_held`, click,
   double-click and long-press counts, plus the live held state. No interaction
   scheme is implied: mapping turns to selection, editing or a menu belongs to
-  the screens. Nothing drains it at the moment: the scheme it fed went to
-  `archive/` with the character display, and the OLED has no UI layer yet.
+  the screens. Drained by the GUI's render task, one `encoder_take()` per frame.
 - **256x64 OLED** (Newhaven NHD-5.5-25664UCG3, SSD1322) — 4-wire SPI on SPI2 at
   8 MHz, mounted rotated so everything above the transport works in portrait
-  64x256. Experiment stage: `gui_init()` puts one static frame on the panel —
-  `screen_test`, the scratch scene — and there is no render task and no model
-  behind it yet.
+  64x256. A render task at **10 frames/s** refreshes the model, folds in the
+  encoder and draws; the frame is then compared with the 8 KB copy of what the
+  panel is showing and flushed only if a pixel differs — `gfx_present` costs a
+  fixed 8.3 ms of SPI whatever changed, and the comparison is at pixel level
+  because a reading that moves below its displayed resolution changes the model
+  without changing the screen. Render times are logged every 5 s, and only while
+  frames are actually being flushed.
+  **Brightness** is the master current (`0xC7`), 16 steps, turned by the encoder
+  and logged on change; not persisted yet, and comes up at 0. The steps are not evenly spaced —
+  0 → 1 doubles the current, 14 → 15 adds 7 %. Everything else that scales the
+  same current is fixed in the init sequence: contrast (`0xC1`) at 255, which
+  makes it the ceiling the current scales down from, and the pre-charge — phase 2
+  at 9 clocks (`0xB1`), voltage 5 (`0xBB`), second period 1 (`0xB6`). Newhaven's
+  own pre-charge values light the pixel outside the phase the drive current
+  controls, and their floor was bright enough that no contrast or current setting
+  could dim the panel. The second pre-charge period must stay ≥ 1: a 0 there does
+  not shorten the phase, it jumps the panel to bright.
+  All five live under the encoder on `screen_panel`, over a ramp of all 16 gray
+  levels — a tuning screen, kept for the next panel or the next room rather than
+  deleted with the tuning it was written for. A click picks the field, a turn
+  moves it, three buzzer clicks tell a step, a field change and the end of a
+  range apart, and the whole set is logged on change. Nothing is persisted: what
+  a session settles on is written into `gfx_target.h`, which the init sequence
+  and the screen's starting values both read.
+  Experiment stage above that: no navigation and no animation, and which screen
+  the panel shows is the `SHOW_PANEL` constant in `gui.c` — `screen_now` on the
+  live model, or the tuning screen. Each screen owns its own state and what its
+  knob means (`screen_panel` has five fields and a selection, `screen_now` just
+  turns brightness); `ui_state_t` carries only what they share.
 
   | Panel pin | To |
   |---|---|
@@ -332,7 +358,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `gui/ui.c` | the immediate-mode layer over the canvas: the text styles, a vertical layout cursor, separators |
 | `gui/gui.c` | the panel as the rest of the firmware sees it: owns the single 8 KB canvas, brings up the transport, draws a frame. The only firmware-only file in `gui/` |
 | `gui/screens/screen_test.c` | scratch scene for panel experiments, model-free; rendered by both the firmware and the simulator |
-| `gui/screens/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; currently the clock, the outdoor block (icon, temperature, conditions) and the pressure / humidity / UVI / wind rows |
+| `gui/screens/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; live so far are the status bar (weekday, local time of the weather location, Wi-Fi bars, location name, age of the fetch) the outdoor block (icon, temperature, conditions) and the rows under it (feels-like, sea-level pressure, humidity, wind with gusts, UV index, cloud cover) and the indoor rows (temperature, sea-level pressure, humidity, CO2, illuminance, dew point). Illuminance is the one value shown at less than its stored resolution: tenths below 1 lx, whole lux to 1000, thousands above. The battery is drawn empty — the board has no charge source. The forecast, chart, Zambretti and sun blocks below are roughed-in layout, still commented out |
 | `timesync.c` | SNTP client; `timesync_is_synced()` and `timesync_format()` |
 | `sensors/climate.c` | the room-level view over the devices, plus the reduction to sea level and the site-altitude setting. Its header carries the reading resolutions |
 | `history.c` | three rings sampled from a 1 s esp_timer, climate and radar alike; the two longer ones persist to `/data` with a versioned header |
