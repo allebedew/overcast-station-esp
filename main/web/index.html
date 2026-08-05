@@ -914,22 +914,6 @@
                 cursor: pointer;
                 border: 3px solid var(--bg);
             }
-            #blHexInput {
-                font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-            }
-            /* preview of the color the device is set to */
-            .bl-dot {
-                display: inline-block;
-                width: 11px;
-                height: 11px;
-                border-radius: 50%;
-                margin-right: 6px;
-                vertical-align: -1px;
-                border: 1px solid var(--border);
-                background: #000;
-            }
             .frc-row {
                 display: flex;
                 gap: 8px;
@@ -1180,30 +1164,6 @@
 
                     <div class="set-row">
                         <div class="head">
-                            <span class="name" data-i18n="blHex"
-                                >Цвет подсветки (HEX)</span
-                            ><span class="val"
-                                ><span class="bl-dot" id="blDot"></span
-                                ><span data-i18n="blHexHint"
-                                    >Enter — применить</span
-                                ></span
-                            >
-                        </div>
-                        <div class="frc-row">
-                            <input
-                                id="blHexInput"
-                                type="text"
-                                maxlength="7"
-                                placeholder="00AAFF"
-                                spellcheck="false"
-                                autocapitalize="off"
-                                autocorrect="off"
-                            />
-                        </div>
-                    </div>
-
-                    <div class="set-row">
-                        <div class="head">
                             <span class="name" data-i18n="altitude"
                                 >Высота над уровнем моря</span
                             ><span class="val" data-i18n="uMeters">м</span>
@@ -1371,8 +1331,7 @@
      DELETE /api/locations      - {index}
      PUT  /api/locations/active - {index} (switch the displayed location)
      POST /api/connect          - restart the STA connection cycle
-     POST /api/settings         - {led_brightness, backlight_rgb: "RRGGBB",
-                                  backlight_scale, altitude} (any subset)
+     POST /api/settings         - {led_brightness, altitude} (any subset)
      POST /api/scd40/calibrate  - {ppm}
 
    Every reading on the page is a fixed slot: the markup for a card, a tile
@@ -1543,10 +1502,6 @@
                     reconnect: "Переподключиться к сохранённым сетям",
                     settings: "Настройки",
                     ledBrightness: "Яркость светодиода",
-                    blHex: "Цвет подсветки (HEX)",
-                    blHexHint: "Enter — применить",
-                    blBadHex: "Нужны 6 шестнадцатеричных цифр, например 00AAFF",
-                    blSaved: "Подсветка сохранена",
                     frcTitle: "Калибровка CO₂ (FRC)",
                     calibrate: "Калибровать",
                     cancel: "Отмена",
@@ -1695,7 +1650,7 @@
                     locLast: "Can't remove the last location",
                     compass: ["N", "E", "S", "W"],
                     /* Kept word for word in sync with weather_api_code_str()
-                       in the firmware, which is what the 16x2 panel shows —
+                       in the firmware, which is what the panel shows —
                        the two used to word the same code differently. Editing
                        one means editing the other. */
                     wcode: {
@@ -1771,10 +1726,6 @@
                     reconnect: "Reconnect to saved networks",
                     settings: "Settings",
                     ledBrightness: "LED brightness",
-                    blHex: "Backlight color (hex)",
-                    blHexHint: "Enter to apply",
-                    blBadHex: "Six hex digits expected, e.g. 00AAFF",
-                    blSaved: "Backlight saved",
                     frcTitle: "CO₂ calibration (FRC)",
                     calibrate: "Calibrate",
                     cancel: "Cancel",
@@ -2397,7 +2348,6 @@
             let lastOk = null;
             let lastStatus = null;
             let brightLoaded = false;
-            let blLoaded = false;
             let altLoaded = false;
             let polling = false;
             const STALE_AFTER_MS = 1500; /* no successful poll this long → offline */
@@ -2564,10 +2514,6 @@
                 if (!altLoaded && st.altitude !== undefined) {
                     altLoaded = true;
                     $("altInput").value = st.altitude;
-                }
-                if (!blLoaded && st.backlight_rgb !== undefined) {
-                    blLoaded = true;
-                    paintBacklight(String(st.backlight_rgb).toUpperCase());
                 }
             }
 
@@ -3760,36 +3706,6 @@
                     body: JSON.stringify({ altitude: m }),
                 });
                 toast(t("altSaved"));
-            });
-
-            /* Backlight: the device stores plain RGB and the page sets it as
-               a hex color, verbatim — no conversion in between. */
-            function paintBacklight(hex) {
-                $("blDot").style.background = "#" + hex;
-                $("blHexInput").value = hex;
-            }
-
-            async function sendBacklight(hex) {
-                await fetch("/api/settings", {
-                    method: "POST",
-                    body: JSON.stringify({ backlight_rgb: hex }),
-                });
-                toast(t("blSaved"));
-            }
-
-            /* A rejected value leaves the device alone: the field is put back
-               to the color the device is actually showing. */
-            $("blHexInput").addEventListener("change", async (e) => {
-                const hex = e.target.value.trim().replace(/^#/, "").toUpperCase();
-                if (!/^[0-9A-F]{6}$/.test(hex)) {
-                    toast(t("blBadHex"));
-                    paintBacklight(
-                        (lastStatus?.settings?.backlight_rgb || "").toUpperCase(),
-                    );
-                    return;
-                }
-                paintBacklight(hex);
-                await sendBacklight(hex);
             });
 
             $("frcBtn").addEventListener("click", async () => {

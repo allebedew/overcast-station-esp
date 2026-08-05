@@ -52,6 +52,6 @@ const char *weather_api_wind_dir_str(int deg);
 /* English description of a WMO weather code. Never NULL. */
 const char *weather_api_code_str(int weather_code);
 
-/* The same in 10 characters — all the 16x2 row leaves next to the temperature.
+/* The same in 10 characters, for a row that also carries the temperature.
  * Intensity becomes a '-' / '+' suffix. Never NULL. */
 const char *weather_api_code_short(int weather_code);

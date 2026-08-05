@@ -21,7 +21,6 @@
 #include "history.h"
 #include "led.h"
 #include "ota.h"
-#include "screen_16x2.h"
 #include "ld2450.h"
 #include "sensors.h"
 #include "sysinfo.h"
@@ -402,9 +401,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"http_conns\":%d,"
         "\"heap_free\":%u,\"heap_min\":%u,\"heap_total\":%u,\"heap_largest\":%u,"
         "\"nvs_used\":%u,\"nvs_total\":%u},"
-        "\"settings\":{\"led_brightness\":%u,"
-        "\"backlight_rgb\":\"%06X\",\"backlight_scale\":%u,"
-        "\"altitude\":%d}}",
+        "\"settings\":{\"led_brightness\":%u,\"altitude\":%d}}",
         sta_json, ap_json,
         cl_temp, cl_rh, cl_co2, cl_press, cl_msl, cl_lux,
         zb_json, sun_json,
@@ -432,8 +429,6 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         run.heap_free, run.heap_min, run.heap_total, run.heap_largest,
         (unsigned)sys->nvs_used_entries, (unsigned)sys->nvs_total_entries,
         (unsigned)led_get_brightness(),
-        (unsigned)screen_16x2_backlight_rgb(),
-        (unsigned)screen_16x2_backlight_scale(),
         climate_altitude_m());
 
     return jbuf_send(req, &j);
@@ -766,17 +761,6 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
         led_set_brightness((uint8_t)bright->valueint);
     }
 
-    /* RGB hex string ("00AAFF", a leading "#" is tolerated). */
-    const cJSON *rgb = cJSON_GetObjectItem(root, "backlight_rgb");
-    if (cJSON_IsString(rgb) && rgb->valuestring != NULL) {
-        const char *hex = rgb->valuestring;
-        hex += (*hex == '#');
-        char *end;
-        unsigned long value = strtoul(hex, &end, 16);
-        if (end != hex && *end == '\0' && value <= 0xFFFFFF) {
-            screen_16x2_set_backlight((uint32_t)value);
-        }
-    }
     /* Metres above sea level — the only input to the pressure reduction. */
     const cJSON *alt = cJSON_GetObjectItem(root, "altitude");
     if (cJSON_IsNumber(alt) && alt->valueint >= CLIMATE_ALTITUDE_MIN &&

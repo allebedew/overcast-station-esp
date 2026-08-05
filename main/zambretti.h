@@ -22,7 +22,7 @@ typedef struct {
  * composition over history.c — no task and no state beyond a short cache. */
 void zambretti_get(zambretti_t *out);
 
-/* The full forecast wording, and the same shortened to the 16 columns of the
- * LCD. Both return "" for a code out of range. */
+/* The full forecast wording, and the same shortened to 16 columns for a narrow
+ * display. Both return "" for a code out of range. */
 const char *zambretti_code_str(uint8_t code);
 const char *zambretti_code_short(uint8_t code);

@@ -16,7 +16,7 @@
  * every read, ten times a second while the display draws.
  *
  * One resolution per quantity, used everywhere a value is shown or stored (the
- * page, the API, the charts, the history rings, the LCD):
+ * page, the API, the charts, the history rings, the panel):
  *
  *     temperature  0.01 °C    TMP117      "%.2f"
  *     pressure     0.001 hPa  BMP581      "%.3f"
@@ -26,8 +26,8 @@
  *     illuminance  0.1 lx     VEML7700    "%.1f"
  *
  * These are resolutions, not accuracies; they exist so a reading reads the same
- * everywhere and a five-minute window is not quantised flat. Only the 16x2
- * display deviates, where sixteen characters do not fit — see screen_16x2.c. */
+ * everywhere and a five-minute window is not quantised flat. A display narrow
+ * enough to have to drop digits says so where it does. */
 
 typedef struct {
     bool temp_ok;

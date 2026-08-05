@@ -44,9 +44,6 @@ static const char *known_device(uint8_t addr)
                      return " (BMP581)";
     case 0x48: case 0x49: case 0x4A: case 0x4B:
                      return " (TMP117)";
-    case 0x3E:       return " (LCD1602 controller)";
-    case 0x60: case 0x6B: case 0x30: case 0x2D:
-                     return " (LCD1602 RGB backlight)";
     default:         return "";
     }
 }

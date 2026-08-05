@@ -11,7 +11,6 @@
 #include "ld2450.h"
 #include "led.h"
 #include "ota.h"
-#include "screen_16x2.h"
 #include "sensors.h"
 #include "storage.h"
 #include "sysinfo.h"
@@ -55,8 +54,6 @@ void app_main(void)
     weather_api_init();
 
     /* After the data modules, so the display starts on real readings. */
-    screen_16x2_init();
-
     gui_init();
 
     /* Last: the handlers read from every module above. */

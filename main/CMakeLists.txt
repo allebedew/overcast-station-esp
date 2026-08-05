@@ -5,10 +5,6 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             "zambretti.c" "sun.c"
                             "storage.c" "weather_api.c" "weather_store.c"
                             "led.c" "buzzer.c"
-                            # the character display: its page layouts and the
-                            # panel's transport
-                            "display16x2/screen_16x2.c"
-                            "display16x2/lcd1602_rgb.c"
                             # everything for the graphical SSD1322 panel: the
                             # drawing framework (canvas, text over u8g2 fonts,
                             # the fonts gui/tools/extract_fonts.py sliced out)
@@ -32,7 +28,7 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             "sensors/veml7700.c"
                             # the mmWave tracker, on its own UART
                             "radar/ld2450.c"
-                       INCLUDE_DIRS "." "sensors" "display16x2" "gui" "gui/gfx"
+                       INCLUDE_DIRS "." "sensors" "gui" "gui/gfx"
                                     "web" "radar"
                        PRIV_REQUIRES u8g2
                                      esp_wifi esp_netif esp_event nvs_flash
