@@ -453,9 +453,24 @@ const char *weather_api_wind_dir_str(int deg)
     return PTS[((d + 45) / 90) % 4];
 }
 
-static void scene_screen_now(gfx_canvas_t *c)
+// Rendered twice: once with every source answering, once with none of them --
+// no clock, no link, no location, no fetch, no sensors. The empty frame is the
+// one the station actually comes up with, and the layout has to survive a
+// column of dashes as well as it survives the widest readings.
+static void screen_now_scene(gfx_canvas_t *c, bool have_data)
 {
     static ui_model_t m;
+    memset(&m, 0, sizeof(m));
+
+    m.out_cond  = "";   // ui_model_refresh() never leaves this NULL
+    m.out.age_s = -1;
+
+    ui_state_t st = { .bright = 0, .on = true };
+
+    if (!have_data) {
+        ui_render(c, &m, &st);
+        return;
+    }
 
     m.now       = 1754200000;   // 2025-08-03 07:06 UTC
     m.utc_off_s = 3 * 3600;
@@ -481,10 +496,19 @@ static void scene_screen_now(gfx_canvas_t *c)
     m.link = true;
     m.rssi = -68;
 
-    // The knob's own state, which the screen shows in its corner.
-    static const ui_state_t st = { .bright = 12 };
+    st.bright = 12;   // the knob's own state, shown in the corner
 
     ui_render(c, &m, &st);
+}
+
+static void scene_screen_now(gfx_canvas_t *c)
+{
+    screen_now_scene(c, true);
+}
+
+static void scene_screen_now_empty(gfx_canvas_t *c)
+{
+    screen_now_scene(c, false);
 }
 
 // The tuning screen as the panel gets it: its state is its own, and untouched
@@ -548,7 +572,8 @@ int main(int argc, char **argv)
         { "pairs",      scene_pairs },
         { "align",      scene_align },
         { "primitives", scene_primitives },
-        { "screen_now", scene_screen_now },
+        { "screen_now",       scene_screen_now },
+        { "screen_now_empty", scene_screen_now_empty },
         { "screen_panel", scene_screen_panel },
         { "screen_test",  screen_test },
     };

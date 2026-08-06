@@ -124,17 +124,49 @@ static void age_str(char *buf, size_t n, int32_t s)
     }
 }
 
-/* A reading formatted for a row, or dashes when its source has nothing to
- * report — every quantity on this screen carries such a flag, so the check
- * belongs with the formatting rather than around every draw. */
-static const char *num(char *buf, size_t n, bool ok, const char *fmt, double v)
+/* An already formatted value on a row, with its optional dim `label` and degree
+ * sign. The label sits on the side facing the middle of the screen — past the
+ * run for a left-aligned column, before it for a right-aligned one — so the two
+ * columns read as a pair rather than as four runs. The sign stays with the
+ * number, and a right-aligned run gives up its width at the anchor so it is the
+ * sign that ends on it. `label` may be NULL. */
+static void value(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st,
+                  const char *s, const char *label, bool deg)
 {
-    if (ok) {
-        snprintf(buf, n, fmt, v);
+    gfx_text_style_t ls = *st;
+    ls.level = GFX_DIM;
+
+    if (st->align == GFX_RIGHT) {
+        if (deg) { x -= DEG_W + 1; }
+        int w = gfx_text(c, x, baseline, st, s);
+        if (deg) { degree(c, x + 1, baseline, st); }
+        if (label) { gfx_text(c, x - w - 3, baseline, &ls, label); }
     } else {
-        snprintf(buf, n, "--");
+        int w = gfx_text(c, x, baseline, st, s);
+        int r = x + w;
+        if (deg) {
+            degree(c, r + 1, baseline, st);
+            r += DEG_W + 1;
+        }
+        if (label) { gfx_text(c, r + 3, baseline, &ls, label); }
     }
-    return buf;
+}
+
+/* A reading: `fmt` over `v`, or `na` when its source has nothing to report —
+ * every quantity on this screen carries such a flag, so the check belongs here
+ * rather than around every draw. `na` spells out the empty form ("--.-") so the
+ * row keeps the width of its digits. */
+static void reading(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st,
+                    bool ok, const char *fmt, const char *na, double v,
+                    const char *label, bool deg)
+{
+    char b[16];
+    if (ok) {
+        snprintf(b, sizeof(b), fmt, v);
+    } else {
+        snprintf(b, sizeof(b), "%s", na);
+    }
+    value(c, x, baseline, st, b, label, deg);
 }
 
 /* Illuminance spans five decades and the row has three characters for it:
@@ -239,7 +271,7 @@ static const struct {
     int8_t         dy;    /* baseline shift; the two fonts hang their glyphs
                            * differently and only the drawing shows by how much */
 } WX_ICONS[] = {
-    { 0,  u8g2_font_unifont_t_weather,   46, -2 },   /* clear sky: the sun */
+    { 0,  u8g2_font_unifont_t_weather,   46, -3 },   /* clear sky: the sun */
     { 71, u8g2_font_unifont_t_77,      9924, -2 },   /* snow, all three rates */
     { 73, u8g2_font_unifont_t_77,      9924, -2 },
     { 75, u8g2_font_unifont_t_77,      9924, -2 },
@@ -264,19 +296,16 @@ static void wx_icon(int code, const uint8_t **font, unsigned *cp, int *dy)
  * the block; a taller icon hangs past the cursor. */
 static void wx_now(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
 {
-    char temp[8];
     char cond[16];
 
     if (m->out_ok) {
-        snprintf(temp, sizeof(temp), "%.1f", m->out.temp_c);
         size_t i = 0;
         for (; m->out_cond[i] && i < sizeof(cond) - 1; i++) {
             cond[i] = (char)toupper((unsigned char)m->out_cond[i]);
         }
         cond[i] = '\0';
     } else {
-        snprintf(temp, sizeof(temp), "--");
-        snprintf(cond, sizeof(cond), "NO DATA");
+        snprintf(cond, sizeof(cond), "--");
     }
     const int code = m->out_ok ? m->out.weather_code : -1;
 
@@ -295,11 +324,22 @@ static void wx_now(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
 
     gfx_glyph(c, 0, top + WX_ICON_H + icon_dy, &is, icon_cp);
 
+    // Whole degrees carry the reading and stay bold; the tenth is a detail and
+    // drops to the text face. Split off the formatted string so rounding and the
+    // sign are decided once, in printf.
+    char temp[12];
+    snprintf(temp, sizeof(temp), m->out_ok ? "%.1f" : "--.-", m->out.temp_c);
+    char *frac = strchr(temp, '.');
+    if (frac) {
+        *frac++ = '\0';
+    }
+
     int baseline = top + fm.ascent;
     int tw = gfx_text(c, x, baseline, &UI_BOLD, temp);
-    if (m->out_ok) {
-        degree(c, x + tw + 1, baseline, &UI_BOLD);
+    if (frac) {
+        tw += 1 + gfx_textf(c, x + tw + 1, baseline, &UI_TEXT, ".%s", frac);
     }
+    degree(c, x + tw + 1, baseline, &UI_BOLD);
     gfx_text(c, x, baseline + UI_GAP + cm.ascent, &UI_TEXT, cond);
 
     ui_gap(cur, fm.ascent + UI_GAP + cm.line_height);
@@ -398,7 +438,7 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     // Status bar
 
     struct tm tm;
-    char day[4]   = "---";
+    char day[4]   = "--";
     char hhmm[6]  = "--:--";
     if (local_tm(m, &tm)) {
         strftime(day,  sizeof(day),  "%a",    &tm);
@@ -409,17 +449,17 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     gfx_text(c, 0, baseline, &UI_TEXT, day);
     gfx_text(c, UI_RX/2, baseline, &UI_TEXT_C, hhmm);
     bars(c, UI_RX, baseline, sig_bars(m->link, m->rssi));
-    battery(c, UI_RX - SIG_W - 3, baseline, 0);   // no charge source on the board yet
+    // battery(c, UI_RX - SIG_W - 3, baseline, 0);
 
     char age[8];
     age_str(age, sizeof(age), m->out.age_s);
 
     baseline = ui_row(&cur, &UI_TEXT);
-    int aw = gfx_text(c, GFX_W, baseline, &UI_TEXT_R, age);
-    // The location name is whatever the user typed, so it is clipped rather than
-    // trusted to fit next to the age.
+    gfx_text_style_t age_st = UI_TEXT_R;
+    age_st.level = GFX_DIM;
+    int aw = gfx_text(c, GFX_W, baseline, &age_st, age);
     gfx_push(c, (gfx_rect_t){ 0, 0, (int16_t)(UI_RX - aw - 2), GFX_H });
-    gfx_text_bg(c, 0, baseline, &UI_TEXT, GFX_NONE, m->loc[0] ? m->loc : "No loc");
+    gfx_text_bg(c, 0, baseline, &UI_TEXT, GFX_NONE, m->loc[0] ? m->loc : "--");
     gfx_pop(c);
     ui_rule(c, &cur);
 
@@ -430,35 +470,29 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
 
     // Condition Labels
 
-    char b[16];
     bool ok = m->out_ok;
 
     baseline = ui_row(&cur, &UI_TEXT);
-    int fl = gfx_text(c, 0, baseline, &UI_TEXT,
-                      num(b, sizeof(b), ok, "FL %.1f", m->out.feels_c));
-    if (ok) {
-        degree(c, fl + 1, baseline, &UI_TEXT);
-    }
-    gfx_text(c, UI_RX, baseline, &UI_TEXT_R,
-             num(b, sizeof(b), ok, "%.1f", m->out.pressure_msl_hpa));
+    reading(c, 0, baseline, &UI_TEXT, ok, "%.1f", "--.-", m->out.feels_c, "FL", true);
+    reading(c, UI_RX, baseline, &UI_TEXT_R, ok, "%.1f", "---.-",
+            m->out.pressure_msl_hpa, NULL, false);
 
     baseline = ui_row(&cur, &UI_TEXT);
-    gfx_text(c, 0, baseline, &UI_TEXT,
-             num(b, sizeof(b), ok, "%.0f%%", m->out.humidity_pct));
+    reading(c, 0, baseline, &UI_TEXT, ok, "%.0f%%", "--%", m->out.humidity_pct,
+            NULL, false);
     // Speed and gusts as one range, in the units the API reports.
     if (ok) {
         gfx_textf(c, UI_RX, baseline, &UI_TEXT_R, "%s%.0f-%.0f",
                   weather_api_wind_dir_str(m->out.wind_dir_deg),
                   m->out.wind_kmh, m->out.gust_kmh);
     } else {
-        gfx_text(c, UI_RX, baseline, &UI_TEXT_R, "--");
+        gfx_text(c, UI_RX, baseline, &UI_TEXT_R, "---");
     }
 
     baseline = ui_row(&cur, &UI_TEXT);
-    gfx_text(c, 0, baseline, &UI_TEXT,
-             num(b, sizeof(b), ok, "UV %.1f", m->out.uvi));
-    gfx_text(c, UI_RX, baseline, &UI_TEXT_R,
-             num(b, sizeof(b), ok, "CL %.0f%%", (double)m->out.cloud_pct));
+    reading(c, 0, baseline, &UI_TEXT, ok, "%.1f", "--.-", m->out.uvi, "UV", false);
+    reading(c, UI_RX, baseline, &UI_TEXT_R, ok, "%.0f%%", "--%",
+            (double)m->out.cloud_pct, "CL", false);
 
     ui_rule(c, &cur);
 /*
@@ -472,35 +506,25 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     const climate_t *cl = &m->climate;
 
     baseline = ui_row(&cur, &UI_TEXT);
-    int rt = gfx_text(c, 0, baseline, &UI_TEXT,
-                      num(b, sizeof(b), cl->temp_ok, "%.2f", cl->temp_c));
-    if (cl->temp_ok) {
-        degree(c, rt + 1, baseline, &UI_TEXT);
-    }
-    gfx_text(c, UI_RX, baseline, &UI_TEXT_R,
-             num(b, sizeof(b), cl->press_ok, "%.3f", cl->press_msl_hpa));
+    reading(c, 0, baseline, &UI_TEXT, cl->temp_ok, "%.2f", "--.--", cl->temp_c,
+            NULL, true);
+    reading(c, UI_RX, baseline, &UI_TEXT_R, cl->press_ok, "%.3f", "---.---",
+            cl->press_msl_hpa, NULL, false);
 
     baseline = ui_row(&cur, &UI_TEXT);
-    gfx_text(c, 0, baseline, &UI_TEXT,
-             num(b, sizeof(b), cl->rh_ok, "%.1f%%", cl->rh_pct));
-    gfx_text(c, UI_RX, baseline, &UI_TEXT_R,
-             num(b, sizeof(b), cl->co2_ok, "CO2 %.0f", (double)cl->co2_ppm));
+    reading(c, 0, baseline, &UI_TEXT, cl->rh_ok, "%.1f%%", "--.-%", cl->rh_pct,
+            NULL, false);
+    reading(c, UI_RX, baseline, &UI_TEXT_R, cl->co2_ok, "%.0f", "---",
+            (double)cl->co2_ppm, "CO2", false);
 
     baseline = ui_row(&cur, &UI_TEXT);
+    char lx[8] = "--";
     if (cl->lux_ok) {
-        char lx[8];
         lux_str(lx, sizeof(lx), cl->lux);
-        gfx_textf(c, 0, baseline, &UI_TEXT, "Lx %s", lx);
-    } else {
-        gfx_text(c, 0, baseline, &UI_TEXT, "--");
     }
-    // The degree sits past the run, so the dew point gives up its own width at
-    // the right edge -- and takes it back when there is nothing to sign.
-    gfx_text(c, cl->rh_ok ? UI_RX - DEG_W - 1 : UI_RX, baseline, &UI_TEXT_R,
-             num(b, sizeof(b), cl->rh_ok, "DW %.1f", cl->dew_c));
-    if (cl->rh_ok) {
-        degree(c, UI_RX - DEG_W, baseline, &UI_TEXT);
-    }
+    value(c, 0, baseline, &UI_TEXT, lx, "Lx", false);
+    reading(c, UI_RX, baseline, &UI_TEXT_R, cl->rh_ok, "%.1f", "--.-",
+            cl->dew_c, "DW", true);
 
     ui_rule(c, &cur);
 

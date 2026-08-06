@@ -24,7 +24,7 @@ void gfx_set_brightness(uint8_t level);
 // evenly spaced in perceived brightness: the step from 0 to 1 doubles the
 // current, the one from 14 to 15 adds 7%.
 #define GFX_BRIGHTNESS_MAX     15
-#define GFX_BRIGHTNESS_DEFAULT 0
+#define GFX_BRIGHTNESS_DEFAULT 12
 
 // The rest of the drive settings, for screen_panel and nothing else: the ceiling
 // the brightness scales down from, and the pre-charge, which lights the pixel
