@@ -21,6 +21,9 @@ extern const gfx_text_style_t UI_BOLD;
 extern const gfx_text_style_t UI_TINY;
 extern const gfx_text_style_t UI_TINY_R;
 
+/* The smallest linked font, for a marker rather than a reading. */
+extern const gfx_text_style_t UI_MICRO_R;
+
 /* x for a right-aligned run: the advance width the alignment subtracts includes
  * the blank column the font leaves after the last glyph, so the anchor is the
  * width itself, not the last column. */
@@ -43,9 +46,9 @@ void ui_gap(ui_cursor_t *cur, int px);
 void ui_rule(gfx_canvas_t *c, ui_cursor_t *cur);
 
 /* One frame. Does not flush — the caller owns the panel. */
-void ui_render(gfx_canvas_t *c, const ui_model_t *m);
+void ui_render(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s);
 
-void screen_now(gfx_canvas_t *c, const ui_model_t *m);
+void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s);
 
 /* The panel's own drive settings under the encoder, over a ramp of every gray
  * level. A tuning screen, not part of the station's UI, and the first one to

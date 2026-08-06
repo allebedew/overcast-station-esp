@@ -110,20 +110,17 @@ static bool local_tm(const ui_model_t *m, struct tm *out)
     return true;
 }
 
-/* How old a reading is, in the largest unit that fits. A negative age is a
- * fetch that has never succeeded. */
+/* How old a reading is, in minutes or hours — the fetch runs hourly, so
+ * seconds would be noise and days say no more than a large hour count. A
+ * negative age is a fetch that has never succeeded. */
 static void age_str(char *buf, size_t n, int32_t s)
 {
     if (s < 0) {
         snprintf(buf, n, "--");
-    } else if (s < 60) {
-        snprintf(buf, n, "%ds", (int)s);
     } else if (s < 3600) {
         snprintf(buf, n, "%dm", (int)(s / 60));
-    } else if (s < 86400) {
-        snprintf(buf, n, "%dh", (int)(s / 3600));
     } else {
-        snprintf(buf, n, "%dd", (int)(s / 86400));
+        snprintf(buf, n, "%dh", (int)(s / 3600));
     }
 }
 
@@ -389,7 +386,7 @@ static void wx_chart(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
 
 // Built up element by element: what is drawn here reads the model, the blocks
 // still commented out are roughed-in layout waiting for theirs.
-void screen_now(gfx_canvas_t *c, const ui_model_t *m)
+void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
 {
     // Background fill
 
@@ -506,6 +503,11 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m)
     }
 
     ui_rule(c, &cur);
+
+    // Brightness, pinned to the bottom corner: the knob has no other feedback
+    // while the panel shows this screen. micro_tr has no descender, so the
+    // baseline is the last row.
+    gfx_textf(c, UI_RX, GFX_H - 1, &UI_MICRO_R, "%u", s->bright);
 /*
     // Chart
 

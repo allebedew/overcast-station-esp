@@ -57,7 +57,8 @@ history.
   and kept in NVS (`settings/buzz_vol`). The pin is pulled down and left alone
   for 10 ms before LEDC claims it — driving 10 nF straight to ground clicks.
   The three clicks are wired to the encoder on the panel, and a fetch that
-  lands ticks once (`CLICK`); the layer that arbitrates a UI click against an
+  lands ticks once — pitched high or low by where the outdoor temperature went
+  since the previous fetch, plain when it held; the layer that arbitrates a UI click against an
   alarm is still to come — `buzzer_play()` cuts off whatever is playing.
 - **I2C sensors** — SDA GPIO2 / SCL GPIO3, all of it in `main/sensors/`: the
   bus, one transport file per device, and a single task ticking at 10 ms that
@@ -167,8 +168,10 @@ history.
   Experiment stage above that: no navigation and no animation, and which screen
   the panel shows is the `SHOW_PANEL` constant in `gui.c` — `screen_now` on the
   live model, or the tuning screen. Each screen owns its own state and what its
-  knob means (`screen_panel` has five fields and a selection, `screen_now` just
-  turns brightness); `ui_state_t` carries only what they share.
+  knob means (`screen_panel` has five fields and a selection, on `screen_now` a
+  turn is brightness — shown as 0–15 in the bottom-right corner, the knob's only
+  feedback there — and a click blanks the panel and brings it back, on at boot
+  and not persisted); `ui_state_t` carries only what they share.
 
   | Panel pin | To |
   |---|---|

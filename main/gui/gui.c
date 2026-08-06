@@ -92,8 +92,13 @@ static void gui_task(void *arg)
         int64_t t0 = esp_timer_get_time();
         if (SHOW_PANEL) {
             screen_panel(&s_canvas);
+        } else if (s_state.on) {
+            ui_render(&s_canvas, &s_model, &s_state);
         } else {
-            ui_render(&s_canvas, &s_model);
+            /* Blanked rather than switched off: every pixel dark is what an
+             * OLED does with a display-off command anyway, and it keeps the
+             * transport out of it. */
+            gfx_clear(&s_canvas, GFX_OFF);
         }
         int64_t render_us = esp_timer_get_time() - t0;
 

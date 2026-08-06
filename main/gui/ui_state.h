@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "encoder.h"
@@ -20,6 +21,10 @@ typedef struct {
      * panel, and it is what moves into the settings module, and into NVS, once
      * there is one. Until then the knob edits it directly. */
     uint8_t bright;
+
+    /* Temporary: a click blanks the panel and another brings it back. Comes up
+     * on and is not persisted — a station that boots dark looks broken. */
+    bool on;
 } ui_state_t;
 
 /* What an input handler did, for whoever owns the sound. Kept out of the

@@ -135,12 +135,26 @@ static bool parse(const char *json, const weather_location_t *loc)
             .utc_offset_s = (int)lroundf(jnum(root, "utc_offset_seconds", 0)),
         };
         taskENTER_CRITICAL(&s_lock);
+        float prev_temp = s_data.temp_c;
+        bool  had_prev  = s_valid;
         s_data = d;
         s_valid = true;
         s_updated_us = esp_timer_get_time();
         taskEXIT_CRITICAL(&s_lock);
         ok = true;
-        buzzer_play(BUZZER_CLICK);   /* one tick per fetch that landed */
+
+        /* One tick per fetch that landed, pitched by where the temperature
+         * went since the last one. The API reports 0.1 C, so anything under
+         * half a step is the same reading, not a move. */
+        buzzer_tune_t tick = BUZZER_CLICK;
+        if (had_prev) {
+            if (d.temp_c > prev_temp + 0.05f) {
+                tick = BUZZER_CLICK_HI;
+            } else if (d.temp_c < prev_temp - 0.05f) {
+                tick = BUZZER_CLICK_LO;
+            }
+        }
+        buzzer_play(tick);
         /* Outlives the reading: the zone is a property of the place, so the
          * clock stays right through an outage and across a reboot. */
         weather_store_set_offset(loc->name, d.utc_offset_s);

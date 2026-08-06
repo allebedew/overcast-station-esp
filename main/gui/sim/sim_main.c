@@ -481,7 +481,10 @@ static void scene_screen_now(gfx_canvas_t *c)
     m.link = true;
     m.rssi = -68;
 
-    ui_render(c, &m);
+    // The knob's own state, which the screen shows in its corner.
+    static const ui_state_t st = { .bright = 12 };
+
+    ui_render(c, &m, &st);
 }
 
 // The tuning screen as the panel gets it: its state is its own, and untouched
