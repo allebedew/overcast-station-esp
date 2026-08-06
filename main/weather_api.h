@@ -2,13 +2,23 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <time.h>
+
+#define WEATHER_API_FORECAST_DAYS 5
+
+/* One day of the daily forecast; index 0 is today. */
+typedef struct {
+    time_t date;            /* local midnight of that day; read with gmtime_r */
+    float  temp_min_c;      /* °C */
+    float  temp_max_c;      /* °C */
+    int    precip_prob_pct; /* precipitation probability, %; -1 if unknown */
+    int    weather_code;    /* WMO weather interpretation code, -1 if unknown */
+} weather_api_day_t;
 
 /* Current outdoor conditions fetched from Open-Meteo. */
 typedef struct {
     float temp_c;           /* air temperature, °C */
     float feels_c;          /* apparent ("feels like") temperature, °C */
-    float temp_min_c;       /* today's forecast minimum temperature, °C */
-    float temp_max_c;       /* today's forecast maximum temperature, °C */
     float humidity_pct;     /* relative humidity, % */
     float pressure_hpa;     /* surface pressure at the station elevation, hPa */
     float pressure_msl_hpa; /* pressure reduced to sea level, hPa */
@@ -29,6 +39,8 @@ typedef struct {
     float elevation_m;      /* model grid-cell elevation for the coordinates, m */
     int utc_offset_s;       /* location's UTC offset (from timezone=auto), seconds */
     int32_t age_s;          /* seconds since the last successful fetch, -1 if none */
+    weather_api_day_t days[WEATHER_API_FORECAST_DAYS];
+    int day_count;          /* days[] entries filled; today's min/max is days[0] */
 } weather_api_data_t;
 
 void weather_api_init(void);

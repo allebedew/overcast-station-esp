@@ -298,6 +298,13 @@ static esp_err_t status_get_handler(httpd_req_t *req)
 
     char wx_cur[480] = "null";
     if (weather_ok) {
+        /* days[0] is today; without it the current reading stands in for the
+         * range, as it did when the daily block held one row. */
+        const weather_api_day_t today =
+            weather.day_count > 0
+                ? weather.days[0]
+                : (weather_api_day_t){ .temp_min_c = weather.temp_c,
+                                       .temp_max_c = weather.temp_c };
         char wx_sun[12], wx_daylight[12];
         json_num(wx_sun, sizeof(wx_sun), weather.sunshine_s >= 0, "%.0f",
                  (double)weather.sunshine_s);
@@ -309,8 +316,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
                  "\"wind\":%.1f,\"gust\":%.1f,\"wind_dir\":%d,"
                  "\"precip_rate\":%.1f,\"clouds\":%d,\"code\":%d,\"is_day\":%d,"
                  "\"sunshine\":%s,\"daylight\":%s,\"elev\":%.0f,\"age\":%d}",
-                 weather.temp_c, weather.feels_c, weather.temp_min_c,
-                 weather.temp_max_c, weather.humidity_pct, weather.pressure_hpa,
+                 weather.temp_c, weather.feels_c, today.temp_min_c,
+                 today.temp_max_c, weather.humidity_pct, weather.pressure_hpa,
                  weather.pressure_msl_hpa, weather.uvi, weather.wind_kmh,
                  weather.gust_kmh, weather.wind_dir_deg, weather.precip_mmh,
                  weather.cloud_pct, weather.weather_code, weather.is_day,

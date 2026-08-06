@@ -350,47 +350,105 @@ static void wx_now(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
  * lit segment — that day's low to high, mapped into it — can be compared across
  * rows by position alone.
  *
- * Columns: 7 px for the weekday, then two characters' worth for either
- * temperature, one digit of precipitation on the far right, the rest for the
- * bar. */
-#define FC_T_W   7
+ * Columns: the weekday letter, either temperature, one digit of precipitation
+ * on the far right, the rest for the bar. Each temperature column is as wide as
+ * the widest value it has to show — a single minus sign anywhere in it costs
+ * every row a character — and the two are measured apart, so the bar gives up
+ * only what is actually needed. */
+#define FC_WD_W  3                    /* one 3x5im letter */
+#define FC_WD_WEEKEND ((gfx_level_t)8)   /* the rest of the weekdays stay GFX_DIM */
+#define FC_P_LEVEL_MIN 8                 /* 1% of rain; 0% is GFX_DIM */
 #define FC_P_W   3
 #define FC_P_X   (UI_RX - FC_P_W - 3)   /* right edge of the high column */
-#define FC_BAR_X (7 + 3 + FC_T_W)
-#define FC_BAR_W (FC_P_X - FC_T_W - 2 - FC_BAR_X)
 
 static void wx_forecast(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
 {
-    (void)m;   // placeholders for now
+    const weather_api_day_t *d = m->out.days;
+    const int n = m->out_ok ? m->out.day_count : 0;
 
-    static const struct { const char *day; int lo, hi, pr; } DAYS[] = {
-        { "Mo", -3, 12, 3 }, { "Tu", 1, 17, 8 }, { "We", -5, 9, 0 },
-        { "Th",  2, 14, 5 }, { "Fr", 6, 19, 9 },
-    };
-    const size_t n = sizeof(DAYS) / sizeof(DAYS[0]);
-
-    int lo = DAYS[0].lo, hi = DAYS[0].hi;
-    for (size_t i = 1; i < n; i++) {
-        if (DAYS[i].lo < lo) { lo = DAYS[i].lo; }
-        if (DAYS[i].hi > hi) { hi = DAYS[i].hi; }
+    float lo = 0, hi = 0;
+    for (int i = 0; i < n; i++) {
+        if (i == 0 || d[i].temp_min_c < lo) { lo = d[i].temp_min_c; }
+        if (i == 0 || d[i].temp_max_c > hi) { hi = d[i].temp_max_c; }
     }
-    int span = hi - lo;
+    float span = hi - lo;
 
-    for (size_t i = 0; i < n; i++) {
+    // Formatted up front: the column widths are a property of the whole block,
+    // so every row has to be known before the first one can be placed.
+    char lo_s[WEATHER_API_FORECAST_DAYS][8], hi_s[WEATHER_API_FORECAST_DAYS][8];
+    int  lo_w = 0, hi_w = 0;
+    for (int i = 0; i < WEATHER_API_FORECAST_DAYS; i++) {
+        if (i < n) {
+            snprintf(lo_s[i], sizeof(lo_s[i]), "%d", (int)lroundf(d[i].temp_min_c));
+            snprintf(hi_s[i], sizeof(hi_s[i]), "%d", (int)lroundf(d[i].temp_max_c));
+        } else {
+            snprintf(lo_s[i], sizeof(lo_s[i]), "--");
+            snprintf(hi_s[i], sizeof(hi_s[i]), "--");
+        }
+        int w = gfx_text_w(&UI_TINY, lo_s[i]);
+        if (w > lo_w) { lo_w = w; }
+        w = gfx_text_w(&UI_TINY, hi_s[i]);
+        if (w > hi_w) { hi_w = w; }
+    }
+
+    const int lo_x  = FC_WD_W + 3 + lo_w;   /* right edge of the low column */
+    const int bar_x = lo_x + 2;
+    const int bar_w = FC_P_X - hi_w - 2 - bar_x;
+
+    // The block keeps its full height whether or not the fetch succeeded, so an
+    // empty row is the day's columns dashed out and the bar left unlit.
+    for (int i = 0; i < WEATHER_API_FORECAST_DAYS; i++) {
         int baseline = ui_row(cur, &UI_TINY);
-        gfx_text(c, 0, baseline, &UI_TINY, DAYS[i].day);
-        gfx_textf(c, FC_BAR_X - 2, baseline, &UI_TINY_R, "%d", DAYS[i].lo);
-        gfx_textf(c, FC_P_X, baseline, &UI_TINY_R, "%d", DAYS[i].hi);
-        gfx_textf(c, UI_RX,  baseline, &UI_TINY_R, "%d", DAYS[i].pr);
+        int top      = baseline - 4;   // the digits ink from here to the baseline
+        bool ok      = i < n;
+
+        // The date already carries the location's offset, so gmtime_r() gives
+        // its calendar day; the column holds the first letter of the weekday.
+        char wd[8]  = "-";
+        int  wday   = -1;
+        if (ok) {
+            struct tm dt;
+            gmtime_r(&d[i].date, &dt);
+            strftime(wd, sizeof(wd), "%a", &dt);
+            wd[1] = '\0';
+            wday  = dt.tm_wday;
+        }
+        gfx_text_style_t wd_st = UI_TINY;
+        wd_st.level = (wday == 0 || wday == 6) ? FC_WD_WEEKEND : GFX_DIM;
+        gfx_text(c, 0, baseline, &wd_st, wd);
+        gfx_px(c, FC_WD_W + 1, baseline - 3, GFX_DIM);   // parts the letter from the low
+
+        gfx_text(c, lo_x,   baseline, &UI_TINY_R, lo_s[i]);
+        gfx_text(c, FC_P_X, baseline, &UI_TINY_R, hi_s[i]);
+
+        // Probability in tens, one digit wide: 95% and up share the 9. It also
+        // reads without the digit, off the brightness alone — a dry day stays
+        // GFX_DIM and any chance at all jumps clear of it before ramping up.
+        int p = ok ? d[i].precip_prob_pct : -1;
+        gfx_text_style_t p_st = UI_TINY_R;
+        p_st.level = GFX_DIM;
+        if (p < 0) {
+            gfx_text(c, UI_RX, baseline, &p_st, "-");
+        } else {
+            if (p > 0) {
+                p_st.level = (gfx_level_t)(FC_P_LEVEL_MIN
+                                           + p * (GFX_FULL - FC_P_LEVEL_MIN) / 100);
+            }
+            int dig = (p + 5) / 10;
+            gfx_textf(c, UI_RX, baseline, &p_st, "%d", dig > 9 ? 9 : dig);
+        }
         gfx_px(c, FC_P_X + 1, baseline - 3, GFX_DIM);   // tells the two numbers apart
 
-        // Centred on the digits, which ink from baseline - 4 to the baseline.
-        int top = baseline - 4;
-        gfx_checker(c, (gfx_rect_t){ FC_BAR_X, (int16_t)top, FC_BAR_W, 3 }, GFX_DIM, GFX_NONE, 1);
+        gfx_checker(c, (gfx_rect_t){ (int16_t)bar_x, (int16_t)top, (int16_t)bar_w, 3 },
+                    GFX_DIM, GFX_NONE, 1);
+        if (!ok) {
+            continue;
+        }
 
-        int x0 = span ? (DAYS[i].lo - lo) * (FC_BAR_W - 1) / span : 0;
-        int x1 = span ? (DAYS[i].hi - lo) * (FC_BAR_W - 1) / span : FC_BAR_W - 1;
-        gfx_checker(c, (gfx_rect_t){ (int16_t)(FC_BAR_X + x0), (int16_t)top,
+        int x0 = span > 0 ? (int)lroundf((d[i].temp_min_c - lo) / span * (bar_w - 1)) : 0;
+        int x1 = span > 0 ? (int)lroundf((d[i].temp_max_c - lo) / span * (bar_w - 1))
+                          : bar_w - 1;
+        gfx_checker(c, (gfx_rect_t){ (int16_t)(bar_x + x0), (int16_t)top,
                                      (int16_t)(x1 - x0 + 1), 3 },
                     GFX_FULL, 12, 0);
     }
@@ -459,7 +517,9 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     age_st.level = GFX_DIM;
     int aw = gfx_text(c, GFX_W, baseline, &age_st, age);
     gfx_push(c, (gfx_rect_t){ 0, 0, (int16_t)(UI_RX - aw - 2), GFX_H });
-    gfx_text_bg(c, 0, baseline, &UI_TEXT, GFX_NONE, m->loc[0] ? m->loc : "--");
+    gfx_text_style_t loc_st = UI_TEXT;
+    loc_st.level = GFX_DIM;
+    gfx_text_bg(c, 0, baseline, &loc_st, GFX_NONE, m->loc[0] ? m->loc : "--");
     gfx_pop(c);
     ui_rule(c, &cur);
 
@@ -495,14 +555,14 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
             (double)m->out.cloud_pct, "CL", false);
 
     ui_rule(c, &cur);
-/*
+
     // Forecast
 
     wx_forecast(c, &cur, m);
     ui_rule(c, &cur);
 
     // Sensor Labels
-*/
+
     const climate_t *cl = &m->climate;
 
     baseline = ui_row(&cur, &UI_TEXT);

@@ -292,10 +292,13 @@ history.
   every 15 min, no API key, default `best_match` model. Temperature and
   apparent temperature, humidity, surface and sea-level pressure, UV index,
   cloud cover, wind speed / gusts / direction, precipitation, daylight flag and
-  the WMO code, plus today's min/max and sunshine / daylight duration from
-  `daily` (the card shows the sunshine in hours and its share of the daylight);
-  `timezone=auto` yields
-  `utc_offset_seconds` and the reply's `elevation` is kept. `precipitation` is
+  the WMO code, plus today's sunshine / daylight duration from `daily` (the card
+  shows the sunshine in hours and its share of the daylight). `daily` also
+  carries a five-day forecast — date, min/max temperature, precipitation
+  probability and WMO code per day, index 0 being today, which is where today's
+  min/max comes from. `timeformat=unixtime` reports GMT+0, so the stored date is
+  shifted by the location's offset and read back with `gmtime_r()`.
+  `timezone=auto` yields `utc_offset_seconds` and the reply's `elevation` is kept. `precipitation` is
   an accumulation over the model step, so it is kept only as a rate in mm/h,
   rescaled by the reply's `interval` (900 s on 15-minute models, 3600 s on
   hourly ones).
@@ -361,7 +364,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `gui/ui.c` | the immediate-mode layer over the canvas: the text styles, a vertical layout cursor, separators |
 | `gui/gui.c` | the panel as the rest of the firmware sees it: owns the single 8 KB canvas, brings up the transport, draws a frame. The only firmware-only file in `gui/` |
 | `gui/screens/screen_test.c` | scratch scene for panel experiments, model-free; rendered by both the firmware and the simulator |
-| `gui/screens/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; live so far are the status bar (weekday, local time of the weather location, Wi-Fi bars, location name, age of the fetch) the outdoor block (icon, temperature, conditions) and the rows under it (feels-like, sea-level pressure, humidity, wind with gusts, UV index, cloud cover) and the indoor rows (temperature, sea-level pressure, humidity, CO2, illuminance, dew point). Illuminance is the one value shown at less than its stored resolution: tenths below 1 lx, whole lux to 1000, thousands above. The battery is drawn empty — the board has no charge source. The forecast, chart, Zambretti and sun blocks below are roughed-in layout, still commented out |
+| `gui/screens/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; live so far are the status bar (weekday, local time of the weather location, Wi-Fi bars, location name, age of the fetch) the outdoor block (icon, temperature, conditions), the rows under it (feels-like, sea-level pressure, humidity, wind with gusts, UV index, cloud cover), the five-day forecast (weekday letter, dim and a shade brighter at the weekend; min/max with a bar over the whole forecast's range; precipitation probability in tens, its brightness rising with the value) and the indoor rows (temperature, sea-level pressure, humidity, CO2, illuminance, dew point). Illuminance is the one value shown at less than its stored resolution: tenths below 1 lx, whole lux to 1000, thousands above. The battery is drawn empty — the board has no charge source. The chart, Zambretti and sun blocks below are roughed-in layout, still commented out |
 | `timesync.c` | SNTP client; `timesync_is_synced()` and `timesync_format()` |
 | `sensors/climate.c` | the room-level view over the devices, plus the reduction to sea level and the site-altitude setting. Its header carries the reading resolutions |
 | `history.c` | three rings sampled from a 1 s esp_timer, climate and radar alike; the two longer ones persist to `/data` with a versioned header |

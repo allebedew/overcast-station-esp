@@ -492,6 +492,26 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data)
     m.out_cond = "Clear sky";   // the longest weather_api_code_short() returns
     m.out.age_s = 63 * 60;
 
+    // Five days from m.now's local midnight, the same convention weather_api.c
+    // stores: a GMT stamp already shifted by the location's offset. The spread
+    // is wider than a real week so the bar has something to map, and the last
+    // day's probability is missing to draw that column's dash.
+    m.out.day_count = WEATHER_API_FORECAST_DAYS;
+    static const struct { float lo, hi; int prob; } FC[] = {
+        { -12.4f, 3.2f, 100 }, { -4.0f, 11.5f, 45 }, { 0.4f, 19.0f, 0 },
+        {  8.1f, 27.4f,  20 }, { 24.0f, 34.2f, -1 },
+    };
+    time_t midnight = (m.now + m.utc_off_s) / 86400 * 86400;
+    for (int i = 0; i < m.out.day_count; i++) {
+        m.out.days[i] = (weather_api_day_t){
+            .date            = midnight + i * 86400,
+            .temp_min_c      = FC[i].lo,
+            .temp_max_c      = FC[i].hi,
+            .precip_prob_pct = FC[i].prob,
+            .weather_code    = 0,
+        };
+    }
+
     snprintf(m.loc, sizeof(m.loc), "Vozdvizhenka");   // a name long enough to crowd the age
     m.link = true;
     m.rssi = -68;

@@ -26,9 +26,11 @@
     "surface_pressure,pressure_msl,uv_index,weather_code,cloud_cover," \
     "wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation,is_day"
 
-/* Daily aggregates; forecast_days=1 keeps only today, so index 0 is today. */
+/* Daily aggregates; index 0 is today. `time` comes back on its own and is
+ * rejected as a variable, so it is not listed here. */
 #define WEATHER_API_DAILY_FIELDS \
-    "temperature_2m_max,temperature_2m_min,sunshine_duration,daylight_duration"
+    "temperature_2m_max,temperature_2m_min,precipitation_probability_max," \
+    "weather_code,sunshine_duration,daylight_duration"
 
 #define WEATHER_API_UPDATE_INTERVAL_MS (15 * 60 * 1000)
 #define WEATHER_API_RETRY_INTERVAL_MS  (5 * 60 * 1000)  /* retry sooner after a failure */
@@ -36,7 +38,7 @@
 #define WEATHER_API_MAX_AGE_MS         (60 * 60 * 1000) /* a reading older than this is dropped */
 #define WEATHER_API_NO_NET_DELAY_MS    10000            /* wait for the link, then re-check */
 #define WEATHER_API_HTTP_TIMEOUT_MS    10000
-#define WEATHER_API_MAX_RESPONSE       2048             /* current-only reply is well under 1 KB */
+#define WEATHER_API_MAX_RESPONSE       4096             /* current plus five daily rows is ~1.5 KB */
 
 static const char *TAG = "weather_api";
 
@@ -72,11 +74,47 @@ static float jnum(const cJSON *obj, const char *name, float dflt)
     return cJSON_IsNumber(it) ? (float)it->valuedouble : dflt;
 }
 
-/* First element of a numeric array; daily arrays hold one, forecast_days=1. */
+/* `dflt` when the array is short or the element is not a number. Double, not
+ * float: a unix timestamp only fits a float to about two minutes. */
+static double jarrn(const cJSON *arr, int i, double dflt)
+{
+    cJSON *it = cJSON_GetArrayItem(arr, i);
+    return cJSON_IsNumber(it) ? it->valuedouble : dflt;
+}
+
+/* Element 0 of a daily array — the value for today. */
 static float jarr0(const cJSON *arr, float dflt)
 {
-    cJSON *it = cJSON_GetArrayItem(arr, 0);
-    return cJSON_IsNumber(it) ? (float)it->valuedouble : dflt;
+    return (float)jarrn(arr, 0, dflt);
+}
+
+/* Fills days[] from the `daily` block, returning how many were filled.
+ * timeformat=unixtime always reports GMT+0, so the location's offset is added
+ * here: gmtime_r() over `date` then gives the local calendar day, the same
+ * convention the display uses for the clock. */
+static int parse_days(const cJSON *daily, int utc_offset_s, float fallback_temp,
+                      weather_api_day_t *days)
+{
+    const cJSON *time = cJSON_GetObjectItem(daily, "time");
+    const cJSON *tmax = cJSON_GetObjectItem(daily, "temperature_2m_max");
+    const cJSON *tmin = cJSON_GetObjectItem(daily, "temperature_2m_min");
+    const cJSON *prob = cJSON_GetObjectItem(daily, "precipitation_probability_max");
+    const cJSON *code = cJSON_GetObjectItem(daily, "weather_code");
+
+    int n = cJSON_GetArraySize(time);
+    if (n > WEATHER_API_FORECAST_DAYS) {
+        n = WEATHER_API_FORECAST_DAYS;
+    }
+    for (int i = 0; i < n; i++) {
+        days[i] = (weather_api_day_t){
+            .date = (time_t)jarrn(time, i, 0) + utc_offset_s,
+            .temp_max_c = (float)jarrn(tmax, i, fallback_temp),
+            .temp_min_c = (float)jarrn(tmin, i, fallback_temp),
+            .precip_prob_pct = (int)lround(jarrn(prob, i, -1)),
+            .weather_code = (int)lround(jarrn(code, i, -1)),
+        };
+    }
+    return n;
 }
 
 /* `precipitation` is an accumulation over the model's own step, which `interval`
@@ -114,11 +152,7 @@ static bool parse(const char *json, const weather_location_t *loc)
             .uvi = uvi->valuedouble,
             /* the rest default where a model omits them */
             .feels_c = jnum(cur, "apparent_temperature", temp->valuedouble),
-            .temp_max_c = jarr0(cJSON_GetObjectItem(daily, "temperature_2m_max"),
-                                temp->valuedouble),
-            .temp_min_c = jarr0(cJSON_GetObjectItem(daily, "temperature_2m_min"),
-                                temp->valuedouble),
-            /* whole-day totals, so both are forecasts until the day is over */
+            /* today's whole-day totals, so both are forecasts until the day is over */
             .sunshine_s = (int32_t)lroundf(
                 jarr0(cJSON_GetObjectItem(daily, "sunshine_duration"), -1)),
             .daylight_s = (int32_t)lroundf(
@@ -134,6 +168,8 @@ static bool parse(const char *json, const weather_location_t *loc)
             .elevation_m = jnum(root, "elevation", 0),
             .utc_offset_s = (int)lroundf(jnum(root, "utc_offset_seconds", 0)),
         };
+        d.day_count = parse_days(daily, d.utc_offset_s, d.temp_c, d.days);
+
         taskENTER_CRITICAL(&s_lock);
         float prev_temp = s_data.temp_c;
         bool  had_prev  = s_valid;
@@ -159,15 +195,24 @@ static bool parse(const char *json, const weather_location_t *loc)
          * clock stays right through an outage and across a reboot. */
         weather_store_set_offset(loc->name, d.utc_offset_s);
         ESP_LOGI(TAG,
-                 "updated: %.1f C (feels %.1f, %.1f..%.1f), %.0f%%, %.1f/%.1f hPa, "
+                 "updated: %.1f C (feels %.1f), %.0f%%, %.1f/%.1f hPa, "
                  "UVI %.2f, wind %.1f (gust %.1f) km/h @%d, clouds %d%%, "
                  "precip %.1f mm/h, sun %.1f/%.1f h, %s, %s",
-                 d.temp_c, d.feels_c, d.temp_min_c, d.temp_max_c, d.humidity_pct,
+                 d.temp_c, d.feels_c, d.humidity_pct,
                  d.pressure_hpa, d.pressure_msl_hpa, d.uvi, d.wind_kmh, d.gust_kmh,
                  d.wind_dir_deg, d.cloud_pct, d.precip_mmh,
                  d.sunshine_s / 3600.0f, d.daylight_s / 3600.0f,
                  d.is_day ? "day" : "night",
                  weather_api_code_str(d.weather_code));
+        for (int i = 0; i < d.day_count; i++) {
+            const weather_api_day_t *day = &d.days[i];
+            struct tm dt;
+            gmtime_r(&day->date, &dt);
+            ESP_LOGI(TAG, "forecast %04d-%02d-%02d: %.1f..%.1f C, rain %d%%, %s",
+                     dt.tm_year + 1900, dt.tm_mon + 1, dt.tm_mday,
+                     day->temp_min_c, day->temp_max_c, day->precip_prob_pct,
+                     weather_api_code_str(day->weather_code));
+        }
     } else {
         ESP_LOGW(TAG, "unexpected JSON shape");
     }
@@ -189,15 +234,15 @@ static fetch_result_t fetch(const weather_location_t *loc)
     static char buf[WEATHER_API_MAX_RESPONSE];
     resp_ctx_t ctx = { .buf = buf, .len = 0, .cap = sizeof(buf) };
 
-    /* timezone=auto makes the daily min/max span the local calendar day and
+    /* timezone=auto makes the daily aggregates span the local calendar day and
      * fills utc_offset_seconds in the reply. */
     char url[512];
     snprintf(url, sizeof(url),
              "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
              "&current=" WEATHER_API_CURRENT_FIELDS
              "&daily=" WEATHER_API_DAILY_FIELDS
-             "&timezone=auto&forecast_days=1",
-             loc->lat, loc->lon);
+             "&timezone=auto&timeformat=unixtime&forecast_days=%d",
+             loc->lat, loc->lon, WEATHER_API_FORECAST_DAYS);
 
     ESP_LOGI(TAG, "GET %s", url);
 
