@@ -184,6 +184,14 @@ static void reading(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t
     value(c, x, baseline, st, b, label, deg, bg);
 }
 
+/* The sensor rows are where the chart's quantity is picked, so while the knob
+ * is on that field the one being plotted wears a plate. Dew point is on no
+ * chart and never marked. */
+static gfx_level_t q_bg(const ui_state_t *s, history_quantity_t q)
+{
+    return (s->focus == UI_FOCUS_CHART_Q && s->chart_q == q) ? GFX_HL : GFX_NONE;
+}
+
 /* WMO code to a glyph. unifont_t_weather re-encodes its icons into the ASCII
  * range, so '.' is the sun there; the snowman it has no glyph for and comes
  * from unifont_t_77 instead. Both are 16x16. The table is filled in code by
@@ -466,40 +474,34 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
 
     const climate_t *cl = &m->climate;
 
-    // These rows are where the chart's quantity is picked, so while the knob is
-    // on that field the one being plotted wears a plate. Dew point is on no
-    // chart and never marked.
-    const bool q_sel = s->focus == UI_FOCUS_CHART_Q;
-#define Q_BG(q) ((q_sel && s->chart_q == (q)) ? GFX_HL : GFX_NONE)
-
     baseline = ui_row(&cur, &UI_TEXT);
     reading(c, 0, baseline, &UI_TEXT, cl->temp_ok, "%.2f", "--.--", cl->temp_c,
-            NULL, true, Q_BG(HISTORY_Q_TEMP));
+            NULL, true, q_bg(s, HISTORY_Q_TEMP));
     reading(c, UI_RX, baseline, &UI_TEXT_R, cl->press_ok, "%.3f", "---.---",
-            cl->press_msl_hpa, NULL, false, Q_BG(HISTORY_Q_PRESS));
+            cl->press_msl_hpa, NULL, false, q_bg(s, HISTORY_Q_PRESS));
 
     baseline = ui_row(&cur, &UI_TEXT);
     reading(c, 0, baseline, &UI_TEXT, cl->rh_ok, "%.1f%%", "--.-%", cl->rh_pct,
-            NULL, false, Q_BG(HISTORY_Q_RH));
+            NULL, false, q_bg(s, HISTORY_Q_RH));
     reading(c, UI_RX, baseline, &UI_TEXT_R, cl->co2_ok, "%.0f", "---",
-            (double)cl->co2_ppm, "CO2", false, Q_BG(HISTORY_Q_CO2));
+            (double)cl->co2_ppm, "CO2", false, q_bg(s, HISTORY_Q_CO2));
 
     baseline = ui_row(&cur, &UI_TEXT);
     char lx[8] = "--";
     if (cl->lux_ok) {
         ui_lux_str(lx, sizeof(lx), cl->lux);
     }
-    value(c, 0, baseline, &UI_TEXT, lx, "Lx", false, Q_BG(HISTORY_Q_LUX));
+    value(c, 0, baseline, &UI_TEXT, lx, "Lx", false, q_bg(s, HISTORY_Q_LUX));
     reading(c, UI_RX, baseline, &UI_TEXT_R, cl->rh_ok, "%.1f", "--.-",
             cl->dew_c, "DW", true, GFX_NONE);
-#undef Q_BG
 
     rule(c, &cur);
 
-    // Brightness, pinned to the bottom corner: the knob has no other feedback
-    // while the panel shows this screen. micro_tr has no descender, so the
-    // baseline is the last row.
-    gfx_textf(c, UI_RX, GFX_H - 1, &UI_MICRO_R, "%u", s->bright);
+    // Brightness, pinned to the bottom corner: it is a knob field and needs a
+    // readout to be edited by. micro_tr has no descender, so the baseline is
+    // the last row.
+    gfx_textf_bg(c, UI_RX, GFX_H - 1, &UI_MICRO_R,
+                 s->focus == UI_FOCUS_BRIGHT ? GFX_HL : GFX_NONE, "%u", s->bright);
 
     // Chart
 

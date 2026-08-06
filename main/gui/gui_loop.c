@@ -42,6 +42,10 @@ static gfx_canvas_t s_canvas;
  * the model many times per reading it changes on screen. */
 static uint8_t s_shown[GFX_W][GFX_H / 2];
 
+/* Whether the panel is driving its pixels, as opposed to ui_state_t's `on`,
+ * which is what the knob asked for. The init script leaves it on. */
+static bool s_panel_on = true;
+
 static ui_state_t s_state;
 static ui_model_t s_model;
 
@@ -84,31 +88,39 @@ static void gui_task(void *arg)
         }
         changed |= ev != UI_EV_NONE;
 
-        /* The frame is drawn from the selection the same call just moved, so
-         * the series and the badge under it can never be a frame apart. */
-        ui_model_refresh(&s_model, s_state.chart_q, s_state.chart_range);
-
-        int64_t t0 = esp_timer_get_time();
+        /* A dark panel is drawn for and clocked to not at all: display-off
+         * leaves its RAM alone, so s_shown keeps describing it. */
         if (s_state.on) {
+            /* The frame is drawn from the selection the same call just moved,
+             * so the series and the badge under it can never be a frame
+             * apart. */
+            ui_model_refresh(&s_model, s_state.chart_q, s_state.chart_range);
+
+            int64_t t0 = esp_timer_get_time();
             ui_render(&s_canvas, &s_model, &s_state);
-        } else {
-            /* Blanked rather than switched off: every pixel dark is what an
-             * OLED does with a display-off command anyway, and it keeps the
-             * transport out of it. */
-            gfx_clear(&s_canvas, GFX_OFF);
-        }
-        int64_t render_us = esp_timer_get_time() - t0;
+            int64_t render_us = esp_timer_get_time() - t0;
 
-        frames++;
-        render_sum_us += render_us;
-        if (render_us > render_max_us) {
-            render_max_us = render_us;
-        }
+            frames++;
+            render_sum_us += render_us;
+            if (render_us > render_max_us) {
+                render_max_us = render_us;
+            }
 
-        if (memcmp(s_canvas.buf, s_shown, sizeof(s_shown)) != 0) {
-            gfx_present(&s_canvas);
-            memcpy(s_shown, s_canvas.buf, sizeof(s_shown));
-            flushes++;
+            if (memcmp(s_canvas.buf, s_shown, sizeof(s_shown)) != 0) {
+                gfx_present(&s_canvas);
+                memcpy(s_shown, s_canvas.buf, sizeof(s_shown));
+                flushes++;
+            }
+
+            /* Powered up only once a fresh frame is in the panel's RAM —
+             * the other order flashes the one it was switched off on. */
+            if (!s_panel_on) {
+                gfx_set_on(true);
+                s_panel_on = true;
+            }
+        } else if (s_panel_on) {
+            gfx_set_on(false);
+            s_panel_on = false;
         }
 
         int64_t now = esp_timer_get_time();

@@ -467,23 +467,44 @@ int history_series(history_tier_t tier, history_quantity_t q, int stride,
 {
     if (stride < 1) { stride = 1; }
 
-    int count = history_count(tier);
-    int cols  = count > 0 ? (count - 1) / stride + 1 : 0;
+    tier_t *t = &s_tiers[tier];
+    taskENTER_CRITICAL(&s_lock);
+    int count = t->count;
+    int head  = t->head;
+    taskEXIT_CRITICAL(&s_lock);
+    if (count <= 0) { return 0; }
+
+    /* The columns sit on a grid of absolute slots, not on the newest one: the
+     * rightmost column is the one still filling and holds `rem` slots, the rest
+     * are whole strides. Anchored to the newest slot instead, every column
+     * would re-average a window slid by one slot on every sample, and the whole
+     * plot would jitter between the scrolls. The ring lengths are whole
+     * multiples of the strides they are read at, so head alone carries the
+     * phase across the wrap. */
+    int rem = t->len % stride == 0 ? ((head + stride - 1) % stride) + 1 : stride;
+    if (rem > count) { rem = count; }
+
+    int cols = 1 + (count - rem + stride - 1) / stride;
     if (cols > n) { cols = n; }
 
+    int end = count - 1;   /* newest slot of the column being averaged */
     for (int k = 0; k < cols; k++) {
-        int   idx = count - 1 - k * stride;
-        float raw = NAN;
-        /* The column stands for its whole stride, so a gap in the slot the
-         * decimation lands on falls back down the window instead of breaking
-         * the line. */
-        for (int j = 0; j < stride && idx - j >= 0; j++) {
+        int   w   = k ? stride : rem;
+        float sum = 0;
+        int   got = 0;
+        /* The column is the mean of the slots it covers, so every reading
+         * reaches the plot and a gap only breaks the line where the whole
+         * column holds nothing. */
+        for (int j = 0; j < w && end - j >= 0; j++) {
             history_point_t p;
-            if (history_get(tier, idx - j, &p) && point_value(&p, q, &raw)) {
-                break;
+            float           raw;
+            if (history_get(tier, end - j, &p) && point_value(&p, q, &raw)) {
+                sum += raw;
+                got++;
             }
         }
-        v[cols - 1 - k] = raw;
+        v[cols - 1 - k] = got ? sum / got : NAN;
+        end -= w;
     }
 
     if (q == HISTORY_Q_PRESS) {

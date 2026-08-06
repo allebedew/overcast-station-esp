@@ -17,8 +17,14 @@
 #include "sim_png.h"
 #include "ui.h"
 
-// The host half of gfx_target.h: a PNG has no drive level. gfx_present() is not
-// implemented here at all -- sim_write_png() takes the canvas directly.
+// The host half of gfx_target.h: a PNG has no drive level and no power state.
+// gfx_present() is not implemented here at all -- sim_write_png() takes the
+// canvas directly.
+void gfx_set_on(bool on)
+{
+    (void)on;
+}
+
 void gfx_set_brightness(uint8_t level)
 {
     (void)level;
@@ -378,6 +384,61 @@ static uint8_t level_at(const gfx_canvas_t *c, int x, int y)
     return (y & 1) ? (b & 0x0F) : (b >> 4);
 }
 
+// --- the chart alone, over the shapes its risers have to survive -------------
+//
+// Six boxes down the canvas, from a smooth wave to pure noise. The scene is for
+// judging the line between neighbouring points, so the series are picked for
+// the steps they make rather than for how a room behaves.
+static void scene_chart(gfx_canvas_t *c)
+{
+    gfx_clear(c, GFX_OFF);
+
+    static const char *const NAME[] = { "WAVE", "WALK", "NOISE", "WAVE+N", "STEPS", "SPIKES" };
+    const gfx_text_style_t   lbl    = { F_CAP, (gfx_level_t)6, GFX_LEFT };
+
+    ui_cursor_t cur = { 1 };
+    static float v[CHART_SERIES_MAX];
+
+    for (int k = 0; k < 6; k++) {
+        float walk = 21.0f;
+        for (int i = 0; i < CHART_SERIES_MAX; i++) {
+            float r = (rand() % 1000) / 1000.0f;   // 0..1
+            switch (k) {
+            case 0: v[i] = 21.0f + sinf(i * 0.15f) * 1.5f; break;
+            case 1: walk += (r - 0.5f) * 0.3f; v[i] = walk; break;
+            case 2: v[i] = 20.0f + r * 3.0f; break;
+            case 3: v[i] = 21.0f + sinf(i * 0.15f) * 1.5f + (r - 0.5f) * 0.6f; break;
+            case 4: v[i] = 20.0f + (i / 7 % 2 ? 2.0f : 0.0f) + r * 0.2f; break;
+            default: v[i] = 20.0f + (r > 0.85f ? 3.0f : 0.0f); break;
+            }
+        }
+        gfx_text(c, 1, ui_row(&cur, &lbl), &lbl, NAME[k]);
+        chart_draw(c, &cur, v, CHART_SERIES_MAX, HISTORY_Q_TEMP, CHART_RANGE_1M, false);
+    }
+}
+
+// One real minute of humidity off the station's /api/history, kept verbatim:
+// synthetic series miss what a 0.1 %RH quantisation does to the line -- long
+// flats broken by one-row steps, which is where the risers are judged.
+static void scene_chart_rh(gfx_canvas_t *c)
+{
+    static const float RH[60] = {
+        61.4f, 61.3f, 61.3f, 61.3f, 61.3f, 61.3f, 61.2f, 61.2f, 61.2f, 61.2f,
+        61.2f, 61.2f, 61.2f, 61.2f, 61.2f, 61.1f, 61.1f, 61.1f, 61.1f, 61.1f,
+        61.0f, 61.0f, 61.0f, 61.0f, 61.0f, 60.9f, 60.9f, 60.9f, 60.9f, 60.9f,
+        60.8f, 60.8f, 60.8f, 60.8f, 60.8f, 60.8f, 60.8f, 60.8f, 60.8f, 60.7f,
+        60.7f, 60.7f, 60.7f, 60.7f, 60.6f, 60.6f, 60.6f, 60.6f, 60.6f, 60.6f,
+        60.6f, 60.6f, 60.6f, 60.5f, 60.5f, 60.5f, 60.5f, 60.5f, 60.6f, 60.6f,
+    };
+
+    gfx_clear(c, GFX_OFF);
+    const gfx_text_style_t lbl = { F_CAP, (gfx_level_t)6, GFX_LEFT };
+    ui_cursor_t            cur = { 1 };
+
+    gfx_text(c, 1, ui_row(&cur, &lbl), &lbl, "RH 1m");
+    chart_draw(c, &cur, RH, 60, HISTORY_Q_RH, CHART_RANGE_1M, false);
+}
+
 static void selftest(void)
 {
     static gfx_canvas_t c;
@@ -601,6 +662,8 @@ int main(int argc, char **argv)
         { "pairs",      scene_pairs },
         { "align",      scene_align },
         { "primitives", scene_primitives },
+        { "chart",      scene_chart },
+        { "chart_rh",   scene_chart_rh },
         { "screen_now",       scene_screen_now },
         { "screen_now_empty", scene_screen_now_empty },
     };

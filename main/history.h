@@ -54,10 +54,12 @@ typedef struct {
 #define HISTORY_RADAR_STEPS(r)   (((r) >> 2) & 0x1F)
 #define HISTORY_RADAR_NEAR_M(r)  (HISTORY_RADAR_STEPS(r) * HISTORY_RADAR_STEP_M)
 
+/* Ordered as the panel's indoor rows are, since the knob cycles the chart's
+ * quantity along this enum and the two would otherwise disagree. */
 typedef enum {
     HISTORY_Q_TEMP,
-    HISTORY_Q_RH,
     HISTORY_Q_PRESS,
+    HISTORY_Q_RH,
     HISTORY_Q_CO2,
     HISTORY_Q_LUX,
     HISTORY_Q_COUNT,
@@ -74,11 +76,15 @@ int history_interval(history_tier_t tier);
 /* idx 0 = oldest stored point. Returns false if idx is out of range. */
 bool history_get(history_tier_t tier, int idx, history_point_t *out);
 
-/* One quantity of a tier for plotting: every `stride`-th slot in display units
- * (C, %, hPa reduced to sea level, ppm, lx), oldest first, NAN for a gap.
+/* One quantity of a tier for plotting: one value per `stride` slots, averaged
+ * over them, in display units (C, %, hPa reduced to sea level, ppm, lx), oldest
+ * first, NAN where the whole stride is a gap.
  * Returns how many of the `n` were written — a ring holding less than the whole
- * window fills the front of `v` and leaves the rest untouched. Decimation runs
- * from the newest slot back, so the phase does not shift as the ring fills. */
+ * window fills the front of `v` and leaves the rest untouched. The columns lie
+ * on a fixed grid of slots and only the rightmost one is still filling, so the
+ * plot scrolls once per stride instead of shifting under every sample. That
+ * grid holds across the ring's wrap only where `stride` divides the tier's
+ * length, which is what CHART_RANGES picks its strides for. */
 int history_series(history_tier_t tier, history_quantity_t q, int stride,
                    float *v, int n);
 

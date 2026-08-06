@@ -26,18 +26,20 @@
 typedef enum {
     UI_FOCUS_CHART_Q,
     UI_FOCUS_CHART_RANGE,
+    UI_FOCUS_BRIGHT,
     UI_FOCUS_COUNT,
 } ui_focus_t;
 
 typedef struct {
     /* A device setting rather than a screen's: it survives whatever is on the
      * panel, and it is what moves into the settings module, and into NVS, once
-     * there is one. Nothing edits it now that the knob drives the chart — it
-     * comes up at gfx_target.h's default and stays there. */
+     * there is one. One of the knob's fields; comes up at gfx_target.h's
+     * default and is not persisted. */
     uint8_t bright;
 
-    /* Temporary: a click blanks the panel and another brings it back. Comes up
-     * on and is not persisted — a station that boots dark looks broken. */
+    /* Temporary: a click switches the panel off and another brings it back.
+     * Comes up on and is not persisted — a station that boots dark looks
+     * broken. */
     bool on;
 
     /* What the chart is showing, and which of the two a turn back would

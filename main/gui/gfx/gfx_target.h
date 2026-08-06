@@ -14,6 +14,10 @@ void gfx_present(const gfx_canvas_t *c);
 // 4-pixel granularity that applies to the panel's own column addressing.
 void gfx_present_cols(const gfx_canvas_t *c, int x0, int x1);
 
+// Panel power. Off is the controller's own display-off: segments and commons
+// stop driving, RAM keeps whatever was last presented. Ignored on the host.
+void gfx_set_on(bool on);
+
 // How hard the panel is driven, 0..GFX_BRIGHTNESS_MAX. Everything else that
 // scales the same current -- the contrast ceiling and the pre-charge -- is
 // settled in the transport's init sequence, and this is what is left to turn.

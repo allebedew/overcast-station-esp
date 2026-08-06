@@ -39,6 +39,8 @@ static const char *TAG = "ssd1322";
 #define CMD_ROW_ADDR   0x75
 #define CMD_MODE_ALLON 0xA5
 #define CMD_MODE_NORM  0xA6
+#define CMD_DISP_OFF   0xAE
+#define CMD_DISP_ON    0xAF
 
 static spi_device_handle_t s_dev;
 
@@ -98,7 +100,7 @@ static void cmd_args(uint8_t c, const uint8_t *args, size_t n)
  * them starts from what the panel is actually running. */
 static const uint8_t INIT_SCRIPT[] = {
     0xFD, 1, 0x12,             /* unlock the basic command set */
-    0xAE, 0,                   /* display off while it is configured */
+    CMD_DISP_OFF, 0,           /* display off while it is configured */
     0x15, 2, COL_FIRST, COL_LAST,
     0x75, 2, 0x00, ROW_LAST,
     0xB3, 1, 0x91,             /* clock: 80 frames/s */
@@ -122,7 +124,7 @@ static const uint8_t INIT_SCRIPT[] = {
     0xBE, 1, 0x07,             /* VCOMH 0.86 * VCC */
     CMD_MODE_NORM, 0,
     0xA9, 0,                   /* partial display off */
-    0xAF, 0,                   /* display on */
+    CMD_DISP_ON, 0,            /* display on */
 };
 
 /* Panel rows are the canvas' x axis; the column range is always the full width,
@@ -213,6 +215,11 @@ void gfx_present_cols(const gfx_canvas_t *c, int x0, int x1)
 
     set_window(x0, x1);
     tx(c->buf[x0], (size_t)(x1 - x0 + 1) * ROW_BYTES, 1);
+}
+
+void gfx_set_on(bool on)
+{
+    cmd(on ? CMD_DISP_ON : CMD_DISP_OFF);
 }
 
 void gfx_set_brightness(uint8_t level)
