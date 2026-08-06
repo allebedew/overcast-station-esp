@@ -242,6 +242,11 @@ esp_err_t bmp581_read(bmp581_data_t *out)
     int32_t raw_t = (int32_t)((buf[2] << 24) | (buf[1] << 16) | (buf[0] << 8)) >> 8;
     uint32_t raw_p = ((uint32_t)buf[5] << 16) | (buf[4] << 8) | buf[3];
 
+    /* Both registers read zero until the first conversion lands. */
+    if (raw_t == 0 && raw_p == 0) {
+        return ESP_ERR_NOT_FINISHED;
+    }
+
     out->temp_c = raw_t * BMP581_TEMP_LSB_C;
     out->press_hpa = raw_p * BMP581_PRESS_LSB_PA / 100.0f;
     return ESP_OK;

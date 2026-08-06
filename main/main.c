@@ -40,6 +40,13 @@ void app_main(void)
     storage_init();
     climate_init(); /* before history: it samples climate every second */
     history_init();
+    weather_store_init(); /* before the gui: its model reads the active location */
+
+    /* Early, so the panel is alive through the slow init below; the values it
+     * reads fill in as those modules come up. */
+    gui_loop_init();
+    buzzer_play(BUZZER_BOOT);
+
     sysinfo_init();
 
     /* Before anything that talks on it, and while the log is still quiet. */
@@ -50,18 +57,13 @@ void app_main(void)
     timesync_init();
     telegram_init();
     alerts_init();
-    weather_store_init();
     weather_api_init();
-
-    /* After the data modules, so the display starts on real readings. */
-    gui_loop_init();
 
     /* Last: the handlers read from every module above. */
     webserver_start();
 
     /* Init went through — mark the image valid, cancelling the OTA rollback. */
     ota_confirm_running_image();
-    buzzer_play(BUZZER_BOOT); /* at the end, so it means "came up", not "powered" */
 
     sysinfo_log_tasks();
     /* app_main returns; the led and wifi tasks carry on. */

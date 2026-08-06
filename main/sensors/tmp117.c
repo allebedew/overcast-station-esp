@@ -34,6 +34,7 @@ static const uint8_t TMP117_ADDRS[] = { 0x48, 0x49, 0x4A, 0x4B };
     (TMP117_MOD_CONTINUOUS | TMP117_CONV_125MS | TMP117_AVG_8)
 
 #define TMP117_CONFIG_RESET 0x0002 /* soft reset bit */
+#define TMP117_CONFIG_DRDY  0x2000 /* set once a conversion has completed */
 /* Datasheet: 2 ms. Busy-waited — a vTaskDelay() of a few ms rounds to zero. */
 #define TMP117_RESET_US     2500
 
@@ -108,8 +109,19 @@ esp_err_t tmp117_read(tmp117_data_t *out)
     if (!s_dev) {
         return ESP_ERR_INVALID_STATE;
     }
+    /* Before the first conversion the temperature register reads 0x8000,
+     * which would publish as -256 C. */
+    uint16_t cfg;
+    esp_err_t err = i2c_dev_read_u16be(s_dev, TMP117_REG_CONFIG, &cfg);
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (!(cfg & TMP117_CONFIG_DRDY)) {
+        return ESP_ERR_NOT_FINISHED;
+    }
+
     uint16_t raw;
-    esp_err_t err = i2c_dev_read_u16be(s_dev, TMP117_REG_TEMP, &raw);
+    err = i2c_dev_read_u16be(s_dev, TMP117_REG_TEMP, &raw);
     if (err == ESP_OK) {
         out->temp_c = (int16_t)raw * TMP117_LSB_C;
     }

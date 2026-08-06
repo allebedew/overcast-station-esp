@@ -306,7 +306,7 @@ history.
   compile-time constants in `telegram.c`; left empty, the module disables
   itself.
 - **Outside weather (Open-Meteo)** — the active location fetched over HTTPS
-  every 15 min, no API key, default `best_match` model. Temperature and
+  every 15 min on the quarter-hour, no API key, default `best_match` model. Temperature and
   apparent temperature, humidity, surface and sea-level pressure, UV index,
   cloud cover, wind speed / gusts / direction, precipitation, daylight flag and
   the WMO code, plus today's sunshine / daylight duration from `daily` (the card
@@ -388,7 +388,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `history.c` | three rings sampled from a 1 s esp_timer, climate and radar alike; the two longer ones persist to `/data` with a versioned header. `history_series()` decimates one quantity out of a tier for the panel's chart, averaging each column over the slots it covers, in display units and NAN for a gap |
 | `storage.c` | mounts the LittleFS `storage` partition at `/data` |
 | `telegram.c` | message queue + sender task; `telegram_notify(fmt, ...)` |
-| `weather_api.c` | Open-Meteo client; own task fetches the active location hourly, `weather_api_refresh()` forces a reload |
+| `weather_api.c` | Open-Meteo client; own task fetches the active location on the quarter-hour, `weather_api_refresh()` forces a reload |
 | `weather_store.c` | saved locations + their UTC offset + active index in NVS (`weather_loc`), mutex-protected |
 | `sun.c` | sunrise/sunset/elevation for the active location; `sun_next_event()` is the countdown the display shows |
 | `zambretti.c` | 3 h barometric tendency fitted over the 1 d ring, and the Zambretti wording it selects with the sea-level pressure |

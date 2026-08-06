@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -309,7 +310,11 @@ static void weather_api_task(void *arg)
         } else {
             switch (fetch(&loc)) {
             case FETCH_OK:
-                wait_ms = WEATHER_API_UPDATE_INTERVAL_MS;
+                /* Wall-clock grid: :00/:15/:30/:45, shifted 10 s past the mark
+                 * so the model step is already published. An unsynced clock
+                 * counts from the epoch, where the spacing is the same. */
+                wait_ms = WEATHER_API_UPDATE_INTERVAL_MS
+                          - (uint32_t)((time(NULL) - 10) % (WEATHER_API_UPDATE_INTERVAL_MS / 1000)) * 1000;
                 retry_ms = WEATHER_API_FIRST_RETRY_MS;
                 break;
             case FETCH_TRANSIENT:
