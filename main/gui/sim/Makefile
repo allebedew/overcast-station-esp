@@ -5,7 +5,7 @@
 #   make clean
 
 GFX  := ../gfx
-UI   := ..
+UI   := ../views
 MAIN := ../..
 U8G2 := ../../../components/u8g2/csrc
 
@@ -14,10 +14,10 @@ U8G2 := ../../../components/u8g2/csrc
 # and includes cleanly here.
 # Basenames only, found through VPATH -- that keeps the object tree flat inside
 # out/obj instead of mirroring the '..' in the source paths.
-VPATH := $(UI) $(UI)/screens $(GFX) $(U8G2)
+VPATH := $(UI) $(GFX) $(U8G2)
 
 SRCS := sim_main.c sim_png.c \
-        ui.c ui_state.c screen_now.c screen_panel.c screen_test.c \
+        ui.c ui_state.c chart.c screen_now.c \
         gfx_canvas.c gfx_text.c gfx_fonts.c \
         u8g2_font.c u8g2_hvline.c u8g2_intersection.c \
         u8g2_kerning.c u8x8_8x8.c u8x8_string.c \

@@ -100,6 +100,21 @@ history.
     ALS and white channels are read, with the Vishay correction above 1000 lx.
     The API reports `lux`, the white/lux ratio as a light-source signature, and
     both raw counts.
+  - **AS3935** (`0x03`, jumpered; 0x01/0x02 in reserve) — lightning. The IRQ
+    pin is **not wired**, so the latched interrupt flag is polled at **20 Hz**:
+    strike timestamps are only as good as that period, two strikes inside one
+    collapse into one, and the LCO antenna tuning is impossible — the resonance
+    frequency comes out on the IRQ pin only, so `TUN_CAP` stays 0 until that
+    pin is temporarily wired. Gain is **indoor** (`AFE_GB` 18), `MIN_NUM_LIGH`
+    1 (accumulation hides an isolated distant storm) and `MASK_DIST` 0. Only
+    `NF_LEV` adapts: a step up on every noise-too-high report, a step back down
+    after 10 quiet minutes; `WDTH`/`SREJ` stay at 2/2 because they cut real
+    sensitivity silently. The RCO calibration runs at every start. The distance
+    register never expires, so an hour without a strike drops the storm state
+    and clears the part's statistics. Logs a line per strike (distance,
+    energy), per noise-floor move and a disturber count per minute; a detection
+    also plays `BUZZER_STORM`. Not yet on the web page, the panel or in the
+    history, and none of it is a setting yet.
 - **mmWave radar (HLK-LD2450)** — UART1 at 256000 8N1, module TX on GPIO10,
   module RX on GPIO11, 5 V. The tracking stream is unprompted, so the only
   thing ever sent is one configuration sequence: **Bluetooth off**, which the
@@ -148,8 +163,9 @@ history.
   because a reading that moves below its displayed resolution changes the model
   without changing the screen. Render times are logged every 5 s, and only while
   frames are actually being flushed.
-  **Brightness** is the master current (`0xC7`), 16 steps, turned by the encoder
-  and logged on change; not persisted yet, and comes up at 0. The steps are not evenly spaced —
+  **Brightness** is the master current (`0xC7`), 16 steps; nothing edits it now
+  that the knob drives the chart, so it comes up at `gfx_target.h`'s default and
+  stays there, shown as 0–15 in the bottom-right corner. The steps are not evenly spaced —
   0 → 1 doubles the current, 14 → 15 adds 7 %. Everything else that scales the
   same current is fixed in the init sequence: contrast (`0xC1`) at 255, which
   makes it the ceiling the current scales down from, and the pre-charge — phase 2
@@ -158,20 +174,18 @@ history.
   controls, and their floor was bright enough that no contrast or current setting
   could dim the panel. The second pre-charge period must stay ≥ 1: a 0 there does
   not shorten the phase, it jumps the panel to bright.
-  All five live under the encoder on `screen_panel`, over a ramp of all 16 gray
-  levels — a tuning screen, kept for the next panel or the next room rather than
-  deleted with the tuning it was written for. A click picks the field, a turn
-  moves it, three buzzer clicks tell a step, a field change and the end of a
-  range apart, and the whole set is logged on change. Nothing is persisted: what
-  a session settles on is written into `gfx_target.h`, which the init sequence
-  and the screen's starting values both read.
-  Experiment stage above that: no navigation and no animation, and which screen
-  the panel shows is the `SHOW_PANEL` constant in `gui.c` — `screen_now` on the
-  live model, or the tuning screen. Each screen owns its own state and what its
-  knob means (`screen_panel` has five fields and a selection, on `screen_now` a
-  turn is brightness — shown as 0–15 in the bottom-right corner, the knob's only
-  feedback there — and a click blanks the panel and brings it back, on at boot
-  and not persisted); `ui_state_t` carries only what they share.
+  None of it is persisted or reachable from the panel: what a tuning session
+  settles on is written into `gfx_target.h`, which the init sequence reads.
+  Experiment stage above that: one screen, `screen_now`, and no animation. The
+  knob drives its chart — **turning back** walks the two fields (which
+  quantity, which window), **turning forward** cycles the picked field's value,
+  both wrapping, so no turn is ever refused. A **click** blanks the panel and another
+  brings it back (on at boot, not persisted). The selection is marked by a `GFX_HL` plate: on the
+  quantity field it sits under the indoor reading being plotted and moves with
+  it, on the window field under the badge below the chart. The buzzer tells a
+  field move from a value move, and the selection is logged on change. Both gestures land in `ui_state_input()`, and
+  what they move — the blanking, the focus, the two chart fields — is all of
+  `ui_state_t`: the screen draws from it and holds no state of its own.
 
   | Panel pin | To |
   |---|---|
@@ -360,14 +374,15 @@ card belongs in that device's module, not in the caller — dew point in
 | `gui/gfx/gfx_canvas.c` | drawing surface for the SSD1322 panel: a 64x256 portrait framebuffer already packed the way the controller wants it, a viewport stack carrying origin and clip, points, dashed h/v lines, rectangles |
 | `gui/gfx/gfx_text.c` | text at a given level and alignment, baseline-positioned, optionally over a filled line box (`gfx_text_bg`). Drives u8g2's font decoder through its own `u8g2_cb_t`, so glyphs land in the canvas at the caller's gray level with no compositing pass |
 | `gui/gfx/gfx_fonts.c` | generated: the u8g2 fonts actually linked, sliced by `gui/tools/extract_fonts.py` |
-| `gui/ui_model.c` | one snapshot of everything a frame may read, taken before it starts drawing, so no reading changes mid-frame and no lock is held across one |
-| `gui/ui.c` | the immediate-mode layer over the canvas: the text styles, a vertical layout cursor, separators |
-| `gui/gui.c` | the panel as the rest of the firmware sees it: owns the single 8 KB canvas, brings up the transport, draws a frame. The only firmware-only file in `gui/` |
-| `gui/screens/screen_test.c` | scratch scene for panel experiments, model-free; rendered by both the firmware and the simulator |
-| `gui/screens/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; live so far are the status bar (weekday, local time of the weather location, Wi-Fi bars, location name, age of the fetch) the outdoor block (icon, temperature, conditions), the rows under it (feels-like, sea-level pressure, humidity, wind with gusts, UV index, cloud cover), the five-day forecast (weekday letter, dim and a shade brighter at the weekend; min/max with a bar over the whole forecast's range; precipitation probability in tens, its brightness rising with the value) and the indoor rows (temperature, sea-level pressure, humidity, CO2, illuminance, dew point). Illuminance is the one value shown at less than its stored resolution: tenths below 1 lx, whole lux to 1000, thousands above. The battery is drawn empty — the board has no charge source. The chart, Zambretti and sun blocks below are roughed-in layout, still commented out |
+| `gui/views/ui_model.c` | one snapshot of everything a frame may read, taken before it starts drawing, so no reading changes mid-frame and no lock is held across one |
+| `gui/views/ui.c` | the immediate-mode layer over the canvas: the text styles, a vertical layout cursor, separators, the illuminance format the room's row and the chart's axis share |
+| `gui/views/chart.c` | the chart as one element: the plot and the labelled row under it. A widget — the series and which quantity it is are passed in, so it neither samples the history nor knows how either was picked. Carries the per-quantity axis: label format, minimum span, and whether the columns go linearly or by decade, and the `CHART_RANGES` table of windows |
+| `gui/views/ui_state.c` | what the UI remembers about itself and the whole encoder scheme: the click blanks the panel, a turn forward walks the knob's fields, a turn back cycles the value of the one in focus. The chart's quantity and window are two of those fields, which is why the selection lives here and not under the screen |
+| `gui/gui_loop.c` | the panel as the rest of the firmware sees it: owns the single 8 KB canvas, brings up the transport, draws a frame. The only firmware-only file in `gui/` |
+| `gui/views/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; live so far are the status bar (weekday, local time of the weather location, Wi-Fi bars, location name, age of the fetch) the outdoor block (icon, temperature, conditions), the rows under it (feels-like, sea-level pressure, humidity, wind with gusts, UV index, cloud cover), the five-day forecast (weekday letter, dim and a shade brighter at the weekend; min/max with a bar over the whole forecast's range; precipitation probability in tens, its brightness rising with the value) and the indoor rows (temperature, sea-level pressure, humidity, CO2, illuminance, dew point). Illuminance is the one value shown at less than its stored resolution: tenths below 1 lx, whole lux to 1000, thousands above. The battery is drawn empty — the board has no charge source. Below them a chart of one history quantity, 60 columns, with the ends of its scale and the window it covers labelled under it. The scale is the series' own min..max but never narrower than a per-quantity minimum (0.5 °C, 10 %RH, 4 hPa, 200 ppm, one decade of lux), so a flat hour reads as flat; illuminance is placed by decade, the rest linearly. Which quantity and which window are the knob's two fields, held in `ui_state_t` and handed both to `ui_model_refresh()`, so it knows what to sample, and to `chart_draw()`; the windows themselves are the `CHART_RANGES` table in `chart.c` — 1m, 5m, 1h, 1d, each 60 columns off the tier whose slots divide into it. The Zambretti and sun blocks below are roughed-in layout, still commented out |
 | `timesync.c` | SNTP client; `timesync_is_synced()` and `timesync_format()` |
 | `sensors/climate.c` | the room-level view over the devices, plus the reduction to sea level and the site-altitude setting. Its header carries the reading resolutions |
-| `history.c` | three rings sampled from a 1 s esp_timer, climate and radar alike; the two longer ones persist to `/data` with a versioned header |
+| `history.c` | three rings sampled from a 1 s esp_timer, climate and radar alike; the two longer ones persist to `/data` with a versioned header. `history_series()` decimates one quantity out of a tier for the panel's chart, in display units and NAN for a gap |
 | `storage.c` | mounts the LittleFS `storage` partition at `/data` |
 | `telegram.c` | message queue + sender task; `telegram_notify(fmt, ...)` |
 | `weather_api.c` | Open-Meteo client; own task fetches the active location hourly, `weather_api_refresh()` forces a reload |

@@ -4,7 +4,9 @@
 #include <stdint.h>
 #include <time.h>
 
+#include "chart.h"   /* the window the series is sampled over */
 #include "climate.h"
+#include "history.h"
 #include "weather_api.h"
 
 /* Everything a frame is allowed to read, collected once before it starts
@@ -35,6 +37,15 @@ typedef struct {
      * this header also compiles on the host for the simulator. */
     bool link;   /* station associated and holding an IP */
     int  rssi;   /* dBm; meaningless unless link */
+
+    /* The chart's series, sampled here rather than under the screen so that
+     * rendering keeps reading the model and nothing else. Oldest first, NAN for
+     * a gap; chart_n is short of the window until the ring has filled it. */
+    float chart[CHART_SERIES_MAX];
+    int   chart_n;
 } ui_model_t;
 
-void ui_model_refresh(ui_model_t *out);
+/* Which series to sample comes from the caller: the selection belongs to the
+ * screen that draws the chart, and the model does not know about screens. */
+void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
+                      chart_range_t chart_range);

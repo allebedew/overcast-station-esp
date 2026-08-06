@@ -1,4 +1,4 @@
-#include "gui.h"
+#include "gui_loop.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -23,12 +23,15 @@ static const char *TAG = "gui";
 #define FRAME_MS 100
 
 /* How often the frame numbers are logged, and only while the screen is actually
- * changing -- an idle panel says nothing. */
-#define STATS_MS 5000
+ * changing -- an idle panel says nothing. Long, because they only ever say the
+ * same thing: the render budget is a tenth of the frame, and what moves the
+ * numbers is what is on screen, not anything worth watching. */
+#define STATS_MS (10 * 60 * 1000)
 
-/* No navigation yet, so which screen the panel shows is settled here: 0 for the
- * station's own screen, 1 for the panel tuning one. */
-#define SHOW_PANEL 0
+/* The selection line is on its own, much shorter timer: it is feedback on a
+ * turn, useless once the stats window is out. Not on the detent itself -- a
+ * sweep of the range would be one line per click. */
+#define SETTING_MS 2000
 
 static gfx_canvas_t s_canvas;
 
@@ -42,17 +45,13 @@ static uint8_t s_shown[GFX_W][GFX_H / 2];
 static ui_state_t s_state;
 static ui_model_t s_model;
 
-/* Whatever the knob is currently editing, on one line, so a setting found by
- * hand can be copied out of the log. Written at boot and after a change. */
+/* Whatever the knob is currently on, on one line: the panel marks the selection
+ * nowhere yet. Written at boot and after a change. */
 static void log_setting(void)
 {
     char line[128];
 
-    if (SHOW_PANEL) {
-        screen_panel_format(line, sizeof(line));
-    } else {
-        snprintf(line, sizeof(line), "Bright %u", s_state.bright);
-    }
+    ui_state_format(&s_state, line, sizeof(line));
     ESP_LOGI(TAG, "panel: %s", line);
 }
 
@@ -70,7 +69,8 @@ static void gui_task(void *arg)
 
     uint32_t frames = 0, flushes = 0;
     int64_t  render_sum_us = 0, render_max_us = 0;
-    int64_t  stats_at = esp_timer_get_time() + STATS_MS * 1000;
+    int64_t  stats_at   = esp_timer_get_time() + STATS_MS * 1000;
+    int64_t  setting_at = esp_timer_get_time() + SETTING_MS * 1000;
 
     bool changed = false;
 
@@ -78,21 +78,18 @@ static void gui_task(void *arg)
         encoder_input_t in;
         encoder_take(&in);
 
-        /* The one place that knows which screen is up, until a page table takes
-         * the job over: each screen owns what its knob means. */
-        ui_event_t ev = SHOW_PANEL ? screen_panel_input(&in)
-                                   : ui_state_input(&s_state, &in);
+        ui_event_t ev = ui_state_input(&s_state, &in);
         if (ev != UI_EV_NONE) {
             buzzer_play(EV_TUNE[ev]);
         }
-        changed |= ev == UI_EV_STEP;
+        changed |= ev != UI_EV_NONE;
 
-        ui_model_refresh(&s_model);
+        /* The frame is drawn from the selection the same call just moved, so
+         * the series and the badge under it can never be a frame apart. */
+        ui_model_refresh(&s_model, s_state.chart_q, s_state.chart_range);
 
         int64_t t0 = esp_timer_get_time();
-        if (SHOW_PANEL) {
-            screen_panel(&s_canvas);
-        } else if (s_state.on) {
+        if (s_state.on) {
             ui_render(&s_canvas, &s_model, &s_state);
         } else {
             /* Blanked rather than switched off: every pixel dark is what an
@@ -115,13 +112,14 @@ static void gui_task(void *arg)
         }
 
         int64_t now = esp_timer_get_time();
-        if (now >= stats_at) {
-            /* On the tick rather than on the turn: a sweep of the range would
-             * otherwise be one line per detent. */
+        if (now >= setting_at) {
             if (changed) {
                 changed = false;
                 log_setting();
             }
+            setting_at = now + SETTING_MS * 1000;
+        }
+        if (now >= stats_at) {
             if (flushes) {
                 ESP_LOGI(TAG, "%lu frames, %lu flushed, render avg %lld us, max %lld us",
                          (unsigned long)frames, (unsigned long)flushes,
@@ -141,7 +139,7 @@ static void gui_task(void *arg)
     }
 }
 
-void gui_init(void)
+void gui_loop_init(void)
 {
     ssd1322_init();
     gfx_init(&s_canvas);

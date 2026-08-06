@@ -7,4 +7,4 @@
  * Firmware-only, unlike the drawing layers below it: the host simulator renders
  * the same scenes to PNG and never links a transport. */
 
-void gui_init(void);
+void gui_loop_init(void);

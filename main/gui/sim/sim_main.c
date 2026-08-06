@@ -4,6 +4,7 @@
 //   make && make run   ->  sim/out/*.png
 
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -465,7 +466,10 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data)
     m.out_cond  = "";   // ui_model_refresh() never leaves this NULL
     m.out.age_s = -1;
 
-    ui_state_t st = { .bright = 0, .on = true };
+    // The knob's own state, which on the panel ui_state_init() sets: the chart
+    // is drawn from what it has picked.
+    ui_state_t st = { .bright = 0, .on = true, .focus = UI_FOCUS_CHART_Q,
+                      .chart_q = HISTORY_Q_TEMP, .chart_range = CHART_RANGE_1M };
 
     if (!have_data) {
         ui_render(c, &m, &st);
@@ -512,6 +516,18 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data)
         };
     }
 
+    // The chart's series, which on the panel comes out of the history rings:
+    // a drifting wave, so both the shape and the axis labels have something to
+    // show. One gap, to draw the break a dead sensor leaves.
+    // A quiet room over a minute of 1 s samples: a tenth of a degree of drift,
+    // well inside the mode's minimum span, so the scene shows the line centred
+    // rather than the noise stretched over the whole box.
+    m.chart_n = CHART_SERIES_MAX;
+    for (int i = 0; i < m.chart_n; i++) {
+        m.chart[i] = 25.5f + sinf(i * 0.2f) * 0.04f + i * 0.001f;
+    }
+    m.chart[m.chart_n / 3] = NAN;
+
     snprintf(m.loc, sizeof(m.loc), "Vozdvizhenka");   // a name long enough to crowd the age
     m.link = true;
     m.rssi = -68;
@@ -529,13 +545,6 @@ static void scene_screen_now(gfx_canvas_t *c)
 static void scene_screen_now_empty(gfx_canvas_t *c)
 {
     screen_now_scene(c, false);
-}
-
-// The tuning screen as the panel gets it: its state is its own, and untouched
-// here it holds the values the transport comes up with.
-static void scene_screen_panel(gfx_canvas_t *c)
-{
-    screen_panel(c);
 }
 
 static void measure(void)
@@ -594,8 +603,6 @@ int main(int argc, char **argv)
         { "primitives", scene_primitives },
         { "screen_now",       scene_screen_now },
         { "screen_now_empty", scene_screen_now_empty },
-        { "screen_panel", scene_screen_panel },
-        { "screen_test",  screen_test },
     };
 
     char path[128];

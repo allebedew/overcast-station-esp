@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+#include "buzzer.h"
 #include "climate.h"
 #include "i2c_bus.h"
 
@@ -28,6 +29,12 @@
 #define TMP117_PERIOD_MS   250
 #define BMP581_PERIOD_MS   250
 #define VEML7700_PERIOD_MS 130
+/* The AS3935 has no interrupt line wired, so its latched flag is what gets
+ * polled; the period is what strike timestamps are worth, and two strikes
+ * inside one of them collapse into one. Not faster: the datasheet wants 2 ms
+ * between the event and the read, and a poll landing inside that window clears
+ * an interrupt it never saw. */
+#define AS3935_PERIOD_MS   50
 
 /* The SCD40 needs ambient pressure it cannot measure itself, so the BMP581's
  * reading is forwarded; the fallback is the ISA pressure at the configured site
@@ -46,6 +53,7 @@ typedef union {
     tmp117_data_t tmp117;
     bmp581_data_t bmp581;
     veml7700_data_t veml7700;
+    as3935_data_t as3935;
 } sensor_reading_t;
 
 typedef struct {
@@ -76,14 +84,17 @@ static esp_err_t scd40_read_any(sensor_reading_t *r) { return scd40_read(&r->scd
 static esp_err_t tmp117_read_any(sensor_reading_t *r) { return tmp117_read(&r->tmp117); }
 static esp_err_t bmp581_read_any(sensor_reading_t *r) { return bmp581_read(&r->bmp581); }
 static esp_err_t veml7700_read_any(sensor_reading_t *r) { return veml7700_read(&r->veml7700); }
+static esp_err_t as3935_read_any(sensor_reading_t *r) { return as3935_read(&r->as3935); }
 
 static void scd40_started(void);
 static void bmp581_published(const sensor_reading_t *r);
+static void as3935_published(const sensor_reading_t *r);
 
 /* Written by the poll task, read by httpd, the display, the LED and alerts. */
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 
-enum { SENSOR_SCD40, SENSOR_TMP117, SENSOR_BMP581, SENSOR_VEML7700, SENSOR_COUNT };
+enum { SENSOR_SCD40, SENSOR_TMP117, SENSOR_BMP581, SENSOR_VEML7700, SENSOR_AS3935,
+       SENSOR_COUNT };
 
 static sensor_t s_sensors[SENSOR_COUNT] = {
     [SENSOR_SCD40] = { .name = "SCD40", .period_ms = SCD40_PERIOD_MS,
@@ -96,6 +107,9 @@ static sensor_t s_sensors[SENSOR_COUNT] = {
                         .on_reading = bmp581_published },
     [SENSOR_VEML7700] = { .name = "VEML7700", .period_ms = VEML7700_PERIOD_MS,
                           .start = veml7700_start, .read = veml7700_read_any },
+    [SENSOR_AS3935] = { .name = "AS3935", .period_ms = AS3935_PERIOD_MS,
+                        .start = as3935_start, .read = as3935_read_any,
+                        .on_reading = as3935_published },
 };
 
 static bool sensor_get(sensor_t *s, sensor_reading_t *out)
@@ -157,6 +171,22 @@ static void bmp581_published(const sensor_reading_t *r)
 {
     (void)r; /* scd40_sync_pressure() reads the published snapshot */
     scd40_sync_pressure();
+}
+
+/* One crack per detection, straight off the strike counter — the driver
+ * publishes state, not events, so the increment is what an event looks like
+ * from here. The count at the first reading only arms the rule: after a
+ * sensor restart it is 0 anyway, and nothing should sound for history. */
+static void as3935_published(const sensor_reading_t *r)
+{
+    static bool armed;
+    static uint32_t strikes;
+
+    if (armed && r->as3935.strikes > strikes) {
+        buzzer_play(BUZZER_STORM);
+    }
+    strikes = r->as3935.strikes;
+    armed = true;
 }
 
 /* ---------------- polling ---------------- */
@@ -303,6 +333,16 @@ bool sensors_veml7700_get(veml7700_data_t *out)
     bool valid = sensor_get(&s_sensors[SENSOR_VEML7700], &r);
     if (valid) {
         *out = r.veml7700;
+    }
+    return valid;
+}
+
+bool sensors_as3935_get(as3935_data_t *out)
+{
+    sensor_reading_t r;
+    bool valid = sensor_get(&s_sensors[SENSOR_AS3935], &r);
+    if (valid) {
+        *out = r.as3935;
     }
     return valid;
 }

@@ -54,6 +54,15 @@ typedef struct {
 #define HISTORY_RADAR_STEPS(r)   (((r) >> 2) & 0x1F)
 #define HISTORY_RADAR_NEAR_M(r)  (HISTORY_RADAR_STEPS(r) * HISTORY_RADAR_STEP_M)
 
+typedef enum {
+    HISTORY_Q_TEMP,
+    HISTORY_Q_RH,
+    HISTORY_Q_PRESS,
+    HISTORY_Q_CO2,
+    HISTORY_Q_LUX,
+    HISTORY_Q_COUNT,
+} history_quantity_t;
+
 /* Starts the 1 s sampling timer driving all tiers. */
 void history_init(void);
 
@@ -64,6 +73,14 @@ int history_interval(history_tier_t tier);
 
 /* idx 0 = oldest stored point. Returns false if idx is out of range. */
 bool history_get(history_tier_t tier, int idx, history_point_t *out);
+
+/* One quantity of a tier for plotting: every `stride`-th slot in display units
+ * (C, %, hPa reduced to sea level, ppm, lx), oldest first, NAN for a gap.
+ * Returns how many of the `n` were written — a ring holding less than the whole
+ * window fills the front of `v` and leaves the rest untouched. Decimation runs
+ * from the newest slot back, so the phase does not shift as the ring fills. */
+int history_series(history_tier_t tier, history_quantity_t q, int stride,
+                   float *v, int n);
 
 /* Clears all tiers (RAM and flash snapshots). Sampling keeps running and
  * starts filling the rings from empty again. */

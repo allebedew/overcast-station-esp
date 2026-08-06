@@ -94,8 +94,8 @@ static void cmd_args(uint8_t c, const uint8_t *args, size_t n)
  * the master current then scales down from. Lower it to take the whole
  * brightness scale down with it.
  *
- * The four values are gfx_target.h's, not this file's, so screen_panel starts
- * from what the panel is actually running. */
+ * The four values are gfx_target.h's, not this file's, so a screen that turns
+ * them starts from what the panel is actually running. */
 static const uint8_t INIT_SCRIPT[] = {
     0xFD, 1, 0x12,             /* unlock the basic command set */
     0xAE, 0,                   /* display off while it is configured */

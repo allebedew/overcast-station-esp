@@ -13,9 +13,10 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             # it. gui/sim/ is the host build, not compiled here
                             "gui/gfx/gfx_canvas.c" "gui/gfx/gfx_text.c"
                             "gui/gfx/gfx_fonts.c" "gui/gfx/ssd1322.c"
-                            "gui/ui_model.c" "gui/ui_state.c" "gui/ui.c" "gui/gui.c"
-                            "gui/screens/screen_now.c" "gui/screens/screen_panel.c"
-                            "gui/screens/screen_test.c"
+                            "gui/gui_loop.c"
+                            "gui/views/ui_model.c" "gui/views/ui_state.c"
+                            "gui/views/ui.c" "gui/views/chart.c"
+                            "gui/views/screen_now.c"
                             # what it serves: the HTTP API and the page in
                             # web/index.html
                             "web/webserver.c"
@@ -26,10 +27,10 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             "sensors/i2c_bus.c"
                             "sensors/i2c_dev.c" "sensors/scd40.c"
                             "sensors/tmp117.c" "sensors/bmp581.c"
-                            "sensors/veml7700.c"
+                            "sensors/veml7700.c" "sensors/as3935.c"
                             # the mmWave tracker, on its own UART
                             "radar/ld2450.c"
-                       INCLUDE_DIRS "." "sensors" "gui" "gui/gfx"
+                       INCLUDE_DIRS "." "sensors" "gui" "gui/gfx" "gui/views"
                                     "web" "radar"
                        PRIV_REQUIRES u8g2
                                      esp_wifi esp_netif esp_event nvs_flash

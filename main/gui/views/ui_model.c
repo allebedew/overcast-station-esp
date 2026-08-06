@@ -7,7 +7,8 @@
 #include "weather_store.h"
 #include "wifi.h"
 
-void ui_model_refresh(ui_model_t *out)
+void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
+                      chart_range_t chart_range)
 {
     memset(out, 0, sizeof(*out));
 
@@ -22,6 +23,10 @@ void ui_model_refresh(ui_model_t *out)
     if (weather_store_get_active_location(&loc)) {
         snprintf(out->loc, sizeof(out->loc), "%s", loc.name);
     }
+
+    const chart_range_def_t *range = &CHART_RANGES[chart_range];
+    out->chart_n = history_series(range->tier, chart_q, range->stride,
+                                  out->chart, CHART_SERIES_MAX);
 
     wifi_info_t wifi;
     wifi_get_info(&wifi);

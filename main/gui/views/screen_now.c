@@ -4,12 +4,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "chart.h"
 #include "gfx_canvas.h"
+#include "screen_now.h"
 #include "ui.h"
 
 /* The main screen, built up one element at a time. The widgets below are here
  * rather than in ui.c because nothing else draws them yet; the first screen that
  * wants one is the reason to move it up. */
+
+/* Full-width dashed separator. Drawn at the cursor, not below a gap of its own:
+ * how far it sits from the row above depends on whether that row has
+ * descenders, which only the caller knows. */
+static void rule(gfx_canvas_t *c, ui_cursor_t *cur)
+{
+    gfx_hline(c, 0, cur->y, GFX_W, GFX_DIM, 0x55, 0);
+    ui_gap(cur, 1 + UI_GAP);   // past the rule's own row, then the gap
+}
 
 /* A degree sign, drawn rather than typed: no linked font carries U+00B0, and
  * 04b_03 has no Latin-1 variant upstream at all. Sits on the cap line of the run
@@ -129,20 +140,24 @@ static void age_str(char *buf, size_t n, int32_t s)
  * run for a left-aligned column, before it for a right-aligned one — so the two
  * columns read as a pair rather than as four runs. The sign stays with the
  * number, and a right-aligned run gives up its width at the anchor so it is the
- * sign that ends on it. `label` may be NULL. */
+ * sign that ends on it. `label` may be NULL.
+ *
+ * `bg` plates the number, and the number alone: the label stays dim and outside
+ * it, or a marked row reads as a block of ink rather than as a value. The
+ * degree sign is a plain pixel run and keeps whatever the plate left behind. */
 static void value(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st,
-                  const char *s, const char *label, bool deg)
+                  const char *s, const char *label, bool deg, gfx_level_t bg)
 {
     gfx_text_style_t ls = *st;
     ls.level = GFX_DIM;
 
     if (st->align == GFX_RIGHT) {
         if (deg) { x -= DEG_W + 1; }
-        int w = gfx_text(c, x, baseline, st, s);
+        int w = gfx_text_bg(c, x, baseline, st, bg, s);
         if (deg) { degree(c, x + 1, baseline, st); }
         if (label) { gfx_text(c, x - w - 3, baseline, &ls, label); }
     } else {
-        int w = gfx_text(c, x, baseline, st, s);
+        int w = gfx_text_bg(c, x, baseline, st, bg, s);
         int r = x + w;
         if (deg) {
             degree(c, r + 1, baseline, st);
@@ -158,7 +173,7 @@ static void value(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *
  * row keeps the width of its digits. */
 static void reading(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st,
                     bool ok, const char *fmt, const char *na, double v,
-                    const char *label, bool deg)
+                    const char *label, bool deg, gfx_level_t bg)
 {
     char b[16];
     if (ok) {
@@ -166,95 +181,7 @@ static void reading(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t
     } else {
         snprintf(b, sizeof(b), "%s", na);
     }
-    value(c, x, baseline, st, b, label, deg);
-}
-
-/* Illuminance spans five decades and the row has three characters for it:
- * tenths below 1 lx, whole lux up to 1000, thousands above. The stored
- * resolution is 0.1 lx throughout — this row is the one that drops digits. */
-static void lux_str(char *buf, size_t n, float lx)
-{
-    if (lx < 1.0f) {
-        snprintf(buf, n, "%.1f", lx);
-    } else if (lx < 1000.0f) {
-        snprintf(buf, n, "%.0f", lx);
-    } else {
-        snprintf(buf, n, "%.1fk", lx / 1000.0f);
-    }
-}
-
-/* Chart: a plot area inset from the side edges. Drawn at the cursor, like
- * ui_rule(), and leaves the standard gap below it.
- *
- * One value per column, oldest on the left; a longer series keeps its newest
- * values, a shorter one is pushed to the right edge. NAN is a gap and draws
- * nothing — history records them, and a zero in their place would flatten the
- * rest. The vertical range is the series' own min..max, so the plot fills the
- * height and shows shape, not absolute level. That range is handed back through
- * lo_out/hi_out — NAN when the series holds no finite value — so a caller that
- * labels the chart does not scan the series again. Either may be NULL. */
-#define CHART_X 2
-#define CHART_W (GFX_W - 2 * CHART_X)   /* 60 */
-#define CHART_H 24
-#define CHART_MAX CHART_W
-
-/* The fill under the line, brightest at the top of the box and fading down.
- * CHART_GRAD 0 leaves the line bare; CHART_GRAD_CHECKER inks every other pixel
- * instead of every one, thinning the fill on top of the fade. */
-#define CHART_GRAD         1
-#define CHART_GRAD_CHECKER 1
-#define CHART_GRAD_TOP     6
-#define CHART_GRAD_BOT     0
-
-static void chart(gfx_canvas_t *c, ui_cursor_t *cur, const float *v, int n,
-                  float *lo_out, float *hi_out)
-{
-    int top = cur->y;
-    ui_gap(cur, CHART_H + UI_GAP);
-
-    if (n > CHART_MAX) {
-        v += n - CHART_MAX;
-        n  = CHART_MAX;
-    }
-
-    float lo = 0, hi = 0;
-    bool  any = false;
-    for (int i = 0; i < n; i++) {
-        if (!isfinite(v[i])) { continue; }
-        if (!any || v[i] < lo) { lo = v[i]; }
-        if (!any || v[i] > hi) { hi = v[i]; }
-        any = true;
-    }
-    if (lo_out) { *lo_out = any ? lo : NAN; }
-    if (hi_out) { *hi_out = any ? hi : NAN; }
-    if (!any) { return; }
-
-    float span   = hi - lo;
-    int   bottom = top + CHART_H - 1;
-    int   x      = CHART_X + CHART_W - n;   // newest value on the right edge
-
-    for (int i = 0; i < n; i++) {
-        if (!isfinite(v[i])) { continue; }
-        int y = span > 0
-                    ? bottom - (int)lroundf((v[i] - lo) / span * (CHART_H - 1))
-                    : top + (CHART_H - 1) / 2;
-
-#if CHART_GRAD
-        // Anchored to the box, not to the line, so the columns add up to one
-        // gradient instead of a wedge under every point.
-        for (int r = y + 1; r <= bottom; r++) {
-#if CHART_GRAD_CHECKER
-            // Anchored to the box's own corner, so the pattern does not shift
-            // with where the series happens to start.
-            if ((((x + i - CHART_X) + (r - top)) & 1) != 0) { continue; }
-#endif
-            gfx_px(c, x + i, r,
-                   (gfx_level_t)(CHART_GRAD_TOP - (r - top) * (CHART_GRAD_TOP - CHART_GRAD_BOT)
-                                                      / (CHART_H - 1)));
-        }
-#endif
-        gfx_px(c, x + i, y, GFX_FULL);
-    }
+    value(c, x, baseline, st, b, label, deg, bg);
 }
 
 /* WMO code to a glyph. unifont_t_weather re-encodes its icons into the ASCII
@@ -454,34 +381,6 @@ static void wx_forecast(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
     }
 }
 
-/* The chart between two tiny rows: the quantity and the window it covers above,
- * the range it was scaled to below — the low on the left, the high on the right,
- * at the ends of the box the plot maps them to. */
-static void wx_chart(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
-{
-    (void)m;   // placeholders for now
-
-    float v[CHART_MAX];
-    for (int i = 0; i < CHART_MAX; i++) {
-        v[i] = sinf(i * 0.2f) * 3.0f + i * 0.05f;
-    }
-
-    int baseline = ui_row(cur, &UI_TEXT);
-    gfx_text_bg(c, 0,  baseline, &UI_TEXT, GFX_HL, "Press");
-    gfx_text_bg(c, UI_RX, baseline, &UI_TEXT_R, GFX_HL, "5m");
-
-    float lo, hi;
-    chart(c, cur, v, CHART_MAX, &lo, &hi);
-
-    baseline = ui_row(cur, &UI_TINY);
-    if (isfinite(lo)) {
-        gfx_textf(c, CHART_X, baseline, &UI_TINY, "%.1f", lo);
-    }
-    if (isfinite(hi)) {
-        gfx_textf(c, UI_RX - CHART_X, baseline, &UI_TINY_R, "%.1f", hi);
-    }
-}
-
 // Built up element by element: what is drawn here reads the model, the blocks
 // still commented out are roughed-in layout waiting for theirs.
 void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
@@ -521,25 +420,26 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     loc_st.level = GFX_DIM;
     gfx_text_bg(c, 0, baseline, &loc_st, GFX_NONE, m->loc[0] ? m->loc : "--");
     gfx_pop(c);
-    ui_rule(c, &cur);
+    rule(c, &cur);
 
     // Conditions with Icon
 
     wx_now(c, &cur, m);
-    ui_rule(c, &cur);
+    rule(c, &cur);
 
     // Condition Labels
 
     bool ok = m->out_ok;
 
     baseline = ui_row(&cur, &UI_TEXT);
-    reading(c, 0, baseline, &UI_TEXT, ok, "%.1f", "--.-", m->out.feels_c, "FL", true);
+    reading(c, 0, baseline, &UI_TEXT, ok, "%.1f", "--.-", m->out.feels_c, "FL", true,
+            GFX_NONE);
     reading(c, UI_RX, baseline, &UI_TEXT_R, ok, "%.1f", "---.-",
-            m->out.pressure_msl_hpa, NULL, false);
+            m->out.pressure_msl_hpa, NULL, false, GFX_NONE);
 
     baseline = ui_row(&cur, &UI_TEXT);
     reading(c, 0, baseline, &UI_TEXT, ok, "%.0f%%", "--%", m->out.humidity_pct,
-            NULL, false);
+            NULL, false, GFX_NONE);
     // Speed and gusts as one range, in the units the API reports.
     if (ok) {
         gfx_textf(c, UI_RX, baseline, &UI_TEXT_R, "%s%.0f-%.0f",
@@ -550,65 +450,74 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     }
 
     baseline = ui_row(&cur, &UI_TEXT);
-    reading(c, 0, baseline, &UI_TEXT, ok, "%.1f", "--.-", m->out.uvi, "UV", false);
+    reading(c, 0, baseline, &UI_TEXT, ok, "%.1f", "--.-", m->out.uvi, "UV", false,
+            GFX_NONE);
     reading(c, UI_RX, baseline, &UI_TEXT_R, ok, "%.0f%%", "--%",
-            (double)m->out.cloud_pct, "CL", false);
+            (double)m->out.cloud_pct, "CL", false, GFX_NONE);
 
-    ui_rule(c, &cur);
+    rule(c, &cur);
 
     // Forecast
 
     wx_forecast(c, &cur, m);
-    ui_rule(c, &cur);
+    rule(c, &cur);
 
     // Sensor Labels
 
     const climate_t *cl = &m->climate;
 
+    // These rows are where the chart's quantity is picked, so while the knob is
+    // on that field the one being plotted wears a plate. Dew point is on no
+    // chart and never marked.
+    const bool q_sel = s->focus == UI_FOCUS_CHART_Q;
+#define Q_BG(q) ((q_sel && s->chart_q == (q)) ? GFX_HL : GFX_NONE)
+
     baseline = ui_row(&cur, &UI_TEXT);
     reading(c, 0, baseline, &UI_TEXT, cl->temp_ok, "%.2f", "--.--", cl->temp_c,
-            NULL, true);
+            NULL, true, Q_BG(HISTORY_Q_TEMP));
     reading(c, UI_RX, baseline, &UI_TEXT_R, cl->press_ok, "%.3f", "---.---",
-            cl->press_msl_hpa, NULL, false);
+            cl->press_msl_hpa, NULL, false, Q_BG(HISTORY_Q_PRESS));
 
     baseline = ui_row(&cur, &UI_TEXT);
     reading(c, 0, baseline, &UI_TEXT, cl->rh_ok, "%.1f%%", "--.-%", cl->rh_pct,
-            NULL, false);
+            NULL, false, Q_BG(HISTORY_Q_RH));
     reading(c, UI_RX, baseline, &UI_TEXT_R, cl->co2_ok, "%.0f", "---",
-            (double)cl->co2_ppm, "CO2", false);
+            (double)cl->co2_ppm, "CO2", false, Q_BG(HISTORY_Q_CO2));
 
     baseline = ui_row(&cur, &UI_TEXT);
     char lx[8] = "--";
     if (cl->lux_ok) {
-        lux_str(lx, sizeof(lx), cl->lux);
+        ui_lux_str(lx, sizeof(lx), cl->lux);
     }
-    value(c, 0, baseline, &UI_TEXT, lx, "Lx", false);
+    value(c, 0, baseline, &UI_TEXT, lx, "Lx", false, Q_BG(HISTORY_Q_LUX));
     reading(c, UI_RX, baseline, &UI_TEXT_R, cl->rh_ok, "%.1f", "--.-",
-            cl->dew_c, "DW", true);
+            cl->dew_c, "DW", true, GFX_NONE);
+#undef Q_BG
 
-    ui_rule(c, &cur);
+    rule(c, &cur);
 
     // Brightness, pinned to the bottom corner: the knob has no other feedback
     // while the panel shows this screen. micro_tr has no descender, so the
     // baseline is the last row.
     gfx_textf(c, UI_RX, GFX_H - 1, &UI_MICRO_R, "%u", s->bright);
-/*
+
     // Chart
 
-    wx_chart(c, &cur, m);
-    ui_rule(c, &cur);
-
+    chart_draw(c, &cur, m->chart, m->chart_n, s->chart_q, s->chart_range,
+               s->focus == UI_FOCUS_CHART_RANGE);
+    rule(c, &cur);
+/*
     // Sun Position
 
     baseline = ui_row(&cur, &UI_TEXT);
     gfx_text(c, 0,     baseline, &UI_TEXT,   "--ZAMBRETTI--");
-    ui_rule(c, &cur);
+    rule(c, &cur);
 
     // Sun Position
 
     baseline = ui_row(&cur, &UI_TEXT);
     gfx_text(c, 0,     baseline, &UI_TEXT,   "--SUN--");
-    ui_rule(c, &cur);
+    rule(c, &cur);
 
     // A random animal pinned to the bottom edge. unifont_t_animals carries one
     // unbroken run of glyphs from 0x20, and its ink sits one row below the

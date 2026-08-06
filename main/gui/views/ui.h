@@ -19,6 +19,7 @@ extern const gfx_text_style_t UI_BOLD;
 
 /* Narrower than UI_TEXT at the same height, for rows that have to fit more. */
 extern const gfx_text_style_t UI_TINY;
+extern const gfx_text_style_t UI_TINY_C;
 extern const gfx_text_style_t UI_TINY_R;
 
 /* The smallest linked font, for a marker rather than a reading. */
@@ -34,7 +35,7 @@ extern const gfx_text_style_t UI_MICRO_R;
 
 /* Vertical layout. Baselines are error-prone to compute by hand, so a row is
  * asked for by style and the cursor keeps the arithmetic. */
-typedef struct {
+typedef struct ui_cursor {   /* tagged so chart.h can name it without ui.h */
     int16_t y;
 } ui_cursor_t;
 
@@ -42,23 +43,11 @@ typedef struct {
 int  ui_row(ui_cursor_t *cur, const gfx_text_style_t *st);
 void ui_gap(ui_cursor_t *cur, int px);
 
-/* Full-width dashed separator, with the gap above and below it. */
-void ui_rule(gfx_canvas_t *c, ui_cursor_t *cur);
+/* Illuminance in three characters, the one reading shown at less than its
+ * stored resolution. Here rather than in a screen because the room's row and
+ * the chart's axis have to drop the same digits. */
+void ui_lux_str(char *buf, size_t n, float lx);
 
-/* One frame. Does not flush — the caller owns the panel. */
+/* One frame: picks the screen and draws it. Does not flush — the caller owns
+ * the panel. */
 void ui_render(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s);
-
-void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s);
-
-/* The panel's own drive settings under the encoder, over a ramp of every gray
- * level. A tuning screen, not part of the station's UI, and the first one to
- * own its state and its input instead of leaving them to the caller. */
-void       screen_panel(gfx_canvas_t *c);
-ui_event_t screen_panel_input(const encoder_input_t *in);
-
-/* Every field on one line, for the log — the only way a session's findings
- * leave the device. */
-void screen_panel_format(char *buf, int n);
-
-/* Scratch scene for panel experiments, model-free by design. */
-void screen_test(gfx_canvas_t *c);

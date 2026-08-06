@@ -431,6 +431,72 @@ bool history_get(history_tier_t tier, int idx, history_point_t *out)
     return ok;
 }
 
+/* One quantity out of a slot, in stored units. False leaves *out alone, so a
+ * caller scanning for a non-gap can keep its own fallback there. */
+static bool point_value(const history_point_t *p, history_quantity_t q, float *out)
+{
+    switch (q) {
+    case HISTORY_Q_TEMP:
+        if (!(p->have & HISTORY_HAS_TEMP)) { return false; }
+        *out = p->temp_cx100 / 100.0f;
+        return true;
+    case HISTORY_Q_RH:
+        if (!(p->have & HISTORY_HAS_RH)) { return false; }
+        *out = p->rh_dpct / 10.0f;
+        return true;
+    case HISTORY_Q_PRESS:
+        if (!(p->have & HISTORY_HAS_PRESS)) { return false; }
+        *out = p->press_mhpa / 1000.0f;
+        return true;
+    case HISTORY_Q_CO2:
+        if (!(p->have & HISTORY_HAS_CO2)) { return false; }
+        *out = p->co2_ppm;
+        return true;
+    case HISTORY_Q_LUX:
+        if (!(p->have & HISTORY_HAS_LUX)) { return false; }
+        *out = p->lux;
+        return true;
+    case HISTORY_Q_COUNT:
+        break;
+    }
+    return false;
+}
+
+int history_series(history_tier_t tier, history_quantity_t q, int stride,
+                   float *v, int n)
+{
+    if (stride < 1) { stride = 1; }
+
+    int count = history_count(tier);
+    int cols  = count > 0 ? (count - 1) / stride + 1 : 0;
+    if (cols > n) { cols = n; }
+
+    for (int k = 0; k < cols; k++) {
+        int   idx = count - 1 - k * stride;
+        float raw = NAN;
+        /* The column stands for its whole stride, so a gap in the slot the
+         * decimation lands on falls back down the window instead of breaking
+         * the line. */
+        for (int j = 0; j < stride && idx - j >= 0; j++) {
+            history_point_t p;
+            if (history_get(tier, idx - j, &p) && point_value(&p, q, &raw)) {
+                break;
+            }
+        }
+        v[cols - 1 - k] = raw;
+    }
+
+    if (q == HISTORY_Q_PRESS) {
+        /* Stored as measured, plotted reduced, like /api/history. The reduction
+         * is linear, so the series costs one powf rather than one per point. */
+        float k_msl = climate_to_sea_level(1.0f);
+        for (int k = 0; k < cols; k++) {
+            v[k] *= k_msl;
+        }
+    }
+    return cols;
+}
+
 void history_reset(void)
 {
     /* count = 0 makes the stored points unreachable (history_get bounds-checks

@@ -26,11 +26,12 @@ void gfx_set_brightness(uint8_t level);
 #define GFX_BRIGHTNESS_MAX     15
 #define GFX_BRIGHTNESS_DEFAULT 12
 
-// The rest of the drive settings, for screen_panel and nothing else: the ceiling
-// the brightness scales down from, and the pre-charge, which lights the pixel
-// outside the phase the drive current controls and sets the floor brightness
-// cannot go below. Their values were found on the panel and are what the
-// transport comes up at; these exist so they can be found again on another one.
+// The rest of the drive settings, called from nowhere since the tuning screen
+// they were written for went: the ceiling the brightness scales down from, and
+// the pre-charge, which lights the pixel outside the phase the drive current
+// controls and sets the floor brightness cannot go below. Their values were
+// found on the panel and are what the transport comes up at; these exist so
+// they can be found again on another one.
 void gfx_set_contrast(uint8_t contrast);
 void gfx_set_precharge(uint8_t phase2, uint8_t second, uint8_t voltage);
 
