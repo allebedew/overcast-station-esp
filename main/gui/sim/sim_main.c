@@ -580,11 +580,11 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data, bool fetching,
     // Five days from m.now's local midnight, the same convention weather_api.c
     // stores: a GMT stamp already shifted by the location's offset. The spread
     // is wider than a real week so the bar has something to map, and the last
-    // day's probability is missing to draw that column's dash.
+    // day's probability and cloud cover are missing to draw those columns' dashes.
     m.out.day_count = WEATHER_API_FORECAST_DAYS;
-    static const struct { float lo, hi; int prob; } FC[] = {
-        { -12.4f, 3.2f, 100 }, { -4.0f, 11.5f, 45 }, { 0.4f, 19.0f, 0 },
-        {  8.1f, 27.4f,  20 }, { 24.0f, 34.2f, -1 },
+    static const struct { float lo, hi; int prob, cloud; } FC[] = {
+        { -12.4f, 3.2f, 100, 0 }, { -4.0f, 11.5f, 45, 30 }, { 0.4f, 19.0f, 0, 95 },
+        {  8.1f, 27.4f,  20, 60 }, { 24.0f, 34.2f, -1, -1 },
     };
     time_t midnight = (m.now + m.utc_off_s) / 86400 * 86400;
     for (int i = 0; i < m.out.day_count; i++) {
@@ -593,6 +593,7 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data, bool fetching,
             .temp_min_c      = FC[i].lo,
             .temp_max_c      = FC[i].hi,
             .precip_prob_pct = FC[i].prob,
+            .cloud_pct       = FC[i].cloud,
             .weather_code    = 0,
         };
     }

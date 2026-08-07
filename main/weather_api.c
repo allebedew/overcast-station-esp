@@ -35,7 +35,7 @@
  * rejected as a variable, so it is not listed here. */
 #define WEATHER_API_DAILY_FIELDS \
     "temperature_2m_max,temperature_2m_min,precipitation_probability_max," \
-    "weather_code,sunshine_duration,daylight_duration"
+    "weather_code,cloud_cover_mean,daylight_duration"
 
 #define WEATHER_API_UPDATE_INTERVAL_MS (15 * 60 * 1000)
 #define WEATHER_API_RETRY_INTERVAL_MS  (5 * 60 * 1000)  /* retry sooner after a failure */
@@ -116,6 +116,7 @@ static int parse_days(const cJSON *daily, int utc_offset_s, float fallback_temp,
     const cJSON *tmin = cJSON_GetObjectItem(daily, "temperature_2m_min");
     const cJSON *prob = cJSON_GetObjectItem(daily, "precipitation_probability_max");
     const cJSON *code = cJSON_GetObjectItem(daily, "weather_code");
+    const cJSON *cloud = cJSON_GetObjectItem(daily, "cloud_cover_mean");
 
     int n = cJSON_GetArraySize(time);
     if (n > WEATHER_API_FORECAST_DAYS) {
@@ -127,6 +128,7 @@ static int parse_days(const cJSON *daily, int utc_offset_s, float fallback_temp,
             .temp_max_c = (float)jarrn(tmax, i, fallback_temp),
             .temp_min_c = (float)jarrn(tmin, i, fallback_temp),
             .precip_prob_pct = (int)lround(jarrn(prob, i, -1)),
+            .cloud_pct = (int)lround(jarrn(cloud, i, -1)),
             .weather_code = (int)lround(jarrn(code, i, -1)),
         };
     }
@@ -168,9 +170,6 @@ static bool parse(const char *json, weather_api_data_t *out)
             /* the rest default where a model omits them */
             .uvi = jnum(cur, "uv_index", WEATHER_API_UVI_NONE),
             .feels_c = jnum(cur, "apparent_temperature", temp->valuedouble),
-            /* today's whole-day totals, so both are forecasts until the day is over */
-            .sunshine_s = (int32_t)lroundf(
-                jarr0(cJSON_GetObjectItem(daily, "sunshine_duration"), -1)),
             .daylight_s = (int32_t)lroundf(
                 jarr0(cJSON_GetObjectItem(daily, "daylight_duration"), -1)),
             .pressure_msl_hpa = jnum(cur, "pressure_msl", press->valuedouble),
@@ -223,21 +222,21 @@ static void publish(const weather_api_data_t *d, const weather_location_t *loc)
     ESP_LOGI(TAG,
              "updated: %.1f C (feels %.1f), %.0f%%, %.1f/%.1f hPa, "
              "UVI %.2f, wind %.1f (gust %.1f) km/h @%d, clouds %d%%, "
-             "precip %.1f mm/h, sun %.1f/%.1f h, %s, %s",
+             "precip %.1f mm/h, daylight %.1f h, %s, %s",
              d->temp_c, d->feels_c, d->humidity_pct,
              d->pressure_hpa, d->pressure_msl_hpa, d->uvi, d->wind_kmh, d->gust_kmh,
              d->wind_dir_deg, d->cloud_pct, d->precip_mmh,
-             d->sunshine_s / 3600.0f, d->daylight_s / 3600.0f,
+             d->daylight_s / 3600.0f,
              d->is_day ? "day" : "night",
              weather_api_code_str(d->weather_code));
     for (int i = 0; i < d->day_count; i++) {
         const weather_api_day_t *day = &d->days[i];
         struct tm dt;
         gmtime_r(&day->date, &dt);
-        ESP_LOGI(TAG, "forecast %04d-%02d-%02d: %.1f..%.1f C, rain %d%%, %s",
+        ESP_LOGI(TAG, "forecast %04d-%02d-%02d: %.1f..%.1f C, rain %d%%, cloud %d%%, %s",
                  dt.tm_year + 1900, dt.tm_mon + 1, dt.tm_mday,
                  day->temp_min_c, day->temp_max_c, day->precip_prob_pct,
-                 weather_api_code_str(day->weather_code));
+                 day->cloud_pct, weather_api_code_str(day->weather_code));
     }
 }
 

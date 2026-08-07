@@ -1444,7 +1444,6 @@
                     weatherGust: "Порывы",
                     weatherClouds: "Облачность",
                     weatherPrecip: "Осадки",
-                    weatherSunshine: "Сияние",
                     weatherAlt: "выс.",
                     uKmh: "км/ч",
                     uMmh: "мм/ч",
@@ -1666,7 +1665,6 @@
                     weatherGust: "Gusts",
                     weatherClouds: "Clouds",
                     weatherPrecip: "Precipitation",
-                    weatherSunshine: "Sunshine",
                     weatherAlt: "alt.",
                     uKmh: "km/h",
                     uMmh: "mm/h",
@@ -2224,19 +2222,6 @@
                     l: "weatherPrecip",
                     ui: "uMmh",
                     f: (v) => v.toFixed(1),
-                },
-                {
-                    /* whole-day totals: hours of sun as the reading, its share
-                     * of the daylight in the label */
-                    k: "sunshine",
-                    l: "weatherSunshine",
-                    src: ["sunshine", "daylight"],
-                    ui: "uH",
-                    f: (s) => (s / 3600).toFixed(1),
-                    lf: (s, d) =>
-                        d > 0
-                            ? `${t("weatherSunshine")}: ${Math.round((100 * s) / d)}%`
-                            : t("weatherSunshine"),
                 },
             ];
 

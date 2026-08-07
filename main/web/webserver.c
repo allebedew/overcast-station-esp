@@ -306,9 +306,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
                 ? weather.days[0]
                 : (weather_api_day_t){ .temp_min_c = weather.temp_c,
                                        .temp_max_c = weather.temp_c };
-        char wx_sun[12], wx_daylight[12];
-        json_num(wx_sun, sizeof(wx_sun), weather.sunshine_s >= 0, "%.0f",
-                 (double)weather.sunshine_s);
+        char wx_daylight[12];
         json_num(wx_daylight, sizeof(wx_daylight), weather.daylight_s >= 0, "%.0f",
                  (double)weather.daylight_s);
         snprintf(wx_cur, sizeof(wx_cur),
@@ -316,13 +314,13 @@ static esp_err_t status_get_handler(httpd_req_t *req)
                  "\"hum\":%.0f,\"press\":%.1f,\"press_msl\":%.1f,\"uvi\":%.2f,"
                  "\"wind\":%.1f,\"gust\":%.1f,\"wind_dir\":%d,"
                  "\"precip_rate\":%.1f,\"clouds\":%d,\"code\":%d,\"is_day\":%d,"
-                 "\"sunshine\":%s,\"daylight\":%s,\"elev\":%.0f,\"age\":%d}",
+                 "\"daylight\":%s,\"elev\":%.0f,\"age\":%d}",
                  weather.temp_c, weather.feels_c, today.temp_min_c,
                  today.temp_max_c, weather.humidity_pct, weather.pressure_hpa,
                  weather.pressure_msl_hpa, weather.uvi, weather.wind_kmh,
                  weather.gust_kmh, weather.wind_dir_deg, weather.precip_mmh,
                  weather.cloud_pct, weather.weather_code, weather.is_day,
-                 wx_sun, wx_daylight, weather.elevation_m, (int)weather.age_s);
+                 wx_daylight, weather.elevation_m, (int)weather.age_s);
     }
 
     char time_str[TIMESYNC_STR_LEN];

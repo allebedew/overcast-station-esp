@@ -343,6 +343,27 @@ static void wx_now(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
     degree(c, x + tw + 1, baseline, &UI_BOLD);
     gfx_text(c, x, baseline + UI_GAP + cm.ascent, &UI_TEXT, cond);
 
+    // Precipitation rate, inverted at the far end of the temperature's row: the
+    // only marked run on the screen that is not a knob field, so the plate reads
+    // as "it is raining" rather than as a selection — and dry weather shows
+    // nothing at all. 1 px of plate on either side of the digits, which
+    // gfx_text_bg does not add.
+    if (m->out_ok && m->out.precip_mmh > 0) {
+        gfx_text_style_t ps = UI_TEXT_R;
+        ps.level = GFX_OFF;
+
+        char precip[8];
+        snprintf(precip, sizeof(precip), "%.1f", m->out.precip_mmh);
+        int pw     = gfx_text_w(&ps, precip);
+        int p_base = baseline - 1;
+
+        gfx_rect(c, (gfx_rect_t){ (int16_t)(UI_RX - pw - 2 * AP_PAD),
+                                  (int16_t)(p_base - cm.ascent - 1),
+                                  (int16_t)(pw + 2 * AP_PAD), (int16_t)(cm.ascent + 2) },
+                 GFX_NONE, GFX_FULL, GFX_SOLID);
+        gfx_text(c, UI_RX - AP_PAD, p_base, &ps, precip);
+    }
+
     ui_gap(cur, fm.ascent + UI_GAP + cm.line_height);
 }
 
@@ -352,15 +373,18 @@ static void wx_now(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
  * rows by position alone.
  *
  * Columns: the weekday letter, either temperature, one digit of precipitation
- * on the far right, the rest for the bar. Each temperature column is as wide as
+ * and a one-pixel cloud column on the far right, the rest for the bar. Each temperature column is as wide as
  * the widest value it has to show — a single minus sign anywhere in it costs
  * every row a character — and the two are measured apart, so the bar gives up
  * only what is actually needed. */
 #define FC_WD_W  3                    /* one 3x5im letter */
 #define FC_WD_WEEKEND ((gfx_level_t)8)   /* the rest of the weekdays stay GFX_DIM */
-#define FC_P_LEVEL_MIN 8                 /* 1% of rain; 0% is GFX_DIM */
+#define FC_LEVEL_MIN 8                   /* 1% of rain; 0% is GFX_DIM */
 #define FC_P_W   3
-#define FC_P_X   (UI_RX - FC_P_W - 3)   /* right edge of the high column */
+#define FC_C_W   1                        /* the cloud column is one pixel wide */
+#define FC_C_X   UI_RX                    /* right edge of the cloud column */
+#define FC_P_X   (FC_C_X - FC_C_W - 3)    /* right edge of the precipitation column */
+#define FC_HI_X  (FC_P_X - FC_P_W - 3)    /* right edge of the high column */
 
 static void wx_forecast(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
 {
@@ -394,7 +418,7 @@ static void wx_forecast(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
 
     const int lo_x  = FC_WD_W + 3 + lo_w;   /* right edge of the low column */
     const int bar_x = lo_x + 2;
-    const int bar_w = FC_P_X - hi_w - 2 - bar_x;
+    const int bar_w = FC_HI_X - hi_w - 2 - bar_x;
 
     // The block keeps its full height whether or not the fetch succeeded, so an
     // empty row is the day's columns dashed out and the bar left unlit.
@@ -419,8 +443,8 @@ static void wx_forecast(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
         gfx_text(c, 0, baseline, &wd_st, wd);
         gfx_px(c, FC_WD_W + 1, baseline - 3, GFX_DIM);   // parts the letter from the low
 
-        gfx_text(c, lo_x,   baseline, &UI_TINY_R, lo_s[i]);
-        gfx_text(c, FC_P_X, baseline, &UI_TINY_R, hi_s[i]);
+        gfx_text(c, lo_x,    baseline, &UI_TINY_R, lo_s[i]);
+        gfx_text(c, FC_HI_X, baseline, &UI_TINY_R, hi_s[i]);
 
         // Probability in tens, one digit wide: 95% and up share the 9. It also
         // reads without the digit, off the brightness alone — a dry day stays
@@ -429,16 +453,30 @@ static void wx_forecast(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
         gfx_text_style_t p_st = UI_TINY_R;
         p_st.level = GFX_DIM;
         if (p < 0) {
-            gfx_text(c, UI_RX, baseline, &p_st, "-");
+            gfx_text(c, FC_P_X, baseline, &p_st, "-");
         } else {
             if (p > 0) {
-                p_st.level = (gfx_level_t)(FC_P_LEVEL_MIN
-                                           + p * (GFX_FULL - FC_P_LEVEL_MIN) / 100);
+                p_st.level = (gfx_level_t)(FC_LEVEL_MIN
+                                           + p * (GFX_FULL - FC_LEVEL_MIN) / 100);
             }
             int dig = (p + 5) / 10;
-            gfx_textf(c, UI_RX, baseline, &p_st, "%d", dig > 9 ? 9 : dig);
+            gfx_textf(c, FC_P_X, baseline, &p_st, "%d", dig > 9 ? 9 : dig);
         }
-        gfx_px(c, FC_P_X + 1, baseline - 3, GFX_DIM);   // tells the two numbers apart
+        // Cloud cover as a one-pixel-wide column instead of a digit, centred on
+        // the separator pixels' row: the clear sky sets both its height — 1, 3
+        // or 5 px, a third of the scale each — and its brightness over 1..15, so
+        // a sunny day is a tall bright column and an overcast one a single faint
+        // pixel. No data is that pixel dimmed instead.
+        int clear = ok && d[i].cloud_pct >= 0 ? 100 - d[i].cloud_pct : -1;
+        if (clear < 0) {
+            gfx_px(c, FC_C_X - 1, baseline - 3, GFX_DIM);
+        } else {
+            int h = clear >= 67 ? 5 : clear >= 34 ? 3 : 1;
+            gfx_level_t lv = (gfx_level_t)(1 + clear * (GFX_FULL - 1) / 100);
+            gfx_vline(c, FC_C_X - 1, baseline - 3 - h / 2, h, lv, 0xFF, 0);
+        }
+        gfx_px(c, FC_HI_X + 1, baseline - 3, GFX_DIM);   // tells the two numbers apart
+        gfx_px(c, FC_P_X + 1,  baseline - 3, GFX_DIM);
 
         gfx_checker(c, (gfx_rect_t){ (int16_t)bar_x, (int16_t)top, (int16_t)bar_w, 3 },
                     GFX_DIM, GFX_NONE, 1);
@@ -449,9 +487,10 @@ static void wx_forecast(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
         int x0 = span > 0 ? (int)lroundf((d[i].temp_min_c - lo) / span * (bar_w - 1)) : 0;
         int x1 = span > 0 ? (int)lroundf((d[i].temp_max_c - lo) / span * (bar_w - 1))
                           : bar_w - 1;
-        gfx_checker(c, (gfx_rect_t){ (int16_t)(bar_x + x0), (int16_t)top,
-                                     (int16_t)(x1 - x0 + 1), 3 },
-                    GFX_FULL, 12, 0);
+
+        for (int x = x0 + (x0 & 1); x <= x1; x += 2) {
+            gfx_vline(c, bar_x + x, top, 3, GFX_FULL, 0xFF, 0);
+        }
     }
 }
 

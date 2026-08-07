@@ -12,6 +12,8 @@ typedef struct {
     float  temp_min_c;      /* °C */
     float  temp_max_c;      /* °C */
     int    precip_prob_pct; /* precipitation probability, %; -1 if unknown */
+    int    cloud_pct;       /* mean cloud cover over the whole day, %;
+                             * -1 if unknown */
     int    weather_code;    /* WMO weather interpretation code, -1 if unknown */
 } weather_api_day_t;
 
@@ -34,8 +36,6 @@ typedef struct {
                              * 2.5..7.5 moderate, above that heavy */
     bool is_day;            /* daylight at the location; the WMO code alone does
                              * not tell a clear day from a clear night */
-    int32_t sunshine_s;     /* today's total sunshine (direct radiation above
-                             * 120 W/m²), seconds; -1 if the model omits it */
     int32_t daylight_s;     /* today's total daylight, seconds; -1 if unknown */
     int cloud_pct;          /* cloud cover, % */
     int weather_code;       /* WMO weather interpretation code, -1 if unknown */
