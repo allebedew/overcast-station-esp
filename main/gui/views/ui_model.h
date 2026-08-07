@@ -49,6 +49,7 @@ typedef struct {
      * this header also compiles on the host for the simulator. */
     ui_link_t link;
     int       rssi;   /* dBm; meaningless unless UI_LINK_UP */
+    bool      ap;     /* own SoftAP is up; the station side has nothing to show */
 
     /* Monotonic since boot, for whatever moves on its own. Kept in the model so
      * a frame animates off one stamp rather than each widget reading a clock. */

@@ -119,6 +119,14 @@ static void schedule_retry(void)
     }
 }
 
+/* Asked of the driver rather than read off s_sta_state: APSTA keeps the
+ * association while the AP is up, but the state is forced to IDLE there. */
+static bool sta_associated(void)
+{
+    wifi_ap_record_t ap;
+    return esp_wifi_sta_get_ap_info(&ap) == ESP_OK;
+}
+
 /* A busy driver (a scan, say) gets another attempt scheduled rather than
  * leaving the state machine stuck. */
 static void try_connect(void)
@@ -176,7 +184,10 @@ static void start_ap(void)
     /* Before the mode switch: dropping the link fires STA_DISCONNECTED, and the
      * handler must see the AP coming up so it schedules no reconnect. */
     s_ap_active = true;
-    s_sta_state = WIFI_STA_IDLE;
+    /* An association survives the switch to APSTA, and the fetchers go by this
+     * state: calling it IDLE would idle them on a working link. Anything short
+     * of associated is IDLE — the retry timer is stopped above. */
+    s_sta_state = sta_associated() ? WIFI_STA_CONNECTED : WIFI_STA_IDLE;
     /* APSTA rather than AP: the station interface is needed for air scans */
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
@@ -192,7 +203,7 @@ static void start_sta(void)
         start_ap();
         return;
     }
-    bool was_connected = s_sta_state == WIFI_STA_CONNECTED;
+    bool was_connected = sta_associated();
     s_attempt = 0;
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
     apply_current_network();
@@ -204,6 +215,7 @@ static void start_sta(void)
          * esp_wifi_connect() would be a no-op and CONNECTING would hang. The
          * drop's STA_DISCONNECTED drives the reconnect with the new config. */
         s_sta_state = WIFI_STA_CONNECTING;
+        s_attempt = -1;   /* the handler's ++ lands on the first network again */
         esp_wifi_disconnect();
     } else {
         /* leaving APSTA does not raise STA_START, so connect by hand */
@@ -215,9 +227,20 @@ void wifi_ap_enable(bool on)
 {
     if (on) {
         start_ap();
-    } else {
-        start_sta();
+        return;
     }
+    /* The station kept its association all along, so leaving the AP is a mode
+     * change and nothing else — reconnecting would drop a working link, and
+     * esp_wifi_connect() on an associated station is a no-op that never
+     * completes. Saved networks reach the driver through wifi_reconnect(). */
+    if (sta_associated()) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
+        s_ap_active = false;
+        s_sta_state = WIFI_STA_CONNECTED;
+        ESP_LOGI(TAG, "AP off, still on \"%s\"", s_current_ssid);
+        return;
+    }
+    start_sta();
 }
 
 void wifi_reconnect(void)
@@ -256,7 +279,10 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGW(TAG, "Disconnected from \"%s\", reason %d (%s)",
                  s_current_ssid, event->reason, disconnect_reason_str(event->reason));
         if (s_ap_active) {
-            return; /* dropped because we switched to AP mode — do not reconnect */
+            /* No reconnect while the AP is up, but the link is gone: the state
+             * has to stop claiming otherwise. */
+            s_sta_state = WIFI_STA_IDLE;
+            return;
         }
         int nets = wifi_store_count();
         if (nets == 0) {

@@ -81,6 +81,27 @@ static void bars(gfx_canvas_t *c, int right, int baseline, unsigned mask)
     }
 }
 
+/* While the SoftAP is up the bars have nothing to say — the station is not
+ * associated with anything — so an inverted "AP" stands in their place. Same
+ * anchor as bars(): `right` is one past the last inked column. 1 px of plate on
+ * either side of the glyphs, which gfx_text_bg does not add. */
+#define AP_PAD 1
+
+static void ap_badge(gfx_canvas_t *c, int right, int baseline)
+{
+    gfx_text_style_t st = UI_TEXT_R;
+    st.level = GFX_OFF;
+
+    gfx_font_metrics_t fm;
+    gfx_font_metrics(st.font, &fm);
+    int w = gfx_text_w(&st, "AP") + 2 * AP_PAD;
+
+    gfx_rect(c, (gfx_rect_t){ (int16_t)(right - w), (int16_t)(baseline - fm.ascent - 1),
+                              (int16_t)w, (int16_t)(fm.ascent + 1) },
+             GFX_NONE, GFX_FULL, GFX_SOLID);
+    gfx_text(c, right - AP_PAD, baseline, &st, "AP");
+}
+
 /* Three dim dots with one lit, walking to the end and back -- the same gesture
  * the connecting link makes with its bars, shown where the reading's age is
  * while a fetch is running. Anchored and sized like the text it replaces --
@@ -457,7 +478,11 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     int baseline = ui_row(&cur, &UI_TEXT);
     gfx_text(c, 0, baseline, &UI_TEXT, day);
     gfx_text(c, UI_RX/2, baseline, &UI_TEXT_C, hhmm);
-    bars(c, UI_RX, baseline, sig_mask(m->link, m->rssi, m->anim_ms));
+    if (m->ap) {
+        ap_badge(c, UI_RX, baseline);
+    } else {
+        bars(c, UI_RX, baseline, sig_mask(m->link, m->rssi, m->anim_ms));
+    }
     // battery(c, UI_RX - SIG_W - 3, baseline, 0);
 
     char age[8];

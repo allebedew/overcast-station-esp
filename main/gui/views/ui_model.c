@@ -37,6 +37,7 @@ void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
               : wifi.sta_state == WIFI_STA_CONNECTING ? UI_LINK_CONNECTING
                                                       : UI_LINK_DOWN;
     out->rssi = wifi.rssi;
+    out->ap   = wifi.ap_active;
 
     out->anim_ms = (uint32_t)(esp_timer_get_time() / 1000);
 }

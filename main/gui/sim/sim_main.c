@@ -14,6 +14,7 @@
 #include "gfx_canvas.h"
 #include "gfx_target.h"
 #include "gfx_text.h"
+#include "screen_ota.h"
 #include "sim_png.h"
 #include "ui.h"
 
@@ -625,6 +626,13 @@ static void scene_screen_now_empty(gfx_canvas_t *c)
     screen_now_scene(c, false, false, 0);
 }
 
+// A part-way upload of a typical image, for the widest numbers the screen has
+// to fit.
+static void scene_screen_ota(gfx_canvas_t *c)
+{
+    screen_ota(c, 743 * 1024, 1216 * 1024);
+}
+
 // The dots that stand in for the reading's age while a fetch runs. One PNG per
 // frame, a step of the walk apart: a still frame says nothing about an
 // animation, a strip of them does.
@@ -689,6 +697,7 @@ int main(int argc, char **argv)
         { "chart_rh",   scene_chart_rh },
         { "screen_now",       scene_screen_now },
         { "screen_now_empty", scene_screen_now_empty },
+        { "screen_ota",       scene_screen_ota },
     };
 
     char path[128];

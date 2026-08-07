@@ -12,6 +12,8 @@
 #include "encoder.h"
 #include "gfx_canvas.h"
 #include "gfx_target.h"
+#include "ota.h"
+#include "screen_ota.h"
 #include "settings.h"
 #include "ssd1322.h"
 #include "ui.h"
@@ -144,6 +146,34 @@ static void log_setting(void)
     ESP_LOGI(TAG, "panel: %s", line);
 }
 
+/* Returns whether the panel was actually written. */
+static bool present_if_changed(void)
+{
+    if (memcmp(s_canvas.buf, s_shown, sizeof(s_shown)) == 0) {
+        return false;
+    }
+    gfx_present(&s_canvas);
+    memcpy(s_shown, s_canvas.buf, sizeof(s_shown));
+    return true;
+}
+
+/* A flash in progress takes the panel over: no model, no input, and a display
+ * the knob switched off is lit for the duration. The normal path turns it back
+ * off on the first frame after the upload ends. */
+static void ota_frame(void)
+{
+    size_t received, total;
+    ota_get_progress(&received, &total);
+
+    screen_ota(&s_canvas, received, total);
+    present_if_changed();
+
+    if (!s_panel_on) {
+        gfx_set_on(true);
+        s_panel_on = true;
+    }
+}
+
 static const buzzer_tune_t EV_TUNE[] = {
     [UI_EV_STEP]  = BUZZER_CLICK,
     [UI_EV_FIELD] = BUZZER_CLICK_HI,
@@ -164,76 +194,78 @@ static void gui_task(void *arg)
     bool changed = false;
 
     for (;;) {
-        adopt_display_settings();
+        if (ota_is_active()) {
+            ota_frame();
+        } else {
+            adopt_display_settings();
 
-        encoder_input_t in;
-        encoder_take(&in);
+            encoder_input_t in;
+            encoder_take(&in);
 
-        ui_event_t ev = ui_state_input(&s_state, &in);
-        if (ev != UI_EV_NONE) {
-            buzzer_play(EV_TUNE[ev]);
-        }
-        changed |= ev != UI_EV_NONE;
+            ui_event_t ev = ui_state_input(&s_state, &in);
+            if (ev != UI_EV_NONE) {
+                buzzer_play(EV_TUNE[ev]);
+            }
+            changed |= ev != UI_EV_NONE;
 
-        if (s_state.on != s_persisted_on) {
-            persist_on();
-        }
-        sync_location(esp_timer_get_time());
+            if (s_state.on != s_persisted_on) {
+                persist_on();
+            }
+            sync_location(esp_timer_get_time());
 
-        /* A dark panel is drawn for and clocked to not at all: display-off
-         * leaves its RAM alone, so s_shown keeps describing it. */
-        if (s_state.on) {
-            /* The frame is drawn from the selection the same call just moved,
-             * so the series and the badge under it can never be a frame
-             * apart. */
-            ui_model_refresh(&s_model, s_state.chart_q, s_state.chart_range,
-                             s_state.loc_sel);
+            /* A dark panel is drawn for and clocked to not at all: display-off
+             * leaves its RAM alone, so s_shown keeps describing it. */
+            if (s_state.on) {
+                /* The frame is drawn from the selection the same call just
+                 * moved, so the series and the badge under it can never be a
+                 * frame apart. */
+                ui_model_refresh(&s_model, s_state.chart_q, s_state.chart_range,
+                                 s_state.loc_sel);
 
-            int64_t t0 = esp_timer_get_time();
-            ui_render(&s_canvas, &s_model, &s_state);
-            int64_t render_us = esp_timer_get_time() - t0;
+                int64_t t0 = esp_timer_get_time();
+                ui_render(&s_canvas, &s_model, &s_state);
+                int64_t render_us = esp_timer_get_time() - t0;
 
-            frames++;
-            render_sum_us += render_us;
-            if (render_us > render_max_us) {
-                render_max_us = render_us;
+                frames++;
+                render_sum_us += render_us;
+                if (render_us > render_max_us) {
+                    render_max_us = render_us;
+                }
+
+                if (present_if_changed()) {
+                    flushes++;
+                }
+
+                /* Powered up only once a fresh frame is in the panel's RAM —
+                 * the other order flashes the one it was switched off on. */
+                if (!s_panel_on) {
+                    gfx_set_on(true);
+                    s_panel_on = true;
+                }
+            } else if (s_panel_on) {
+                gfx_set_on(false);
+                s_panel_on = false;
             }
 
-            if (memcmp(s_canvas.buf, s_shown, sizeof(s_shown)) != 0) {
-                gfx_present(&s_canvas);
-                memcpy(s_shown, s_canvas.buf, sizeof(s_shown));
-                flushes++;
+            int64_t now = esp_timer_get_time();
+            if (now >= setting_at) {
+                if (changed) {
+                    changed = false;
+                    persist_brightness();
+                    log_setting();
+                }
+                setting_at = now + SETTING_MS * 1000;
             }
-
-            /* Powered up only once a fresh frame is in the panel's RAM —
-             * the other order flashes the one it was switched off on. */
-            if (!s_panel_on) {
-                gfx_set_on(true);
-                s_panel_on = true;
+            if (now >= stats_at) {
+                if (flushes) {
+                    ESP_LOGI(TAG, "%lu frames, %lu flushed, render avg %lld us, max %lld us",
+                             (unsigned long)frames, (unsigned long)flushes,
+                             render_sum_us / frames, render_max_us);
+                }
+                frames = flushes = 0;
+                render_sum_us = render_max_us = 0;
+                stats_at = now + STATS_MS * 1000;
             }
-        } else if (s_panel_on) {
-            gfx_set_on(false);
-            s_panel_on = false;
-        }
-
-        int64_t now = esp_timer_get_time();
-        if (now >= setting_at) {
-            if (changed) {
-                changed = false;
-                persist_brightness();
-                log_setting();
-            }
-            setting_at = now + SETTING_MS * 1000;
-        }
-        if (now >= stats_at) {
-            if (flushes) {
-                ESP_LOGI(TAG, "%lu frames, %lu flushed, render avg %lld us, max %lld us",
-                         (unsigned long)frames, (unsigned long)flushes,
-                         render_sum_us / frames, render_max_us);
-            }
-            frames = flushes = 0;
-            render_sum_us = render_max_us = 0;
-            stats_at = now + STATS_MS * 1000;
         }
 
         /* A render that overran the period leaves the task runnable, and it

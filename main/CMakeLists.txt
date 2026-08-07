@@ -16,7 +16,7 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             "gui/gui_loop.c"
                             "gui/views/ui_model.c" "gui/views/ui_state.c"
                             "gui/views/ui.c" "gui/views/chart.c"
-                            "gui/views/screen_now.c"
+                            "gui/views/screen_now.c" "gui/views/screen_ota.c"
                             # what it serves: the HTTP API and the page in
                             # web/index.html
                             "web/webserver.c"

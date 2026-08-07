@@ -18,18 +18,18 @@ static const char *TAG = "ota";
 
 static volatile bool s_ota_active;
 
-/* A percentage rather than two byte counts: one volatile read cannot be caught
- * between them. */
-static volatile int s_ota_percent;
+static volatile size_t s_ota_received;
+static volatile size_t s_ota_total;
 
 bool ota_is_active(void)
 {
     return s_ota_active;
 }
 
-int ota_progress_percent(void)
+void ota_get_progress(size_t *received, size_t *total)
 {
-    return s_ota_percent;
+    *received = s_ota_received;
+    *total    = s_ota_total;
 }
 
 static void reboot_cb(void *arg)
@@ -70,9 +70,10 @@ esp_err_t ota_post_handler(httpd_req_t *req)
              (unsigned)req->content_len, target->label);
 
     /* The LED and screen tasks poll this. Progress is set first, so a task
-     * that sees the flag never reads the previous attempt's percentage. */
-    s_ota_percent = 0;
-    s_ota_active = true;
+     * that sees the flag never reads the previous attempt's counters. */
+    s_ota_received = 0;
+    s_ota_total    = req->content_len;
+    s_ota_active   = true;
 
     esp_ota_handle_t ota;
     esp_err_t err = esp_ota_begin(target, OTA_WITH_SEQUENTIAL_WRITES, &ota);
@@ -102,7 +103,7 @@ esp_err_t ota_post_handler(httpd_req_t *req)
             break;
         }
         received += r;
-        s_ota_percent = 100 * received / req->content_len;
+        s_ota_received = received;
         int decile = 10 * received / req->content_len;
         if (decile != last_decile) {
             last_decile = decile;
