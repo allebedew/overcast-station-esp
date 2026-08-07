@@ -24,6 +24,9 @@
 /* What the knob is on. Turning back walks this list, turning forward cycles the
  * value of the entry it stands on. */
 typedef enum {
+    UI_FOCUS_NONE,        /* nothing picked: the screen carries no plate and a
+                           * turn forward has nothing to move */
+    UI_FOCUS_LOC,
     UI_FOCUS_CHART_Q,
     UI_FOCUS_CHART_RANGE,
     UI_FOCUS_BRIGHT,
@@ -44,6 +47,13 @@ typedef struct {
     ui_focus_t         focus;
     history_quantity_t chart_q;
     chart_range_t      chart_range;
+
+    /* Which weather location the knob stands on, and how many there are to
+     * pick from. Both are filled by the caller, which owns the store: selecting
+     * one refetches the weather, so the turn is applied a couple of seconds
+     * after it settles rather than per detent. */
+    uint8_t loc_sel;
+    uint8_t loc_count;
 } ui_state_t;
 
 /* What an input handler did, for whoever owns the sound. Kept out of the

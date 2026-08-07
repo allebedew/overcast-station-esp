@@ -476,8 +476,11 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     }
     gfx_push(c, (gfx_rect_t){ 0, 0, (int16_t)(UI_RX - aw - 2), GFX_H });
     gfx_text_style_t loc_st = UI_TEXT;
-    loc_st.level = GFX_DIM;
-    gfx_text_bg(c, 0, baseline, &loc_st, GFX_NONE, m->loc[0] ? m->loc : "--");
+    // Dim ink would vanish into the plate, so a selected name goes full level.
+    bool loc_sel = s->focus == UI_FOCUS_LOC;
+    loc_st.level = loc_sel ? GFX_FULL : GFX_DIM;
+    gfx_text_bg(c, 0, baseline, &loc_st, loc_sel ? GFX_HL : GFX_NONE,
+                m->loc[0] ? m->loc : "--");
     gfx_pop(c);
     rule(c, &cur);
 

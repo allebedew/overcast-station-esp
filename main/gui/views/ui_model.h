@@ -43,7 +43,7 @@ typedef struct {
     bool               out_ok;
     bool               out_fetching; /* a fetch is running; the age is animated instead */
     const char        *out_cond; /* its WMO code as words, never NULL */
-    char               loc[33];  /* active location's name; "" when none is set */
+    char               loc[33];  /* selected location's name; "" when none is set */
 
     /* The link, unpacked rather than embedded: wifi.h pulls in esp_err.h, and
      * this header also compiles on the host for the simulator. */
@@ -62,6 +62,8 @@ typedef struct {
 } ui_model_t;
 
 /* Which series to sample comes from the caller: the selection belongs to the
- * screen that draws the chart, and the model does not know about screens. */
+ * screen that draws the chart, and the model does not know about screens. So
+ * does the location, and by index rather than by whichever is active — the knob
+ * shows the name it stands on for the seconds before the pick is applied. */
 void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
-                      chart_range_t chart_range);
+                      chart_range_t chart_range, uint8_t loc_sel);

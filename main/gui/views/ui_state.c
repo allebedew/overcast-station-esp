@@ -9,9 +9,11 @@ void ui_state_init(ui_state_t *s, uint8_t bright, bool on)
 {
     s->bright      = bright;
     s->on          = on;
-    s->focus       = UI_FOCUS_CHART_Q;
+    s->focus       = UI_FOCUS_NONE;
     s->chart_q     = HISTORY_Q_TEMP;
     s->chart_range = CHART_RANGE_1M;
+    s->loc_sel     = 0;
+    s->loc_count   = 0;
     gfx_set_brightness(s->bright);
 }
 
@@ -27,7 +29,8 @@ ui_event_t ui_state_input(ui_state_t *s, const encoder_input_t *in)
     /* Held or not, a detent means the same thing: the gesture has no job yet.
      * Back walks the fields, forward cycles the value of the one in focus —
      * split by direction rather than by a click because the click already
-     * switches the panel off. Both wrap, so no turn is ever refused. */
+     * switches the panel off. Both wrap; a turn forward moves nothing only on
+     * the empty focus and on a location field with nothing to switch to. */
     int fwd  = in->cw + in->cw_held;
     int back = in->ccw + in->ccw_held;
 
@@ -41,6 +44,16 @@ ui_event_t ui_state_input(ui_state_t *s, const encoder_input_t *in)
             break;
         case UI_FOCUS_CHART_RANGE:
             s->chart_range = (chart_range_t)((s->chart_range + fwd) % CHART_RANGE_COUNT);
+            break;
+        case UI_FOCUS_NONE:
+            return UI_EV_LIMIT;
+        case UI_FOCUS_LOC:
+            /* One location, or none, is the single field a turn can be refused
+             * on: there is nothing else to move to. */
+            if (s->loc_count < 2) {
+                return UI_EV_LIMIT;
+            }
+            s->loc_sel = (uint8_t)((s->loc_sel + fwd) % s->loc_count);
             break;
         default:
             /* 0 is the dimmest step the panel has, not off, so wrapping through
@@ -58,9 +71,10 @@ ui_event_t ui_state_input(ui_state_t *s, const encoder_input_t *in)
 
 void ui_state_format(const ui_state_t *s, char *buf, int n)
 {
-    static const char *const FIELD[UI_FOCUS_COUNT] = { "quantity", "range", "brightness" };
+    static const char *const FIELD[UI_FOCUS_COUNT] = { "nothing", "location", "quantity",
+                                                       "range", "brightness" };
 
-    snprintf(buf, (size_t)n, "chart %s %s, bright %u, knob on %s",
+    snprintf(buf, (size_t)n, "chart %s %s, bright %u, location %u/%u, knob on %s",
              chart_quantity_name(s->chart_q), CHART_RANGES[s->chart_range].label,
-             s->bright, FIELD[s->focus]);
+             s->bright, s->loc_sel, s->loc_count, FIELD[s->focus]);
 }

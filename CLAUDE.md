@@ -7,6 +7,9 @@
   Conversation with the user: **Russian**.
   (Comments written before 2026-07-17 are in Russian — translate them
   opportunistically when touching that code, no mass rewrite.)
+- **Answer briefly.** No preamble, no restating the request, no summary of
+  what was just shown. Report the result in a line or two; expand only when
+  asked.
 - **Comment sparingly.** Only what cannot be read off the code: a non-obvious
   *why*, a magic constant, a hardware quirk, a concurrency rule, a display
   layout the arithmetic depends on. No restating what the next line does, no

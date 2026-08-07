@@ -9,7 +9,7 @@
 #include "wifi.h"
 
 void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
-                      chart_range_t chart_range)
+                      chart_range_t chart_range, uint8_t loc_sel)
 {
     memset(out, 0, sizeof(*out));
 
@@ -23,7 +23,7 @@ void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
     out->out_fetching = weather_api_is_fetching();
 
     weather_location_t loc;
-    if (weather_store_get_active_location(&loc)) {
+    if (weather_store_get(loc_sel, &loc)) {
         snprintf(out->loc, sizeof(out->loc), "%s", loc.name);
     }
 

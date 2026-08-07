@@ -189,9 +189,13 @@ history.
   are the signal bar sweeping while the link is being made and, in place of the
   reading's age while a fetch runs, three dots with one lit walking the same
   way. The
-  knob drives its chart — **turning back** walks the three fields (which
-  quantity, which window, brightness), **turning forward** cycles the picked
-  field's value, all wrapping, so no turn is ever refused. A **click** switches the panel off
+  knob drives its chart — **turning back** walks the four fields (weather
+  location, which quantity, which window, brightness) and an empty focus that
+  picks nothing and carries no plate, **turning forward**
+  cycles the picked
+  field's value, all wrapping. A turn forward moves nothing only on the empty
+  focus and on the location field with fewer than two saved. A **click**
+  switches the panel off
   (`0xAE`, and nothing is rendered or clocked out while it is dark) and another
   brings it back; the state is kept in `settings/disp_on`, so a panel switched
   off stays dark across a reboot. Both it and the brightness are also readable
@@ -200,14 +204,19 @@ history.
   what it last saw at the top of every frame and adopts whatever moved, so
   panel commands stay on one task. A click is stored as it happens, a
   brightness turn once it has settled for 2 s — one NVS write per detent is
-  what the delay avoids.
+  what the delay avoids. The location field works the same way: the name in the
+  status bar follows the knob at once, and the pick reaches
+  `weather_store_set_active()` — which persists it and refetches — 2 s after the
+  turn stops. A location added, removed or selected over the web is adopted on
+  the next frame and drops any pending pick.
   The selection is marked by a `GFX_HL` plate: on the
   quantity field it sits under the indoor reading being plotted and moves with
   it, on the window field under the badge below the chart, on brightness under
-  the number in the bottom-right corner. The buzzer tells a
+  the number in the bottom-right corner, on the location under the name in the
+  status bar, which goes full level so as not to sink into the plate. The buzzer tells a
   field move from a value move, and the selection is logged on change. Both gestures land in `ui_state_input()`, and
   what they move — the panel's power, the focus, the two chart fields, the
-  brightness — is all of
+  brightness, the selected location — is all of
   `ui_state_t`: the screen draws from it and holds no state of its own.
 
   | Panel pin | To |
@@ -408,8 +417,8 @@ card belongs in that device's module, not in the caller — dew point in
 | `gui/views/ui_model.c` | one snapshot of everything a frame may read, taken before it starts drawing, so no reading changes mid-frame and no lock is held across one |
 | `gui/views/ui.c` | the immediate-mode layer over the canvas: the text styles, a vertical layout cursor, separators, the illuminance format the room's row and the chart's axis share |
 | `gui/views/chart.c` | the chart as one element: the plot and the labelled row under it. A widget — the series and which quantity it is are passed in, so it neither samples the history nor knows how either was picked. Carries the per-quantity axis: label format, minimum span, and whether the columns go linearly or by decade, and the `CHART_RANGES` table of windows |
-| `gui/views/ui_state.c` | what the UI remembers about itself and the whole encoder scheme: the click switches the panel off, a turn back walks the knob's fields, a turn forward cycles the value of the one in focus. The chart's quantity and window are two of those fields, the panel brightness the third, which is why the selection lives here and not under the screen |
-| `gui/gui_loop.c` | the panel as the rest of the firmware sees it: owns the single 8 KB canvas, brings up the transport, draws a frame. The only firmware-only file in `gui/` |
+| `gui/views/ui_state.c` | what the UI remembers about itself and the whole encoder scheme: the click switches the panel off, a turn back walks the knob's fields, a turn forward cycles the value of the one in focus. The weather location is the first of those fields, the chart's quantity and window the next two and the panel brightness the last, with an empty focus ahead of them that the state boots on, which is why the selection lives here and not under the screen. The location is held as an index into the store, whose count the GUI task feeds in, so the state machine stays free of esp headers |
+| `gui/gui_loop.c` | the panel as the rest of the firmware sees it: owns the single 8 KB canvas, brings up the transport, draws a frame, and applies what the knob moved — the panel settings and the active location — once the turn has settled. The only firmware-only file in `gui/` |
 | `gui/views/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; live so far are the status bar (weekday, local time of the weather location, Wi-Fi bars, sweeping while an association attempt is on the air, location name, age of the fetch) the outdoor block (icon, temperature, conditions), the rows under it (feels-like, sea-level pressure, humidity, wind with gusts, UV index, cloud cover), the five-day forecast (weekday letter, dim and a shade brighter at the weekend; min/max with a bar over the whole forecast's range; precipitation probability in tens, its brightness rising with the value) and the indoor rows (temperature, sea-level pressure, humidity, CO2, illuminance, dew point). Illuminance is the one value shown at less than its stored resolution: tenths below 1 lx, whole lux to 1000, thousands above. The battery is drawn empty — the board has no charge source. Below them a chart of one history quantity, 60 columns, with the ends of its scale and the window it covers labelled under it. The scale is the series' own min..max but never narrower than a per-quantity minimum set at the sensors' own noise (0.2 °C, 1 %RH, 0.3 hPa, 50 ppm, one decade of lux), so a flat hour reads as flat; illuminance is placed by decade, the rest linearly. Neighbouring points are joined by a riser and the corner column at each end of a flat run is moved one row toward the level it heads for, so a sensor's own quantisation draws as a slope rather than a staircase. Which quantity and which window are the knob's two fields, held in `ui_state_t` and handed both to `ui_model_refresh()`, so it knows what to sample, and to `chart_draw()`; the windows themselves are the `CHART_RANGES` table in `chart.c` — 1m, 5m, 1h, 1d, each 60 columns off the tier whose slots divide into it. The Zambretti and sun blocks below are roughed-in layout, still commented out |
 | `timesync.c` | SNTP client; `timesync_is_synced()` and `timesync_format()` |
 | `sensors/climate.c` | the room-level view over the devices, plus the reduction to sea level and the site-altitude setting. Its header carries the reading resolutions |

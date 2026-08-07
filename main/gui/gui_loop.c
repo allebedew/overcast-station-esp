@@ -16,6 +16,7 @@
 #include "ssd1322.h"
 #include "ui.h"
 #include "ui_state.h"
+#include "weather_store.h"
 
 static const char *TAG = "gui";
 
@@ -71,6 +72,49 @@ static void persist_on(void)
 {
     settings_set(SETTING_DISPLAY_ON, s_state.on);
     s_persisted_on = s_state.on;
+}
+
+/* How long the location field has to settle before the pick is applied.
+ * Selecting a location drops the cached reading and refetches, so a sweep down
+ * the list must not queue a fetch per detent. */
+#define LOC_APPLY_MS 2000
+
+/* The pending pick's deadline, 0 when the knob and the store agree, plus what
+ * each side held when this last ran: a pick made over the web is adopted, one
+ * made on the knob is held until it stops moving. */
+static int64_t s_loc_apply_at;
+static uint8_t s_loc_last_sel;
+static int     s_loc_seen_active = -1;
+
+/* The knob's location field against the store, which the web API also edits. */
+static void sync_location(int64_t now)
+{
+    int count  = weather_store_count();
+    int active = weather_store_get_active();
+
+    s_state.loc_count = (uint8_t)count;
+
+    /* A pick made elsewhere, or a list edited under the index, wins over
+     * whatever the knob was holding. */
+    if (active != s_loc_seen_active || s_state.loc_sel >= count) {
+        s_loc_seen_active = active;
+        s_state.loc_sel   = (uint8_t)(active < 0 ? 0 : active);
+        s_loc_last_sel    = s_state.loc_sel;
+        s_loc_apply_at    = 0;
+        return;
+    }
+
+    if (s_state.loc_sel != s_loc_last_sel) {
+        s_loc_last_sel = s_state.loc_sel;
+        s_loc_apply_at = now + LOC_APPLY_MS * 1000;
+    }
+    if (s_loc_apply_at && now >= s_loc_apply_at) {
+        s_loc_apply_at = 0;
+        if (active >= 0 && s_state.loc_sel != (uint8_t)active) {
+            weather_store_set_active(s_state.loc_sel);
+            s_loc_seen_active = s_state.loc_sel;
+        }
+    }
 }
 
 /* A setting written from elsewhere (the web API talks to the settings module,
@@ -134,6 +178,7 @@ static void gui_task(void *arg)
         if (s_state.on != s_persisted_on) {
             persist_on();
         }
+        sync_location(esp_timer_get_time());
 
         /* A dark panel is drawn for and clocked to not at all: display-off
          * leaves its RAM alone, so s_shown keeps describing it. */
@@ -141,7 +186,8 @@ static void gui_task(void *arg)
             /* The frame is drawn from the selection the same call just moved,
              * so the series and the badge under it can never be a frame
              * apart. */
-            ui_model_refresh(&s_model, s_state.chart_q, s_state.chart_range);
+            ui_model_refresh(&s_model, s_state.chart_q, s_state.chart_range,
+                             s_state.loc_sel);
 
             int64_t t0 = esp_timer_get_time();
             ui_render(&s_canvas, &s_model, &s_state);
