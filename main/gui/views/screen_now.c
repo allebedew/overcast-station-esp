@@ -254,7 +254,8 @@ static void reading(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t
  * chart and never marked. */
 static gfx_level_t q_bg(const ui_state_t *s, history_quantity_t q)
 {
-    return (s->focus == UI_FOCUS_CHART_Q && s->chart_q == q) ? GFX_HL : GFX_NONE;
+    return (s->focus == UI_FOCUS_CHART_Q && s->set.chart_q == q) ? GFX_HL
+                                                                 : GFX_NONE;
 }
 
 /* WMO code to a glyph. unifont_t_weather re-encodes its icons into the ASCII
@@ -580,12 +581,13 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     // readout to be edited by. micro_tr has no descender, so the baseline is
     // its last row, and it clears the burn-in shift's reserve above the edge.
     gfx_textf_bg(c, UI_RX, GFX_H - 1 - GFX_SHIFT_MAX, &UI_MICRO_R,
-                 s->focus == UI_FOCUS_BRIGHT ? GFX_HL : GFX_NONE, "%u", s->bright);
+                 s->focus == UI_FOCUS_BRIGHT ? GFX_HL : GFX_NONE, "%u",
+                 s->set.bright);
 
     // Chart
 
-    chart_draw(c, &cur, m->chart, m->chart_n, s->chart_q, s->chart_range,
-               s->focus == UI_FOCUS_CHART_RANGE);
+    chart_draw(c, &cur, m->chart, m->chart_n, s->set.chart_q,
+               s->set.chart_range, s->focus == UI_FOCUS_CHART_RANGE);
     rule(c, &cur);
 
     // Zambretti: the 3 h tendency, then the wording it selects. The number is

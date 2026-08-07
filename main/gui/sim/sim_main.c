@@ -543,8 +543,10 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data, bool fetching,
 
     // The knob's own state, which on the panel ui_state_init() sets: the chart
     // is drawn from what it has picked.
-    ui_state_t st = { .bright = 0, .on = true, .focus = UI_FOCUS_CHART_Q,
-                      .chart_q = HISTORY_Q_TEMP, .chart_range = CHART_RANGE_1M };
+    ui_state_t st = { .set = { .bright = 0, .on = true,
+                               .chart_q = HISTORY_Q_TEMP,
+                               .chart_range = CHART_RANGE_1M },
+                      .focus = UI_FOCUS_CHART_Q };
 
     if (!have_data) {
         ui_render(c, &m, &st);
@@ -611,7 +613,7 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data, bool fetching,
     m.link = UI_LINK_UP;
     m.rssi = -68;
 
-    st.bright = 12;   // the knob's own state, shown in the corner
+    st.set.bright = 12;   // the knob's own state, shown in the corner
 
     ui_render(c, &m, &st);
 }

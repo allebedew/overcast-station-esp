@@ -5,16 +5,13 @@
 #include "chart.h"
 #include "gfx_target.h"
 
-void ui_state_init(ui_state_t *s, uint8_t bright, bool on)
+void ui_state_init(ui_state_t *s, const ui_settings_t *set)
 {
-    s->bright      = bright;
-    s->on          = on;
-    s->focus       = UI_FOCUS_NONE;
-    s->chart_q     = HISTORY_Q_TEMP;
-    s->chart_range = CHART_RANGE_1M;
-    s->loc_sel     = 0;
-    s->loc_count   = 0;
-    gfx_set_brightness(s->bright);
+    s->set       = *set;
+    s->focus     = UI_FOCUS_NONE;
+    s->loc_sel   = 0;
+    s->loc_count = 0;
+    gfx_set_brightness(s->set.bright);
 }
 
 ui_event_t ui_state_input(ui_state_t *s, const encoder_input_t *in)
@@ -22,7 +19,7 @@ ui_event_t ui_state_input(ui_state_t *s, const encoder_input_t *in)
     /* An odd number of clicks lands on the other state; an even one is where
      * it started, however many arrived in the one frame. */
     if (in->click & 1) {
-        s->on = !s->on;
+        s->set.on = !s->set.on;
         return UI_EV_FIELD;
     }
 
@@ -40,10 +37,12 @@ ui_event_t ui_state_input(ui_state_t *s, const encoder_input_t *in)
     if (fwd) {
         switch (s->focus) {
         case UI_FOCUS_CHART_Q:
-            s->chart_q = (history_quantity_t)((s->chart_q + fwd) % HISTORY_Q_COUNT);
+            s->set.chart_q =
+                (history_quantity_t)((s->set.chart_q + fwd) % HISTORY_Q_COUNT);
             break;
         case UI_FOCUS_CHART_RANGE:
-            s->chart_range = (chart_range_t)((s->chart_range + fwd) % CHART_RANGE_COUNT);
+            s->set.chart_range =
+                (chart_range_t)((s->set.chart_range + fwd) % CHART_RANGE_COUNT);
             break;
         case UI_FOCUS_NONE:
             return UI_EV_LIMIT;
@@ -58,8 +57,9 @@ ui_event_t ui_state_input(ui_state_t *s, const encoder_input_t *in)
         default:
             /* 0 is the dimmest step the panel has, not off, so wrapping through
              * it costs nothing. */
-            s->bright = (uint8_t)((s->bright + fwd) % (GFX_BRIGHTNESS_MAX + 1));
-            gfx_set_brightness(s->bright);
+            s->set.bright =
+                (uint8_t)((s->set.bright + fwd) % (GFX_BRIGHTNESS_MAX + 1));
+            gfx_set_brightness(s->set.bright);
             break;
         }
     }
@@ -75,6 +75,7 @@ void ui_state_format(const ui_state_t *s, char *buf, int n)
                                                        "range", "brightness" };
 
     snprintf(buf, (size_t)n, "chart %s %s, bright %u, location %u/%u, knob on %s",
-             chart_quantity_name(s->chart_q), CHART_RANGES[s->chart_range].label,
-             s->bright, s->loc_sel, s->loc_count, FIELD[s->focus]);
+             chart_quantity_name(s->set.chart_q),
+             CHART_RANGES[s->set.chart_range].label, s->set.bright, s->loc_sel,
+             s->loc_count, FIELD[s->focus]);
 }

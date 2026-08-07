@@ -33,20 +33,24 @@ typedef enum {
     UI_FOCUS_COUNT,
 } ui_focus_t;
 
+/* Everything the knob changes that outlives the frame, and exactly what is kept
+ * in NVS: read into here at boot and written back once a turn has settled, by
+ * whoever calls this — the state machine itself stays free of the settings
+ * module, which is an esp header away. A station whose panel was switched off
+ * therefore boots dark, and one whose chart was on a day of pressure comes back
+ * to it. */
 typedef struct {
-    /* Device settings rather than a screen's: they survive whatever is on the
-     * panel. Both are one of the knob's fields and both are persisted, by
-     * whoever calls this — the state machine itself stays free of the settings
-     * module, which is an esp header away. A station whose panel was switched
-     * off therefore boots dark. */
-    uint8_t bright;
-    bool on;
-
-    /* What the chart is showing, and which of the two a turn back would
-     * change. */
-    ui_focus_t         focus;
+    uint8_t            bright;
+    bool               on;
     history_quantity_t chart_q;
     chart_range_t      chart_range;
+} ui_settings_t;
+
+typedef struct {
+    ui_settings_t set;
+
+    /* Which of the settings a turn back would change. */
+    ui_focus_t focus;
 
     /* Which weather location the knob stands on, and how many there are to
      * pick from. Both are filled by the caller, which owns the store: selecting
@@ -65,9 +69,9 @@ typedef enum {
     UI_EV_LIMIT,   /* a turn that changed nothing: the range ends here */
 } ui_event_t;
 
-/* Takes the persisted panel settings and applies them, so the panel and this
- * struct agree whatever the transport's own init sequence left behind. */
-void ui_state_init(ui_state_t *s, uint8_t bright, bool on);
+/* Takes the persisted settings and applies them, so the panel and this struct
+ * agree whatever the transport's own init sequence left behind. */
+void ui_state_init(ui_state_t *s, const ui_settings_t *set);
 
 ui_event_t ui_state_input(ui_state_t *s, const encoder_input_t *in);
 

@@ -4,8 +4,10 @@
 #include "nvs.h"
 
 #include "buzzer.h"
+#include "chart.h"
 #include "climate.h"
 #include "gfx_target.h"
+#include "history.h"
 
 #define NVS_NAMESPACE "settings"
 
@@ -45,6 +47,16 @@ static const entry_t s_tab[SETTING_COUNT] = {
         { .key = "radar_bt_off", .api = "radar_bt_off",
           .name = "Radar Bluetooth off", .def = 1, .min = 0, .max = 1,
           .as_bool = true }, NVS_TYPE_U8 },
+    /* What the knob left the chart on. Off the HTTP API: it is where the panel
+     * stands, not something to drive a station by. */
+    [SETTING_CHART_Q] = {
+        { .key = "chart_q", .api = NULL, .name = "Chart quantity",
+          .def = HISTORY_Q_TEMP, .min = 0, .max = HISTORY_Q_COUNT - 1 },
+        NVS_TYPE_U8 },
+    [SETTING_CHART_RANGE] = {
+        { .key = "chart_range", .api = NULL, .name = "Chart range",
+          .def = CHART_RANGE_1M, .min = 0, .max = CHART_RANGE_COUNT - 1 },
+        NVS_TYPE_U8 },
 };
 
 /* Where a changed value has to land besides NVS — see settings_on_change(). */
