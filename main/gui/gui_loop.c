@@ -32,6 +32,12 @@ static const char *TAG = "gui";
  * numbers is what is on screen, not anything worth watching. */
 #define STATS_MS (10 * 60 * 1000)
 
+/* How long the frame stays at one burn-in offset. The share of its life a pixel
+ * spends under a given glyph is one over the number of offsets and does not
+ * depend on this at all; what it is chosen for is that a step of one pixel this
+ * far apart is not something the eye catches. */
+#define SHIFT_MS (10 * 60 * 1000)
+
 /* The selection line is on its own, much shorter timer: it is feedback on a
  * turn, useless once the stats window is out. Not on the detent itself -- a
  * sweep of the range would be one line per click. */
@@ -165,6 +171,7 @@ static void ota_frame(void)
     size_t received, total;
     ota_get_progress(&received, &total);
 
+    gfx_set_shift(&s_canvas, 0);
     screen_ota(&s_canvas, received, total);
     present_if_changed();
 
@@ -190,6 +197,11 @@ static void gui_task(void *arg)
     int64_t  render_sum_us = 0, render_max_us = 0;
     int64_t  stats_at   = esp_timer_get_time() + STATS_MS * 1000;
     int64_t  setting_at = esp_timer_get_time() + SETTING_MS * 1000;
+    int64_t  shift_at   = esp_timer_get_time() + SHIFT_MS * 1000;
+
+    /* The offset walks the range a pixel at a time and turns round at each end:
+     * closing the cycle 5 -> 0 instead would be one visible jump per cycle. */
+    int shift = 0, shift_dir = 1;
 
     bool changed = false;
 
@@ -197,6 +209,8 @@ static void gui_task(void *arg)
         if (ota_is_active()) {
             ota_frame();
         } else {
+            int64_t now = esp_timer_get_time();
+
             adopt_display_settings();
 
             encoder_input_t in;
@@ -211,11 +225,22 @@ static void gui_task(void *arg)
             if (s_state.on != s_persisted_on) {
                 persist_on();
             }
-            sync_location(esp_timer_get_time());
+            sync_location(now);
 
             /* A dark panel is drawn for and clocked to not at all: display-off
              * leaves its RAM alone, so s_shown keeps describing it. */
             if (s_state.on) {
+                /* Only a lit panel ages, so a dark one holds the offset where
+                 * it stands rather than walking it invisibly. */
+                if (now >= shift_at) {
+                    if (shift + shift_dir < 0 || shift + shift_dir > GFX_SHIFT_MAX) {
+                        shift_dir = -shift_dir;
+                    }
+                    shift += shift_dir;
+                    shift_at = now + SHIFT_MS * 1000;
+                }
+                gfx_set_shift(&s_canvas, shift);
+
                 /* The frame is drawn from the selection the same call just
                  * moved, so the series and the badge under it can never be a
                  * frame apart. */
@@ -247,7 +272,6 @@ static void gui_task(void *arg)
                 s_panel_on = false;
             }
 
-            int64_t now = esp_timer_get_time();
             if (now >= setting_at) {
                 if (changed) {
                     changed = false;

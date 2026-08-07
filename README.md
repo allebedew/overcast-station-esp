@@ -175,6 +175,10 @@ history.
   because a reading that moves below its displayed resolution changes the model
   without changing the screen. Render times are logged every 5 s, and only while
   frames are actually being flushed.
+  Against burn-in the whole frame is drawn 0–5 rows lower than its layout puts
+  it, one row every 10 min, walking the range and turning round at each end;
+  only a lit panel advances it, and OTA draws at 0. The shift clips at the
+  bottom rather than wrapping, so screens keep `GFX_SHIFT_MAX` rows free there.
   **Brightness** is the master current (`0xC7`), 16 steps; it is one of the
   knob's fields, kept in `settings/disp_bright` (default 12) and shown as 0–15
   in the bottom-right corner. The steps are not evenly spaced —
@@ -378,8 +382,9 @@ history.
   `weather_api_refresh()`. The offset is filled from the first successful fetch
   and rewritten only when it changes, so the display clock is right after a
   reboot and through an outage, without a reading to read it from.
-- **SNTP** — UTC from `pool.ntp.org`; until the first sync `system.time` is
-  dashes.
+- **SNTP** — UTC from `pool.ntp.org`, started on `IP_EVENT_STA_GOT_IP` and
+  restarted on every reconnect, so neither a boot nor an outage pays the lwIP
+  backoff. Until the first sync `system.time` is dashes.
 
 ## Architecture
 

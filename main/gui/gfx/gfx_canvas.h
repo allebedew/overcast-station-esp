@@ -48,6 +48,13 @@ typedef struct {
 void gfx_init(gfx_canvas_t *c);
 void gfx_clear(gfx_canvas_t *c, gfx_level_t level);
 
+// Burn-in shift: the whole frame is drawn dy rows further down than its layout
+// puts it, 0..GFX_SHIFT_MAX. It clips at the bottom rather than wrapping, so
+// layouts keep that many rows free there; the top just gains a blank strip.
+// Sets the root viewport, so it may only be called between frames.
+#define GFX_SHIFT_MAX 5
+void gfx_set_shift(gfx_canvas_t *c, int dy);
+
 // Every primitive takes local coordinates and is clipped to the current viewport.
 // gfx_push returns false when the box is entirely clipped away -- drawing through
 // it is still safe, so the return value is only worth checking to skip work.

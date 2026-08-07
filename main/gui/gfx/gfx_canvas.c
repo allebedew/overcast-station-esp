@@ -25,6 +25,13 @@ void gfx_init(gfx_canvas_t *c)
     c->vp[0] = (gfx_viewport_t){ .ox = 0, .oy = 0, .clip = { 0, 0, GFX_W, GFX_H } };
 }
 
+void gfx_set_shift(gfx_canvas_t *c, int dy)
+{
+    if (dy < 0)              { dy = 0; }
+    if (dy > GFX_SHIFT_MAX)  { dy = GFX_SHIFT_MAX; }
+    c->vp[0].oy = (int16_t)dy;
+}
+
 void gfx_clear(gfx_canvas_t *c, gfx_level_t level)
 {
     if (level == GFX_NONE) {

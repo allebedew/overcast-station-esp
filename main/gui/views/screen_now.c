@@ -578,8 +578,8 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
 
     // Brightness, pinned to the bottom corner: it is a knob field and needs a
     // readout to be edited by. micro_tr has no descender, so the baseline is
-    // the last row.
-    gfx_textf_bg(c, UI_RX, GFX_H - 1, &UI_MICRO_R,
+    // its last row, and it clears the burn-in shift's reserve above the edge.
+    gfx_textf_bg(c, UI_RX, GFX_H - 1 - GFX_SHIFT_MAX, &UI_MICRO_R,
                  s->focus == UI_FOCUS_BRIGHT ? GFX_HL : GFX_NONE, "%u", s->bright);
 
     // Chart
