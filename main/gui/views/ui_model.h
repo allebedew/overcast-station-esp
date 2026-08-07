@@ -8,6 +8,15 @@
 #include "climate.h"
 #include "history.h"
 #include "weather_api.h"
+#include "zambretti.h"
+
+/* Station side of the link, as much of it as the screen distinguishes. The pause
+ * between attempts is UI_LINK_DOWN: nothing is on the air, so nothing moves. */
+typedef enum {
+    UI_LINK_DOWN,
+    UI_LINK_CONNECTING,   /* association attempt actually in progress */
+    UI_LINK_UP,           /* associated and holding an IP */
+} ui_link_t;
 
 /* Everything a frame is allowed to read, collected once before it starts
  * drawing. Rendering never calls a module directly: a reading that changed
@@ -28,15 +37,22 @@ typedef struct {
 
     climate_t climate;   /* the room; each quantity carries its own _ok */
 
+    zambretti_t zb;      /* the local forecast; ok is false for the first 3 h */
+
     weather_api_data_t out;      /* the fetched forecast */
     bool               out_ok;
+    bool               out_fetching; /* a fetch is running; the age is animated instead */
     const char        *out_cond; /* its WMO code as words, never NULL */
     char               loc[33];  /* active location's name; "" when none is set */
 
     /* The link, unpacked rather than embedded: wifi.h pulls in esp_err.h, and
      * this header also compiles on the host for the simulator. */
-    bool link;   /* station associated and holding an IP */
-    int  rssi;   /* dBm; meaningless unless link */
+    ui_link_t link;
+    int       rssi;   /* dBm; meaningless unless UI_LINK_UP */
+
+    /* Monotonic since boot, for whatever moves on its own. Kept in the model so
+     * a frame animates off one stamp rather than each widget reading a clock. */
+    uint32_t anim_ms;
 
     /* The chart's series, sampled here rather than under the screen so that
      * rendering keeps reading the model and nothing else. Oldest first, NAN for

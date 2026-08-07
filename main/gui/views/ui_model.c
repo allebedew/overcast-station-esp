@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_timer.h"
 #include "timesync.h"
 #include "weather_store.h"
 #include "wifi.h"
@@ -16,8 +17,10 @@ void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
     out->utc_off_s = weather_api_utc_offset_s();
 
     climate_get(&out->climate);
-    out->out_ok   = weather_api_get(&out->out);
-    out->out_cond = weather_api_code_short(out->out.weather_code);
+    zambretti_get(&out->zb);
+    out->out_ok       = weather_api_get(&out->out);
+    out->out_cond     = weather_api_code_short(out->out.weather_code);
+    out->out_fetching = weather_api_is_fetching();
 
     weather_location_t loc;
     if (weather_store_get_active_location(&loc)) {
@@ -30,6 +33,10 @@ void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
 
     wifi_info_t wifi;
     wifi_get_info(&wifi);
-    out->link = wifi.sta_state == WIFI_STA_CONNECTED;
+    out->link = wifi.sta_state == WIFI_STA_CONNECTED  ? UI_LINK_UP
+              : wifi.sta_state == WIFI_STA_CONNECTING ? UI_LINK_CONNECTING
+                                                      : UI_LINK_DOWN;
     out->rssi = wifi.rssi;
+
+    out->anim_ms = (uint32_t)(esp_timer_get_time() / 1000);
 }

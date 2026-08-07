@@ -49,7 +49,8 @@ history.
   at different pitches, two bare tones well below resonance (2.5 and 1.5 kHz,
   there to be listened to), `OK`/`WARN`/`ALARM`/`ERROR`, one per CO₂ zone edge in
   each direction (the motif repeats once per zone crossed, rising going up and
-  falling coming down), `STORM`, `ARRIVE`/`LEAVE` and the boot chirp. The
+  falling coming down), `STORM`, `ARRIVE`/`LEAVE` on the radar's raw presence
+  flag and the boot chirp. The
   element resonates at 4 kHz and drops off
   steeply either side, so tunes differ by rhythm inside 3.5–4.5 kHz, not by
   pitch. Volume is the PWM duty, 1–50 % of full swing (the fundamental goes as
@@ -176,7 +177,10 @@ history.
   not shorten the phase, it jumps the panel to bright.
   None of those is persisted or reachable from the panel: what a tuning session
   settles on is written into `gfx_target.h`, which the init sequence reads.
-  Experiment stage above that: one screen, `screen_now`, and no animation. The
+  Experiment stage above that: one screen, `screen_now`. The only moving parts
+  are the signal bar sweeping while the link is being made and, in place of the
+  reading's age while a fetch runs, three dots with one lit walking the same
+  way. The
   knob drives its chart — **turning back** walks the three fields (which
   quantity, which window, brightness), **turning forward** cycles the picked
   field's value, all wrapping, so no turn is ever refused. A **click** switches the panel off
@@ -284,7 +288,9 @@ history.
   record — 60 % of the slots filled and spread over at least two of them. Pure
   composition over the history, no task and no state beyond a 15 s cache.
   Shown on the pressure card, whose badge is the
-  tendency (arrow repeated once per grade) and whose footer is the wording.
+  tendency (arrow repeated once per grade) and whose footer is the wording, and
+  on the panel's main screen as the 3 h change followed by the shortened
+  wording, clipped to the row.
 - **Sun** — sunrise, sunset, day length, the sun's angle above the horizon and
   the twilight band that angle falls in (day above +6°, golden hour down to the
   horizon, then civil / nautical / astronomical twilight at −6 / −12 / −18°,
@@ -302,12 +308,18 @@ history.
   crossing 800/1200/2000 ppm (±25 ppm hysteresis), and arrival/departure from
   the radar's presence flag, reported with how long the previous state lasted.
   A departure counts only after 5 min of confirmed absence, since the radar
-  loses whoever sits still; an arrival after 3 s. Token and chat id are
+  loses whoever sits still; an arrival after 3 s. The buzzer does not wait for
+  either: `ARRIVE`/`LEAVE` play on the raw presence flag, whose own 5 s hold is
+  what keeps them from chattering. Token and chat id are
   compile-time constants in `telegram.c`; left empty, the module disables
   itself.
 - **Outside weather (Open-Meteo)** — the active location fetched over HTTPS
-  every 15 min on the quarter-hour, no API key, default `best_match` model. Temperature and
-  apparent temperature, humidity, surface and sea-level pressure, UV index,
+  every 15 min on the quarter-hour, no API key, `icon_seamless` model
+  (`WEATHER_API_MODEL` in `weather_api.c`). Temperature and
+  apparent temperature, humidity, surface and sea-level pressure, UV index
+  (derived outside the models, so a named model returns it as null — a second
+  minimal request without `models` fills it in, and the card shows `--.-` if
+  that one fails too),
   cloud cover, wind speed / gusts / direction, precipitation, daylight flag and
   the WMO code, plus today's sunshine / daylight duration from `daily` (the card
   shows the sunshine in hours and its share of the daylight). `daily` also
@@ -382,7 +394,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `gui/views/chart.c` | the chart as one element: the plot and the labelled row under it. A widget — the series and which quantity it is are passed in, so it neither samples the history nor knows how either was picked. Carries the per-quantity axis: label format, minimum span, and whether the columns go linearly or by decade, and the `CHART_RANGES` table of windows |
 | `gui/views/ui_state.c` | what the UI remembers about itself and the whole encoder scheme: the click switches the panel off, a turn back walks the knob's fields, a turn forward cycles the value of the one in focus. The chart's quantity and window are two of those fields, the panel brightness the third, which is why the selection lives here and not under the screen |
 | `gui/gui_loop.c` | the panel as the rest of the firmware sees it: owns the single 8 KB canvas, brings up the transport, draws a frame. The only firmware-only file in `gui/` |
-| `gui/views/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; live so far are the status bar (weekday, local time of the weather location, Wi-Fi bars, location name, age of the fetch) the outdoor block (icon, temperature, conditions), the rows under it (feels-like, sea-level pressure, humidity, wind with gusts, UV index, cloud cover), the five-day forecast (weekday letter, dim and a shade brighter at the weekend; min/max with a bar over the whole forecast's range; precipitation probability in tens, its brightness rising with the value) and the indoor rows (temperature, sea-level pressure, humidity, CO2, illuminance, dew point). Illuminance is the one value shown at less than its stored resolution: tenths below 1 lx, whole lux to 1000, thousands above. The battery is drawn empty — the board has no charge source. Below them a chart of one history quantity, 60 columns, with the ends of its scale and the window it covers labelled under it. The scale is the series' own min..max but never narrower than a per-quantity minimum set at the sensors' own noise (0.2 °C, 1 %RH, 0.3 hPa, 50 ppm, one decade of lux), so a flat hour reads as flat; illuminance is placed by decade, the rest linearly. Neighbouring points are joined by a riser and the corner column at each end of a flat run is moved one row toward the level it heads for, so a sensor's own quantisation draws as a slope rather than a staircase. Which quantity and which window are the knob's two fields, held in `ui_state_t` and handed both to `ui_model_refresh()`, so it knows what to sample, and to `chart_draw()`; the windows themselves are the `CHART_RANGES` table in `chart.c` — 1m, 5m, 1h, 1d, each 60 columns off the tier whose slots divide into it. The Zambretti and sun blocks below are roughed-in layout, still commented out |
+| `gui/views/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; live so far are the status bar (weekday, local time of the weather location, Wi-Fi bars, sweeping while an association attempt is on the air, location name, age of the fetch) the outdoor block (icon, temperature, conditions), the rows under it (feels-like, sea-level pressure, humidity, wind with gusts, UV index, cloud cover), the five-day forecast (weekday letter, dim and a shade brighter at the weekend; min/max with a bar over the whole forecast's range; precipitation probability in tens, its brightness rising with the value) and the indoor rows (temperature, sea-level pressure, humidity, CO2, illuminance, dew point). Illuminance is the one value shown at less than its stored resolution: tenths below 1 lx, whole lux to 1000, thousands above. The battery is drawn empty — the board has no charge source. Below them a chart of one history quantity, 60 columns, with the ends of its scale and the window it covers labelled under it. The scale is the series' own min..max but never narrower than a per-quantity minimum set at the sensors' own noise (0.2 °C, 1 %RH, 0.3 hPa, 50 ppm, one decade of lux), so a flat hour reads as flat; illuminance is placed by decade, the rest linearly. Neighbouring points are joined by a riser and the corner column at each end of a flat run is moved one row toward the level it heads for, so a sensor's own quantisation draws as a slope rather than a staircase. Which quantity and which window are the knob's two fields, held in `ui_state_t` and handed both to `ui_model_refresh()`, so it knows what to sample, and to `chart_draw()`; the windows themselves are the `CHART_RANGES` table in `chart.c` — 1m, 5m, 1h, 1d, each 60 columns off the tier whose slots divide into it. The Zambretti and sun blocks below are roughed-in layout, still commented out |
 | `timesync.c` | SNTP client; `timesync_is_synced()` and `timesync_format()` |
 | `sensors/climate.c` | the room-level view over the devices, plus the reduction to sea level and the site-altitude setting. Its header carries the reading resolutions |
 | `history.c` | three rings sampled from a 1 s esp_timer, climate and radar alike; the two longer ones persist to `/data` with a versioned header. `history_series()` decimates one quantity out of a tier for the panel's chart, averaging each column over the slots it covers, in display units and NAN for a gap |

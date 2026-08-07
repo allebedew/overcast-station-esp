@@ -515,17 +515,30 @@ const char *weather_api_wind_dir_str(int deg)
     return PTS[((d + 45) / 90) % 4];
 }
 
+// zambretti.c is firmware-only for the same reason; the scene sets zb.ok itself,
+// so the wording only has to be the right length, not the right forecast. The
+// widest entry of its table, which overruns the row it shares with the number --
+// that overrun is the thing worth seeing.
+const char *zambretti_code_short(uint8_t code)
+{
+    (void)code;
+    return "Showers, better";
+}
+
 // Rendered twice: once with every source answering, once with none of them --
 // no clock, no link, no location, no fetch, no sensors. The empty frame is the
 // one the station actually comes up with, and the layout has to survive a
 // column of dashes as well as it survives the widest readings.
-static void screen_now_scene(gfx_canvas_t *c, bool have_data)
+static void screen_now_scene(gfx_canvas_t *c, bool have_data, bool fetching,
+                             uint32_t anim_ms)
 {
     static ui_model_t m;
     memset(&m, 0, sizeof(m));
 
-    m.out_cond  = "";   // ui_model_refresh() never leaves this NULL
-    m.out.age_s = -1;
+    m.out_cond     = "";   // ui_model_refresh() never leaves this NULL
+    m.out.age_s    = -1;
+    m.out_fetching = fetching;
+    m.anim_ms      = anim_ms;
 
     // The knob's own state, which on the panel ui_state_init() sets: the chart
     // is drawn from what it has picked.
@@ -547,6 +560,10 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data)
         .press_ok = true, .press_msl_hpa = 1013.2f,
         .lux_ok  = true,  .lux      = 12345.0f,
     };
+
+    // Pressure falling fast, the widest form the number takes: a sign, a digit,
+    // a tenth. The code only selects the wording, which the host stubs out.
+    m.zb = (zambretti_t){ .ok = true, .trend = -2, .delta_3h_hpa = -2.4f, .code = 8 };
 
     m.out_ok   = true;
     m.out      = (weather_api_data_t){ .temp_c = 25.8f, .feels_c = -7.1f, .wind_kmh = 12.0f,
@@ -590,7 +607,7 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data)
     m.chart[m.chart_n / 3] = NAN;
 
     snprintf(m.loc, sizeof(m.loc), "Vozdvizhenka");   // a name long enough to crowd the age
-    m.link = true;
+    m.link = UI_LINK_UP;
     m.rssi = -68;
 
     st.bright = 12;   // the knob's own state, shown in the corner
@@ -600,13 +617,19 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data)
 
 static void scene_screen_now(gfx_canvas_t *c)
 {
-    screen_now_scene(c, true);
+    screen_now_scene(c, true, false, 0);
 }
 
 static void scene_screen_now_empty(gfx_canvas_t *c)
 {
-    screen_now_scene(c, false);
+    screen_now_scene(c, false, false, 0);
 }
+
+// The dots that stand in for the reading's age while a fetch runs. One PNG per
+// frame, a step of the walk apart: a still frame says nothing about an
+// animation, a strip of them does.
+#define FETCH_FRAMES   8
+#define FETCH_FRAME_MS 200   /* SIG_STEP_MS -- one dot per frame */
 
 static void measure(void)
 {
@@ -674,6 +697,18 @@ int main(int argc, char **argv)
         scenes[i].fn(&canvas);
 
         snprintf(path, sizeof(path), "out/%s.png", scenes[i].name);
+        if (!sim_write_png(path, &canvas, scale)) {
+            fprintf(stderr, "cannot write %s\n", path);
+            return 1;
+        }
+        printf("%s\n", path);
+    }
+
+    for (int i = 0; i < FETCH_FRAMES; i++) {
+        gfx_init(&canvas);
+        screen_now_scene(&canvas, true, true, (uint32_t)i * FETCH_FRAME_MS);
+
+        snprintf(path, sizeof(path), "out/screen_now_fetch%d.png", i);
         if (!sim_write_png(path, &canvas, scale)) {
             fprintf(stderr, "cannot write %s\n", path);
             return 1;

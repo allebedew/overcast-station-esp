@@ -17,9 +17,13 @@
 #include "weather_store.h"
 #include "wifi.h"
 
-/* Open-Meteo (https://open-meteo.com), no API key. The default "best_match"
- * model is used; coordinates come from the active location in weather_store,
- * so the URL is rebuilt per fetch. */
+/* Open-Meteo (https://open-meteo.com), no API key. Coordinates come from the
+ * active location in weather_store, so the URL is rebuilt per fetch. */
+
+/* Forecast model. Naming one costs the fields the API derives outside the
+ * models (UV, see fetch_uv) but keeps every field from a single consistent
+ * run; "best_match" hands the choice back to the API. */
+#define WEATHER_API_MODEL "icon_seamless"
 
 /* Fields requested in the `current` block (comma-separated, URL-safe). */
 #define WEATHER_API_CURRENT_FIELDS \
@@ -48,12 +52,19 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static weather_api_data_t s_data;
 static bool s_valid;
 static int64_t s_updated_us;
+static bool s_fetching;
+static int64_t s_fetch_begin_us;
+
+/* A fetch that answers immediately would otherwise flash the indicator for a
+ * frame or two; it is reported as running for at least this long. */
+#define WEATHER_API_FETCH_MIN_MS 600
 
 /* Accumulates the response body across HTTP_EVENT_ON_DATA callbacks. */
 typedef struct {
     char *buf;
     int len;
     int cap;
+    bool truncated;
 } resp_ctx_t;
 
 static esp_err_t http_event(esp_http_client_event_t *evt)
@@ -63,6 +74,10 @@ static esp_err_t http_event(esp_http_client_event_t *evt)
         if (ctx->len + evt->data_len < ctx->cap) {
             memcpy(ctx->buf + ctx->len, evt->data, evt->data_len);
             ctx->len += evt->data_len;
+        } else {
+            /* Dropping the tail leaves unparsable JSON, so say so here rather
+             * than let it surface as a parse failure. */
+            ctx->truncated = true;
         }
     }
     return ESP_OK;
@@ -129,7 +144,9 @@ static float precip_rate(const cJSON *cur)
     return interval_s > 0 ? mm * 3600.0f / interval_s : 0;
 }
 
-static bool parse(const char *json, const weather_location_t *loc)
+/* Fills `out`; publishing is deferred so the reading appears complete, with UV
+ * already in it, in a single step. */
+static bool parse(const char *json, weather_api_data_t *out)
 {
     cJSON *root = cJSON_Parse(json);
     if (!root) {
@@ -143,15 +160,13 @@ static bool parse(const char *json, const weather_location_t *loc)
     cJSON *temp = cJSON_GetObjectItem(cur, "temperature_2m");
     cJSON *hum = cJSON_GetObjectItem(cur, "relative_humidity_2m");
     cJSON *press = cJSON_GetObjectItem(cur, "surface_pressure");
-    cJSON *uvi = cJSON_GetObjectItem(cur, "uv_index");
-    if (cJSON_IsNumber(temp) && cJSON_IsNumber(hum) &&
-        cJSON_IsNumber(press) && cJSON_IsNumber(uvi)) {
+    if (cJSON_IsNumber(temp) && cJSON_IsNumber(hum) && cJSON_IsNumber(press)) {
         weather_api_data_t d = {
             .temp_c = temp->valuedouble,
             .humidity_pct = hum->valuedouble,
             .pressure_hpa = press->valuedouble,
-            .uvi = uvi->valuedouble,
             /* the rest default where a model omits them */
+            .uvi = jnum(cur, "uv_index", WEATHER_API_UVI_NONE),
             .feels_c = jnum(cur, "apparent_temperature", temp->valuedouble),
             /* today's whole-day totals, so both are forecasts until the day is over */
             .sunshine_s = (int32_t)lroundf(
@@ -170,56 +185,60 @@ static bool parse(const char *json, const weather_location_t *loc)
             .utc_offset_s = (int)lroundf(jnum(root, "utc_offset_seconds", 0)),
         };
         d.day_count = parse_days(daily, d.utc_offset_s, d.temp_c, d.days);
-
-        taskENTER_CRITICAL(&s_lock);
-        float prev_temp = s_data.temp_c;
-        bool  had_prev  = s_valid;
-        s_data = d;
-        s_valid = true;
-        s_updated_us = esp_timer_get_time();
-        taskEXIT_CRITICAL(&s_lock);
+        *out = d;
         ok = true;
-
-        /* One tick per fetch that landed, pitched by where the temperature
-         * went since the last one. The API reports 0.1 C, so anything under
-         * half a step is the same reading, not a move. */
-        buzzer_tune_t tick = BUZZER_CLICK;
-        if (had_prev) {
-            if (d.temp_c > prev_temp + 0.05f) {
-                tick = BUZZER_CLICK_HI;
-            } else if (d.temp_c < prev_temp - 0.05f) {
-                tick = BUZZER_CLICK_LO;
-            }
-        }
-        buzzer_play(tick);
-        /* Outlives the reading: the zone is a property of the place, so the
-         * clock stays right through an outage and across a reboot. */
-        weather_store_set_offset(loc->name, d.utc_offset_s);
-        ESP_LOGI(TAG,
-                 "updated: %.1f C (feels %.1f), %.0f%%, %.1f/%.1f hPa, "
-                 "UVI %.2f, wind %.1f (gust %.1f) km/h @%d, clouds %d%%, "
-                 "precip %.1f mm/h, sun %.1f/%.1f h, %s, %s",
-                 d.temp_c, d.feels_c, d.humidity_pct,
-                 d.pressure_hpa, d.pressure_msl_hpa, d.uvi, d.wind_kmh, d.gust_kmh,
-                 d.wind_dir_deg, d.cloud_pct, d.precip_mmh,
-                 d.sunshine_s / 3600.0f, d.daylight_s / 3600.0f,
-                 d.is_day ? "day" : "night",
-                 weather_api_code_str(d.weather_code));
-        for (int i = 0; i < d.day_count; i++) {
-            const weather_api_day_t *day = &d.days[i];
-            struct tm dt;
-            gmtime_r(&day->date, &dt);
-            ESP_LOGI(TAG, "forecast %04d-%02d-%02d: %.1f..%.1f C, rain %d%%, %s",
-                     dt.tm_year + 1900, dt.tm_mon + 1, dt.tm_mday,
-                     day->temp_min_c, day->temp_max_c, day->precip_prob_pct,
-                     weather_api_code_str(day->weather_code));
-        }
     } else {
         ESP_LOGW(TAG, "unexpected JSON shape");
     }
 
     cJSON_Delete(root);
     return ok;
+}
+
+static void publish(const weather_api_data_t *d, const weather_location_t *loc)
+{
+    taskENTER_CRITICAL(&s_lock);
+    float prev_temp = s_data.temp_c;
+    bool  had_prev  = s_valid;
+    s_data = *d;
+    s_valid = true;
+    s_updated_us = esp_timer_get_time();
+    taskEXIT_CRITICAL(&s_lock);
+
+    /* One tick per fetch that landed, pitched by where the temperature
+     * went since the last one. The API reports 0.1 C, so anything under
+     * half a step is the same reading, not a move. */
+    buzzer_tune_t tick = BUZZER_CLICK;
+    if (had_prev) {
+        if (d->temp_c > prev_temp + 0.05f) {
+            tick = BUZZER_CLICK_HI;
+        } else if (d->temp_c < prev_temp - 0.05f) {
+            tick = BUZZER_CLICK_LO;
+        }
+    }
+    buzzer_play(tick);
+    /* Outlives the reading: the zone is a property of the place, so the
+     * clock stays right through an outage and across a reboot. */
+    weather_store_set_offset(loc->name, d->utc_offset_s);
+    ESP_LOGI(TAG,
+             "updated: %.1f C (feels %.1f), %.0f%%, %.1f/%.1f hPa, "
+             "UVI %.2f, wind %.1f (gust %.1f) km/h @%d, clouds %d%%, "
+             "precip %.1f mm/h, sun %.1f/%.1f h, %s, %s",
+             d->temp_c, d->feels_c, d->humidity_pct,
+             d->pressure_hpa, d->pressure_msl_hpa, d->uvi, d->wind_kmh, d->gust_kmh,
+             d->wind_dir_deg, d->cloud_pct, d->precip_mmh,
+             d->sunshine_s / 3600.0f, d->daylight_s / 3600.0f,
+             d->is_day ? "day" : "night",
+             weather_api_code_str(d->weather_code));
+    for (int i = 0; i < d->day_count; i++) {
+        const weather_api_day_t *day = &d->days[i];
+        struct tm dt;
+        gmtime_r(&day->date, &dt);
+        ESP_LOGI(TAG, "forecast %04d-%02d-%02d: %.1f..%.1f C, rain %d%%, %s",
+                 dt.tm_year + 1900, dt.tm_mon + 1, dt.tm_mday,
+                 day->temp_min_c, day->temp_max_c, day->precip_prob_pct,
+                 weather_api_code_str(day->weather_code));
+    }
 }
 
 /* The two failures deserve different waits: a request that never reached the
@@ -230,21 +249,9 @@ typedef enum {
     FETCH_REJECTED,   /* the reply arrived and was unusable */
 } fetch_result_t;
 
-static fetch_result_t fetch(const weather_location_t *loc)
+/* NUL-terminates the body in `ctx` on FETCH_OK. */
+static fetch_result_t http_get(const char *url, resp_ctx_t *ctx)
 {
-    static char buf[WEATHER_API_MAX_RESPONSE];
-    resp_ctx_t ctx = { .buf = buf, .len = 0, .cap = sizeof(buf) };
-
-    /* timezone=auto makes the daily aggregates span the local calendar day and
-     * fills utc_offset_seconds in the reply. */
-    char url[512];
-    snprintf(url, sizeof(url),
-             "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
-             "&current=" WEATHER_API_CURRENT_FIELDS
-             "&daily=" WEATHER_API_DAILY_FIELDS
-             "&timezone=auto&timeformat=unixtime&forecast_days=%d",
-             loc->lat, loc->lon, WEATHER_API_FORECAST_DAYS);
-
     ESP_LOGI(TAG, "GET %s", url);
 
     esp_http_client_config_t cfg = {
@@ -253,7 +260,10 @@ static fetch_result_t fetch(const weather_location_t *loc)
         .crt_bundle_attach = esp_crt_bundle_attach,
         .timeout_ms = WEATHER_API_HTTP_TIMEOUT_MS,
         .event_handler = http_event,
-        .user_data = &ctx,
+        .user_data = ctx,
+        /* The request line alone is ~450 chars, which overflows the 512 B
+         * default the header writer shares with the rest of the headers. */
+        .buffer_size_tx = 1024,
     };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) {
@@ -271,9 +281,96 @@ static fetch_result_t fetch(const weather_location_t *loc)
         ESP_LOGE(TAG, "API returned HTTP %d", status);
         return FETCH_REJECTED;
     }
+    if (ctx->truncated) {
+        ESP_LOGE(TAG, "reply exceeds the %d byte buffer", ctx->cap);
+        return FETCH_REJECTED;
+    }
     /* http_event keeps len < cap, so this NUL is always in bounds */
-    ctx.buf[ctx.len] = '\0';
-    return parse(ctx.buf, loc) ? FETCH_OK : FETCH_REJECTED;
+    ctx->buf[ctx->len] = '\0';
+    return FETCH_OK;
+}
+
+/* UV is derived from CAMS rather than from a forecast model, so naming a model
+ * makes the API return it as null. Only then is it worth a second request,
+ * which asks for nothing else and leaves `uvi` untouched if it fails. */
+static void fetch_uv(const weather_location_t *loc, float *uvi)
+{
+    /* The reply is ~310 bytes: one value, but the API always prepends the
+     * coordinates, elevation, timezone and units. */
+    char buf[512];
+    resp_ctx_t ctx = { .buf = buf, .len = 0, .cap = sizeof(buf) };
+
+    char url[192];
+    snprintf(url, sizeof(url),
+             "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
+             "&current=uv_index",
+             loc->lat, loc->lon);
+
+    ESP_LOGI(TAG, "%s reports no UV index, asking without a model", WEATHER_API_MODEL);
+    if (http_get(url, &ctx) != FETCH_OK) {
+        return;
+    }
+
+    cJSON *root = cJSON_Parse(ctx.buf);
+    float v = jnum(cJSON_GetObjectItem(root, "current"), "uv_index",
+                   WEATHER_API_UVI_NONE);
+    cJSON_Delete(root);
+
+    if (v < 0) {
+        ESP_LOGW(TAG, "no UV index in the reply either");
+        return;
+    }
+    *uvi = v;
+}
+
+/* Both requests complete before anything is published, so the reading never
+ * appears without its UV index and then gains one a second later. */
+static fetch_result_t fetch_once(const weather_location_t *loc)
+{
+    static char buf[WEATHER_API_MAX_RESPONSE];
+    resp_ctx_t ctx = { .buf = buf, .len = 0, .cap = sizeof(buf) };
+
+    /* timezone=auto makes the daily aggregates span the local calendar day and
+     * fills utc_offset_seconds in the reply. */
+    char url[512];
+    snprintf(url, sizeof(url),
+             "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
+             "&current=" WEATHER_API_CURRENT_FIELDS
+             "&daily=" WEATHER_API_DAILY_FIELDS
+             "&models=" WEATHER_API_MODEL
+             "&timezone=auto&timeformat=unixtime&forecast_days=%d",
+             loc->lat, loc->lon, WEATHER_API_FORECAST_DAYS);
+
+    fetch_result_t r = http_get(url, &ctx);
+    if (r != FETCH_OK) {
+        return r;
+    }
+
+    weather_api_data_t d;
+    if (!parse(ctx.buf, &d)) {
+        return FETCH_REJECTED;
+    }
+    if (d.uvi < 0) {
+        fetch_uv(loc, &d.uvi);
+    }
+    publish(&d, loc);
+    return FETCH_OK;
+}
+
+/* The same, with the display's "updating" flag around it. */
+static fetch_result_t fetch(const weather_location_t *loc)
+{
+    taskENTER_CRITICAL(&s_lock);
+    s_fetching = true;
+    s_fetch_begin_us = esp_timer_get_time();
+    taskEXIT_CRITICAL(&s_lock);
+
+    fetch_result_t r = fetch_once(loc);
+
+    taskENTER_CRITICAL(&s_lock);
+    s_fetching = false;
+    taskEXIT_CRITICAL(&s_lock);
+    return r;
 }
 
 /* Milliseconds since the last successful fetch, UINT32_MAX if there was none. */
@@ -369,6 +466,17 @@ bool weather_api_get(weather_api_data_t *out)
     out->age_s = valid ? (int32_t)((esp_timer_get_time() - updated) / 1000000)
                        : -1;
     return valid;
+}
+
+bool weather_api_is_fetching(void)
+{
+    taskENTER_CRITICAL(&s_lock);
+    bool fetching = s_fetching;
+    int64_t began = s_fetch_begin_us;
+    taskEXIT_CRITICAL(&s_lock);
+    return fetching ||
+           (began != 0 &&
+            esp_timer_get_time() - began < WEATHER_API_FETCH_MIN_MS * 1000);
 }
 
 int weather_api_utc_offset_s(void)

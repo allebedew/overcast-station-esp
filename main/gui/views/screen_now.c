@@ -39,31 +39,75 @@ static void degree(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t 
     gfx_px(c, x + 1, top + 2, GFX_FULL);
 }
 
-/* Signal strength: bars of rising height, the leftmost `lit` of them at full
+/* Signal strength: bars of rising height, the ones set in `mask` at full
  * brightness and the rest dim. `right` is the anchor the way UI_RX is for text —
- * one past the last inked column — and the bars stand one row above `baseline`. */
+ * one past the last inked column — and the bars stand one row above `baseline`.
+ * A mask rather than a count because the connecting animation lights a single
+ * bar somewhere in the middle. */
 #define SIG_BARS 4
 #define SIG_W (2 * SIG_BARS - 1)   /* 1 px bars, 1 px apart */
 #define SIG_H 5
 
+/* One step of the connecting animation, in ms: a single bar walks to the far end
+ * and back, so a full sweep is 2 * SIG_BARS - 2 of these. */
+#define SIG_STEP_MS 200
+
 /* RSSI to lit bars. The thresholds are the usual client-side ones: -55 dBm and
  * up is as good as the link ever gets indoors, below -75 it starts dropping
- * rates. No link is no bars, and an associated but weak link still shows one. */
-static int sig_bars(bool link, int rssi)
+ * rates. No link is no bars, and an associated but weak link still shows one.
+ * While an attempt is on the air one bar sweeps back and forth instead. */
+static unsigned sig_mask(ui_link_t link, int rssi, uint32_t anim_ms)
 {
-    if (!link)       { return 0; }
-    if (rssi >= -55) { return 4; }
-    if (rssi >= -65) { return 3; }
-    if (rssi >= -75) { return 2; }
-    return 1;
+    if (link == UI_LINK_CONNECTING) {
+        unsigned step = anim_ms / SIG_STEP_MS % (2 * SIG_BARS - 2);
+        unsigned i    = step < SIG_BARS ? step : 2 * SIG_BARS - 2 - step;
+        return 1u << i;
+    }
+    if (link != UI_LINK_UP) { return 0; }
+
+    int lit = rssi >= -55 ? 4
+            : rssi >= -65 ? 3
+            : rssi >= -75 ? 2
+                          : 1;
+    return (1u << lit) - 1;
 }
 
-static void bars(gfx_canvas_t *c, int right, int baseline, int lit)
+static void bars(gfx_canvas_t *c, int right, int baseline, unsigned mask)
 {
     for (int i = 0; i < SIG_BARS; i++) {
         int h = SIG_H - SIG_BARS + 1 + i;   // 2..SIG_H
         gfx_vline(c, right - 1 - 2 * (SIG_BARS - 1 - i), baseline - h, h,
-                  i < lit ? GFX_FULL : GFX_DIM, GFX_SOLID, 0);
+                  (mask >> i) & 1 ? GFX_FULL : GFX_DIM, GFX_SOLID, 0);
+    }
+}
+
+/* Three dim dots with one lit, walking to the end and back -- the same gesture
+ * the connecting link makes with its bars, shown where the reading's age is
+ * while a fetch is running. Anchored and sized like the text it replaces --
+ * `right` one past the last column, `w` the advance width the age would have
+ * had -- so what is beside it does not move when the animation comes and goes.
+ *
+ * A function of `anim_ms` alone: the screen is redrawn from the model and keeps
+ * no state between frames. */
+#define DOTS     3
+#define DOT_DX   3   /* dot pitch, px: "1h" is only eight columns wide */
+
+static void dots(gfx_canvas_t *c, int right, int baseline, int w, uint32_t anim_ms)
+{
+    gfx_font_metrics_t fm;
+    gfx_font_metrics(UI_TEXT.font, &fm);
+    // A row above the cap's middle: level with the x-height the dim location
+    // name beside it is drawn at.
+    int y = baseline - fm.cap / 2 - 1;
+
+    // Centred in the age's box, and left-aligned in it when the width is odd.
+    int x0 = right - w + (w - (DOT_DX * (DOTS - 1) + 1)) / 2;
+
+    unsigned step = anim_ms / SIG_STEP_MS % (2 * DOTS - 2);
+    unsigned lit  = step < DOTS ? step : 2 * DOTS - 2 - step;
+
+    for (unsigned i = 0; i < DOTS; i++) {
+        gfx_px(c, x0 + (int)i * DOT_DX, y, i == lit ? GFX_FULL : GFX_DIM);
     }
 }
 
@@ -413,7 +457,7 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     int baseline = ui_row(&cur, &UI_TEXT);
     gfx_text(c, 0, baseline, &UI_TEXT, day);
     gfx_text(c, UI_RX/2, baseline, &UI_TEXT_C, hhmm);
-    bars(c, UI_RX, baseline, sig_bars(m->link, m->rssi));
+    bars(c, UI_RX, baseline, sig_mask(m->link, m->rssi, m->anim_ms));
     // battery(c, UI_RX - SIG_W - 3, baseline, 0);
 
     char age[8];
@@ -422,7 +466,14 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     baseline = ui_row(&cur, &UI_TEXT);
     gfx_text_style_t age_st = UI_TEXT_R;
     age_st.level = GFX_DIM;
-    int aw = gfx_text(c, GFX_W, baseline, &age_st, age);
+    // Measured either way: while the fetch runs the dots stand in the age's own
+    // box, so the location beside them keeps the width it had.
+    int aw = gfx_text_w(&age_st, age);
+    if (m->out_fetching) {
+        dots(c, GFX_W, baseline, aw, m->anim_ms);
+    } else {
+        gfx_text(c, GFX_W, baseline, &age_st, age);
+    }
     gfx_push(c, (gfx_rect_t){ 0, 0, (int16_t)(UI_RX - aw - 2), GFX_H });
     gfx_text_style_t loc_st = UI_TEXT;
     loc_st.level = GFX_DIM;
@@ -458,8 +509,8 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     }
 
     baseline = ui_row(&cur, &UI_TEXT);
-    reading(c, 0, baseline, &UI_TEXT, ok, "%.1f", "--.-", m->out.uvi, "UV", false,
-            GFX_NONE);
+    reading(c, 0, baseline, &UI_TEXT, ok && m->out.uvi >= 0, "%.1f", "--.-",
+            m->out.uvi, "UV", false, GFX_NONE);
     reading(c, UI_RX, baseline, &UI_TEXT_R, ok, "%.0f%%", "--%",
             (double)m->out.cloud_pct, "CL", false, GFX_NONE);
 
@@ -508,13 +559,26 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     chart_draw(c, &cur, m->chart, m->chart_n, s->chart_q, s->chart_range,
                s->focus == UI_FOCUS_CHART_RANGE);
     rule(c, &cur);
-/*
-    // Sun Position
+
+    // Zambretti: the 3 h tendency, then the wording it selects. The number is
+    // measured first and the wording clipped to whatever is left of the row —
+    // even the shortened forms run past 64 px in the widest cases.
 
     baseline = ui_row(&cur, &UI_TEXT);
-    gfx_text(c, 0,     baseline, &UI_TEXT,   "--ZAMBRETTI--");
+    char zb[8];
+    snprintf(zb, sizeof(zb), m->zb.ok ? "%+.1f" : "--", m->zb.delta_3h_hpa);
+    int zw = gfx_text(c, 0, baseline, &UI_TEXT, zb) + 3;
+
+    gfx_text_style_t z_st = UI_TEXT;
+    z_st.level = GFX_DIM;
+    // gfx_push(c, (gfx_rect_t){ (int16_t)zw, 0, (int16_t)(UI_RX - zw), GFX_H });
+    gfx_text(c, zw, baseline, &z_st,
+             m->zb.ok ? zambretti_code_short(m->zb.code) : "--");
+    // gfx_pop(c);
     rule(c, &cur);
 
+
+/*
     // Sun Position
 
     baseline = ui_row(&cur, &UI_TEXT);

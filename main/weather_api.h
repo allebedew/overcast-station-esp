@@ -15,6 +15,9 @@ typedef struct {
     int    weather_code;    /* WMO weather interpretation code, -1 if unknown */
 } weather_api_day_t;
 
+/* `uvi` when neither request produced a UV index. */
+#define WEATHER_API_UVI_NONE (-1.0f)
+
 /* Current outdoor conditions fetched from Open-Meteo. */
 typedef struct {
     float temp_c;           /* air temperature, °C */
@@ -22,7 +25,7 @@ typedef struct {
     float humidity_pct;     /* relative humidity, % */
     float pressure_hpa;     /* surface pressure at the station elevation, hPa */
     float pressure_msl_hpa; /* pressure reduced to sea level, hPa */
-    float uvi;              /* UV index */
+    float uvi;              /* UV index, WEATHER_API_UVI_NONE if unavailable */
     float wind_kmh;         /* wind speed at 10 m, km/h */
     float gust_kmh;         /* wind gusts at 10 m, km/h */
     int wind_dir_deg;       /* wind direction, meteorological degrees (0 = N) */
@@ -52,6 +55,10 @@ void weather_api_refresh(void);
 /* Latest conditions. False until the first successful fetch and again after a
  * failed one; *out is left as the last known values. */
 bool weather_api_get(weather_api_data_t *out);
+
+/* True while a fetch is on the air, and for a short while after a very quick
+ * one, so the display's indicator is never a single-frame flash. */
+bool weather_api_is_fetching(void);
 
 /* The active location's UTC offset: the live reading, else the one stored with
  * the location, else 0. Separate from weather_api_get() so the display clock
