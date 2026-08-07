@@ -31,15 +31,12 @@ typedef enum {
 } ui_focus_t;
 
 typedef struct {
-    /* A device setting rather than a screen's: it survives whatever is on the
-     * panel, and it is what moves into the settings module, and into NVS, once
-     * there is one. One of the knob's fields; comes up at gfx_target.h's
-     * default and is not persisted. */
+    /* Device settings rather than a screen's: they survive whatever is on the
+     * panel. Both are one of the knob's fields and both are persisted, by
+     * whoever calls this — the state machine itself stays free of the settings
+     * module, which is an esp header away. A station whose panel was switched
+     * off therefore boots dark. */
     uint8_t bright;
-
-    /* Temporary: a click switches the panel off and another brings it back.
-     * Comes up on and is not persisted — a station that boots dark looks
-     * broken. */
     bool on;
 
     /* What the chart is showing, and which of the two a turn back would
@@ -58,9 +55,9 @@ typedef enum {
     UI_EV_LIMIT,   /* a turn that changed nothing: the range ends here */
 } ui_event_t;
 
-/* Applies what it starts with, so the panel and this struct agree whatever the
- * transport's own init sequence left behind. */
-void ui_state_init(ui_state_t *s);
+/* Takes the persisted panel settings and applies them, so the panel and this
+ * struct agree whatever the transport's own init sequence left behind. */
+void ui_state_init(ui_state_t *s, uint8_t bright, bool on);
 
 ui_event_t ui_state_input(ui_state_t *s, const encoder_input_t *in);
 

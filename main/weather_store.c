@@ -18,6 +18,7 @@ static weather_location_t s_locations[WEATHER_MAX_LOCATIONS];
 static int s_count;
 static int s_active = -1;
 static SemaphoreHandle_t s_lock;
+static weather_store_change_fn s_on_change;
 
 static void save(void)
 {
@@ -63,6 +64,19 @@ void weather_store_init(void)
     ESP_LOGI(TAG, "%d location(s), active %d", s_count, s_active);
 }
 
+void weather_store_on_change(weather_store_change_fn fn)
+{
+    s_on_change = fn;
+}
+
+/* Always outside the lock: the callback refetches, and the fetch reads back. */
+static void notify(void)
+{
+    if (s_on_change) {
+        s_on_change();
+    }
+}
+
 esp_err_t weather_store_add(const char *name, float lat, float lon)
 {
     if (!name || !name[0] || strlen(name) > 32 ||
@@ -92,13 +106,19 @@ esp_err_t weather_store_add(const char *name, float lat, float lon)
     s_locations[i].lon = lon;
     /* Nothing else would select it: on an empty store the first location has
      * to become the active one, or no weather is ever fetched. */
-    if (s_active < 0) {
+    bool became_active = s_active < 0;
+    if (became_active) {
         s_active = i;
     }
     save();
     xSemaphoreGive(s_lock);
 
     ESP_LOGI(TAG, "Location \"%s\" saved (%d total)", name, s_count);
+    /* Adding a second city must not drop the reading the first one is shown
+     * with, so only the one that took the selection refetches. */
+    if (became_active) {
+        notify();
+    }
     return ESP_OK;
 }
 
@@ -122,6 +142,7 @@ esp_err_t weather_store_remove(int idx)
     xSemaphoreGive(s_lock);
 
     ESP_LOGI(TAG, "Location removed (%d left)", s_count);
+    notify(); /* the active location may have shifted under the index */
     return ESP_OK;
 }
 
@@ -160,6 +181,9 @@ esp_err_t weather_store_set_active(int idx)
         save();
     }
     xSemaphoreGive(s_lock);
+    if (changed) {
+        notify();
+    }
     return ESP_OK;
 }
 

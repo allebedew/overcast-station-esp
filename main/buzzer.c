@@ -14,14 +14,9 @@
 #define LEDC_TIMER   LEDC_TIMER_0
 #define LEDC_CHANNEL LEDC_CHANNEL_0
 
-/* Below ~2% of full swing the pulses get short enough for the tone to go
- * uneven — quieter than that wants a resistor in series with the piezo. */
-#define DEFAULT_VOLUME_PCT 10
-#define DUTY_RES           LEDC_TIMER_10_BIT
-#define DUTY_MAX           (1 << 10)
-#define DUTY_OFF           0
-
-#define SETTING_VOLUME "buzz_vol"
+#define DUTY_RES LEDC_TIMER_10_BIT
+#define DUTY_MAX (1 << 10)
+#define DUTY_OFF 0
 
 /* Idle frequency: the timer needs one to be configured, nothing is audible at
  * DUTY_OFF. */
@@ -140,7 +135,7 @@ static const char *const TUNE_NAMES[BUZZER_TUNE_COUNT] = {
 #define REQ_STOP (-1)
 
 static QueueHandle_t s_queue; /* length 1, overwritten: the newest request wins */
-static volatile uint8_t s_volume_pct = DEFAULT_VOLUME_PCT;
+static volatile uint8_t s_volume_pct;
 
 static void output(const note_t *note)
 {
@@ -197,24 +192,11 @@ const char *buzzer_tune_name(buzzer_tune_t tune)
     return (unsigned)tune < BUZZER_TUNE_COUNT ? TUNE_NAMES[tune] : "";
 }
 
-void buzzer_set_volume(uint8_t pct)
+/* The volume is SETTING_BUZZER_VOLUME and nothing else; the setting is clamped
+ * to the range in buzzer.h before it gets here. */
+static void apply_volume(int32_t pct)
 {
-    if (pct < BUZZER_VOL_MIN) {
-        pct = BUZZER_VOL_MIN;
-    } else if (pct > BUZZER_VOL_MAX) {
-        pct = BUZZER_VOL_MAX;
-    }
-    s_volume_pct = pct;
-}
-
-uint8_t buzzer_get_volume(void)
-{
-    return s_volume_pct;
-}
-
-void buzzer_save_volume(void)
-{
-    settings_set_u8(SETTING_VOLUME, s_volume_pct);
+    s_volume_pct = (uint8_t)pct;
 }
 
 void buzzer_init(void)
@@ -254,7 +236,8 @@ void buzzer_init(void)
     };
     ESP_ERROR_CHECK(ledc_channel_config(&channel));
 
-    buzzer_set_volume(settings_get_u8(SETTING_VOLUME, DEFAULT_VOLUME_PCT));
+    apply_volume(settings_get(SETTING_BUZZER_VOLUME));
+    settings_on_change(SETTING_BUZZER_VOLUME, apply_volume);
 
     s_queue = xQueueCreate(1, sizeof(int8_t));
     ESP_ERROR_CHECK(s_queue ? ESP_OK : ESP_ERR_NO_MEM);

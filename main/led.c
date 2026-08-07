@@ -10,10 +10,9 @@
 #include "sensors.h"
 #include "ota.h"
 
-#define LED_GPIO           8
-#define DEFAULT_BRIGHTNESS 4
-#define BLINK_PERIOD_MS    100
-#define PULSE_CYCLE_MS     2000
+#define LED_GPIO        8
+#define BLINK_PERIOD_MS 100
+#define PULSE_CYCLE_MS  2000
 
 /* CO2 anchors (ppm) of the connected-state gradient: green, yellow, red. */
 #define CO2_GREEN  400
@@ -27,26 +26,15 @@
 /* Error codes: number of red blinks per cycle. */
 #define ERR_SENSOR 2 /* SCD40 not responding */
 
-#define SETTING_BRIGHT "led_bright"
-
 static const char *TAG = "led";
 
 static led_strip_handle_t led_strip;
 static volatile bool s_activity;
-static volatile uint8_t s_brightness = DEFAULT_BRIGHTNESS;
+static volatile uint8_t s_brightness;
 
-void led_set_brightness(uint8_t brightness)
+static void apply_brightness(int32_t brightness)
 {
-    if (brightness == 0) {
-        brightness = 1;
-    }
-    s_brightness = brightness;
-    settings_set_u8(SETTING_BRIGHT, brightness);
-}
-
-uint8_t led_get_brightness(void)
-{
-    return s_brightness;
+    s_brightness = (uint8_t)brightness;
 }
 
 void led_notify_activity(void)
@@ -172,8 +160,8 @@ void led_init(void)
     ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip));
     ESP_ERROR_CHECK(led_strip_clear(led_strip));
 
-    uint8_t br = settings_get_u8(SETTING_BRIGHT, DEFAULT_BRIGHTNESS);
-    s_brightness = br > 0 ? br : DEFAULT_BRIGHTNESS;
+    s_brightness = (uint8_t)settings_get(SETTING_LED_BRIGHTNESS);
+    settings_on_change(SETTING_LED_BRIGHTNESS, apply_brightness);
 
     xTaskCreate(led_task, "led", 2048, NULL, 2, NULL);
     ESP_LOGI(TAG, "LED task started, GPIO %d", LED_GPIO);

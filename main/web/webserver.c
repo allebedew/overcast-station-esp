@@ -16,6 +16,7 @@
 #include "cJSON.h"
 #include "mdns.h"
 #include "climate.h"
+#include "settings.h"
 #include "zambretti.h"
 #include "sun.h"
 #include "history.h"
@@ -380,6 +381,27 @@ static esp_err_t status_get_handler(httpd_req_t *req)
                  sun_phase_str(sun_phase_of(elev)), next);
     }
 
+    /* From the same table the POST handler reads, so the two can never differ
+     * on which settings exist. */
+    char settings_json[256];
+    jbuf_t s;
+    jbuf_init(&s, settings_json, sizeof(settings_json));
+    jbuf_printf(&s, "{");
+    for (setting_id_t id = 0, n = 0; id < SETTING_COUNT; id++) {
+        const setting_desc_t *d = settings_desc(id);
+        if (!d->api) {
+            continue;
+        }
+        int32_t v = settings_get(id);
+        if (d->as_bool) {
+            jbuf_printf(&s, "%s\"%s\":%s", n++ ? "," : "", d->api,
+                        v ? "true" : "false");
+        } else {
+            jbuf_printf(&s, "%s\"%s\":%d", n++ ? "," : "", d->api, (int)v);
+        }
+    }
+    jbuf_printf(&s, "}");
+
     static char json[3584];
     jbuf_t j;
     jbuf_init(&j, json, sizeof(json));
@@ -408,7 +430,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"http_conns\":%d,"
         "\"heap_free\":%u,\"heap_min\":%u,\"heap_total\":%u,\"heap_largest\":%u,"
         "\"nvs_used\":%u,\"nvs_total\":%u},"
-        "\"settings\":{\"led_brightness\":%u,\"altitude\":%d}}",
+        "\"settings\":%s}",
         sta_json, ap_json,
         cl_temp, cl_rh, cl_co2, cl_press, cl_msl, cl_lux,
         zb_json, sun_json,
@@ -435,8 +457,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         http_conn_count(),
         run.heap_free, run.heap_min, run.heap_total, run.heap_largest,
         (unsigned)sys->nvs_used_entries, (unsigned)sys->nvs_total_entries,
-        (unsigned)led_get_brightness(),
-        climate_altitude_m());
+        settings_json);
 
     return jbuf_send(req, &j);
 }
@@ -702,7 +723,6 @@ static esp_err_t location_add_post_handler(httpd_req_t *req)
     const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(root, "name"));
     const cJSON *lat = cJSON_GetObjectItem(root, "lat");
     const cJSON *lon = cJSON_GetObjectItem(root, "lon");
-    int was_active = weather_store_get_active();
     esp_err_t err = (name && cJSON_IsNumber(lat) && cJSON_IsNumber(lon))
         ? weather_store_add(name, (float)lat->valuedouble, (float)lon->valuedouble)
         : ESP_ERR_INVALID_ARG;
@@ -712,11 +732,6 @@ static esp_err_t location_add_post_handler(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
                                    err == ESP_ERR_NO_MEM ? "list is full"
                                                          : "bad location");
-    }
-    /* Only when this one became the active location. Adding a second city
-     * must not drop the reading the first one is being shown with. */
-    if (weather_store_get_active() != was_active) {
-        weather_api_refresh();
     }
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
@@ -735,7 +750,6 @@ static esp_err_t location_delete_handler(httpd_req_t *req)
     if (err != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "not found");
     }
-    weather_api_refresh(); /* the active location may have shifted */
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
@@ -753,7 +767,6 @@ static esp_err_t location_active_put_handler(httpd_req_t *req)
     if (err != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad index");
     }
-    weather_api_refresh();
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
@@ -763,16 +776,41 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
     if (!root) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
     }
-    const cJSON *bright = cJSON_GetObjectItem(root, "led_brightness");
-    if (cJSON_IsNumber(bright) && bright->valueint >= 1 && bright->valueint <= 255) {
-        led_set_brightness((uint8_t)bright->valueint);
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "expected an object");
     }
 
-    /* Metres above sea level — the only input to the pressure reduction. */
-    const cJSON *alt = cJSON_GetObjectItem(root, "altitude");
-    if (cJSON_IsNumber(alt) && alt->valueint >= CLIMATE_ALTITUDE_MIN &&
-        alt->valueint <= CLIMATE_ALTITUDE_MAX) {
-        climate_set_altitude_m(alt->valueint);
+    /* Driven by the settings table, so a new setting costs nothing here. Any
+     * subset of the keys may be sent; what arrives is only stored, and the
+     * settings module carries it to whoever holds the value. Out of range is
+     * clamped there, but an unknown key or a wrong type is a client bug worth
+     * saying out loud rather than swallowing. */
+    const cJSON *item;
+    cJSON_ArrayForEach(item, root) {
+        setting_id_t id;
+        const setting_desc_t *d = NULL;
+        for (id = 0; id < SETTING_COUNT; id++) {
+            const setting_desc_t *c = settings_desc(id);
+            if (c->api && item->string && strcmp(c->api, item->string) == 0) {
+                d = c;
+                break;
+            }
+        }
+        char msg[64];
+        if (!d) {
+            snprintf(msg, sizeof(msg), "unknown setting: %s",
+                     item->string ? item->string : "?");
+            cJSON_Delete(root);
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, msg);
+        }
+        if (d->as_bool ? !cJSON_IsBool(item) : !cJSON_IsNumber(item)) {
+            snprintf(msg, sizeof(msg), "%s wants a %s", d->api,
+                     d->as_bool ? "boolean" : "number");
+            cJSON_Delete(root);
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, msg);
+        }
+        settings_set(id, d->as_bool ? cJSON_IsTrue(item) : item->valueint);
     }
 
     cJSON_Delete(root);

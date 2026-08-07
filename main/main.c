@@ -12,6 +12,7 @@
 #include "led.h"
 #include "ota.h"
 #include "sensors.h"
+#include "settings.h"
 #include "storage.h"
 #include "sysinfo.h"
 #include "telegram.h"
@@ -30,6 +31,8 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+    settings_init(); /* before everything that reads a setting at init */
 
     led_init();
     buzzer_init();

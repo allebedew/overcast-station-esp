@@ -444,6 +444,7 @@ void weather_api_init(void)
 {
     /* 8 KiB stack: TLS handshake and JSON parse run in this task */
     xTaskCreate(weather_api_task, "weather_api", 8192, NULL, 2, &s_task);
+    weather_store_on_change(weather_api_refresh);
 }
 
 void weather_api_refresh(void)

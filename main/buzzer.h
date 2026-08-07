@@ -55,14 +55,11 @@ const char *buzzer_tune_name(buzzer_tune_t tune);
 
 /* Volume as a share of full swing. The fundamental of a square wave goes as
  * sin(pi*duty), so BUZZER_VOL_MAX is as loud as this element gets and halving
- * the number is not halving the sound: 50% -> 10% is about 10 dB. */
+ * the number is not halving the sound: 50% -> 10% is about 10 dB. Below ~2% the
+ * pulses get short enough for the tone to go uneven — quieter than that wants a
+ * resistor in series with the piezo. */
 #define BUZZER_VOL_MIN 1
 #define BUZZER_VOL_MAX 50
 
-/* Applies at once and stays in RAM — one NVS write per knob detent is what
- * buzzer_save_volume() exists to avoid. Clamped to the range above. */
-void buzzer_set_volume(uint8_t pct);
-uint8_t buzzer_get_volume(void);
-
-/* Persists whatever buzzer_set_volume() last took. */
-void buzzer_save_volume(void);
+/* The volume itself is SETTING_BUZZER_VOLUME, read and written there; this
+ * module only follows it. */

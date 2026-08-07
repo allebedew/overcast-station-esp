@@ -8,37 +8,22 @@
 #include "sensors.h"
 #include "settings.h"
 
-#define NVS_KEY_ALTITUDE "altitude_m"
-
 static const char *TAG = "climate";
 
-/* Site altitude in metres, cached from NVS. */
+/* Site altitude in metres, cached from the settings. */
 static int s_altitude_m;
+
+static void apply_altitude(int32_t metres)
+{
+    s_altitude_m = (int)metres;
+    ESP_LOGI(TAG, "site altitude set to %d m", s_altitude_m);
+}
 
 void climate_init(void)
 {
-    s_altitude_m = (int)settings_get_i32(NVS_KEY_ALTITUDE, 0);
+    s_altitude_m = (int)settings_get(SETTING_ALTITUDE_M);
+    settings_on_change(SETTING_ALTITUDE_M, apply_altitude);
     ESP_LOGI(TAG, "site altitude %d m", s_altitude_m);
-}
-
-int climate_altitude_m(void)
-{
-    return s_altitude_m;
-}
-
-void climate_set_altitude_m(int metres)
-{
-    if (metres < CLIMATE_ALTITUDE_MIN) {
-        metres = CLIMATE_ALTITUDE_MIN;
-    } else if (metres > CLIMATE_ALTITUDE_MAX) {
-        metres = CLIMATE_ALTITUDE_MAX;
-    }
-    if (metres == s_altitude_m) {
-        return;
-    }
-    s_altitude_m = metres;
-    settings_set_i32(NVS_KEY_ALTITUDE, metres);
-    ESP_LOGI(TAG, "site altitude set to %d m", metres);
 }
 
 #define SEA_LEVEL_STANDARD_HPA 1013.25f /* ISA standard atmosphere at 0 m */

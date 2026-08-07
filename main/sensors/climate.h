@@ -57,13 +57,11 @@ void climate_init(void);
 void climate_get(climate_t *out);
 
 /* Metres above sea level, the input to the sea-level pressure reduction;
- * 0 makes the reduced value equal the measured one. The setter clamps to
- * CLIMATE_ALTITUDE_MIN..MAX and persists to NVS. */
+ * 0 makes the reduced value equal the measured one. It is
+ * SETTING_ALTITUDE_M — set it there and this module picks it up; the range
+ * below is what the settings table clamps it to. */
 #define CLIMATE_ALTITUDE_MIN (-500)
 #define CLIMATE_ALTITUDE_MAX 9000
-
-int climate_altitude_m(void);
-void climate_set_altitude_m(int metres);
 
 /* The transform climate_get() applies to press_msl_hpa, exposed for the stored
  * history, which keeps the pressure as measured and reduces it on the way out.

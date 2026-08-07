@@ -896,6 +896,19 @@
                 color: var(--text-dim);
                 font-variant-numeric: tabular-nums;
             }
+            .set-row .head input[type="checkbox"] {
+                width: 16px;
+                height: 16px;
+                accent-color: var(--accent);
+                cursor: pointer;
+                flex: none;
+            }
+            .set-row .hint {
+                font-size: 11px;
+                line-height: 1.4;
+                color: var(--text-dim);
+                margin-top: 6px;
+            }
             input[type="range"] {
                 -webkit-appearance: none;
                 width: 100%;
@@ -1164,6 +1177,52 @@
 
                     <div class="set-row">
                         <div class="head">
+                            <span class="name" data-i18n="buzzerVolume"
+                                >Громкость зуммера</span
+                            ><span class="val" id="volVal">—</span>
+                        </div>
+                        <input
+                            type="range"
+                            id="volRange"
+                            min="1"
+                            max="50"
+                            value="10"
+                        />
+                    </div>
+
+                    <div class="set-row">
+                        <div class="head">
+                            <span class="name" data-i18n="displayOn"
+                                >Дисплей включён</span
+                            ><input type="checkbox" id="dispOn" />
+                        </div>
+                    </div>
+
+                    <div class="set-row">
+                        <div class="head">
+                            <span class="name" data-i18n="displayBrightness"
+                                >Яркость дисплея</span
+                            ><span class="val" id="dispBriVal">—</span>
+                        </div>
+                        <input
+                            type="range"
+                            id="dispBriRange"
+                            min="0"
+                            max="15"
+                            value="12"
+                        />
+                    </div>
+
+                    <div class="set-row">
+                        <div class="head">
+                            <span class="name" data-i18n="radarBtOff"
+                                >Bluetooth радара отключён</span
+                            ><input type="checkbox" id="radarBtOff" />
+                        </div>
+                    </div>
+
+                    <div class="set-row">
+                        <div class="head">
                             <span class="name" data-i18n="altitude"
                                 >Высота над уровнем моря</span
                             ><span class="val" data-i18n="uMeters">м</span>
@@ -1331,7 +1390,9 @@
      DELETE /api/locations      - {index}
      PUT  /api/locations/active - {index} (switch the displayed location)
      POST /api/connect          - restart the STA connection cycle
-     POST /api/settings         - {led_brightness, altitude} (any subset)
+     POST /api/settings         - any subset of the keys /api/status reports
+                                  under "settings"; an unknown key or a wrong
+                                  type is a 400
      POST /api/scd40/calibrate  - {ppm}
 
    Every reading on the page is a fixed slot: the markup for a card, a tile
@@ -1414,6 +1475,11 @@
                     sensLux: "Освещённость",
                     altitude: "Высота над уровнем моря",
                     altSaved: "Высота сохранена",
+                    buzzerVolume: "Громкость зуммера",
+                    displayOn: "Дисплей включён",
+                    displayBrightness: "Яркость дисплея",
+                    radarBtOff: "Bluetooth радара отключён",
+                    settingSaved: "Настройка сохранена",
                     sensWhiteRatio: "Соотношение white/lux",
                     sensGain: "Усиление",
                     sensIt: "Интегрирование",
@@ -1631,6 +1697,11 @@
                     sensLux: "Illuminance",
                     altitude: "Altitude above sea level",
                     altSaved: "Altitude saved",
+                    buzzerVolume: "Buzzer volume",
+                    displayOn: "Display on",
+                    displayBrightness: "Display brightness",
+                    radarBtOff: "Radar Bluetooth switched off",
+                    settingSaved: "Setting saved",
                     sensWhiteRatio: "White/lux ratio",
                     sensGain: "Gain",
                     sensIt: "Integration",
@@ -2347,8 +2418,6 @@
             /* ---------- status polling ---------- */
             let lastOk = null;
             let lastStatus = null;
-            let brightLoaded = false;
-            let altLoaded = false;
             let polling = false;
             const STALE_AFTER_MS = 1500; /* no successful poll this long → offline */
             const POLL_TIMEOUT_MS = 1200; /* give up on a single stuck request */
@@ -2505,16 +2574,29 @@
                 );
                 $("sysRows").innerHTML = kvRows(rows);
 
-                if (!brightLoaded && st.led_brightness !== undefined) {
-                    /* once, to avoid fighting the user's hand */
-                    brightLoaded = true;
-                    $("briRange").value = st.led_brightness;
-                    $("briVal").textContent = st.led_brightness;
-                }
-                if (!altLoaded && st.altitude !== undefined) {
-                    altLoaded = true;
-                    $("altInput").value = st.altitude;
-                }
+                /* Settings follow the device on every poll rather than being
+                   seeded once: the panel's two also answer to the knob, and a
+                   page that never looks again would show them wrong. A control
+                   the user is on has the focus, and that is the one case the
+                   sync skips, so nothing is rewritten under a moving hand. */
+                syncSetting("briRange", st.led_brightness, "briVal");
+                syncSetting("volRange", st.buzzer_volume, "volVal");
+                syncSetting("dispBriRange", st.display_brightness, "dispBriVal");
+                syncSetting("dispOn", st.display_on);
+                syncSetting("radarBtOff", st.radar_bt_off);
+                syncSetting("altInput", st.altitude);
+            }
+
+            /* One setting into its control: a checkbox takes `checked`,
+               everything else `value`, and `valId` is the number shown beside a
+               slider. */
+            function syncSetting(id, value, valId) {
+                if (value === undefined) return;
+                const el = $(id);
+                if (el === document.activeElement) return;
+                if (el.type === "checkbox") el.checked = !!value;
+                else el.value = value;
+                if (valId) $(valId).textContent = value;
             }
 
             /* Watchdog: flip to offline as soon as polls stop succeeding, even
@@ -3679,17 +3761,42 @@
             }
 
             /* ---------- settings ---------- */
-            $("briRange").addEventListener(
-                "input",
-                (e) => ($("briVal").textContent = e.target.value),
-            );
-            $("briRange").addEventListener("change", async (e) => {
+            async function saveSetting(key, value, msg) {
                 await fetch("/api/settings", {
                     method: "POST",
-                    body: JSON.stringify({ led_brightness: +e.target.value }),
+                    body: JSON.stringify({ [key]: value }),
                 });
-                toast(t("brightSaved"));
-            });
+                toast(t(msg));
+            }
+
+            /* Sliders report while dragging and save once let go: on `input`
+               every pixel would be an NVS write on the station. */
+            function wireSlider(id, valId, key, msg) {
+                $(id).addEventListener(
+                    "input",
+                    (e) => ($(valId).textContent = e.target.value),
+                );
+                $(id).addEventListener("change", (e) =>
+                    saveSetting(key, +e.target.value, msg),
+                );
+            }
+
+            function wireCheckbox(id, key, msg) {
+                $(id).addEventListener("change", (e) =>
+                    saveSetting(key, e.target.checked, msg),
+                );
+            }
+
+            wireSlider("briRange", "briVal", "led_brightness", "brightSaved");
+            wireSlider("volRange", "volVal", "buzzer_volume", "settingSaved");
+            wireSlider(
+                "dispBriRange",
+                "dispBriVal",
+                "display_brightness",
+                "settingSaved",
+            );
+            wireCheckbox("dispOn", "display_on", "settingSaved");
+            wireCheckbox("radarBtOff", "radar_bt_off", "settingSaved");
 
             /* Site altitude: the one input to the sea-level reduction. Saved on
                change (blur or Enter), so the field is not written back while it

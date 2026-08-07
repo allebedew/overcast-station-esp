@@ -27,7 +27,10 @@ history.
   a card per I2C device with a liveness dot; an outside-weather card with a location chip row (a typed
   city name is geocoded in-browser, so adding one needs internet on the
   client); system, settings and Wi-Fi cards behind the header gear. Settings:
-  LED brightness, site altitude, SCD40 FRC, history reset.
+  LED brightness, buzzer volume, display on and its brightness, radar
+  Bluetooth, site altitude, SCD40 FRC, history reset. Every setting
+  follows the device on each poll except while the control has the focus, so
+  what the knob changes shows up here without overwriting a moving hand.
   Every reading is a fixed slot generated from the tables at the top of the
   script (`SERIES`, `WEATHER_TILES`, `SENSOR_DEVS`) and renders as `--` when
   absent — adding a metric is a table entry, not markup. `badge` replaces a card's
@@ -118,12 +121,17 @@ history.
     history, and none of it is a setting yet.
 - **mmWave radar (HLK-LD2450)** — UART1 at 256000 8N1, module TX on GPIO10,
   module RX on GPIO11, 5 V. The tracking stream is unprompted, so the only
-  thing ever sent is one configuration sequence: **Bluetooth off**, which the
-  module ships with on and which serves the same target stream to anyone in
-  range with the vendor's app. Sent once — the module keeps the setting in its
-  own flash and cannot be asked whether Bluetooth is on, so a flag in NVS
-  (`settings/radar_bt_off`) is what spares every later boot the write and the
-  module restart it ends with. Clear it by hand after replacing the module. A
+  thing ever sent is one configuration sequence: **Bluetooth on or off**, which
+  the module ships with on and which serves the same target stream to anyone in
+  range with the vendor's app. `settings/radar_bt_off` (default off) is the
+  state the module is meant to hold, and the reader task carries a change into
+  it — on its own task, because the UART is the one it is draining. Nothing is
+  written at boot: the module keeps Bluetooth in its own flash and cannot be
+  asked about it, so the setting is the only account of it there is, and
+  writing it back every boot would cost a module restart each time. A module
+  swapped under a station that already has the setting is the case this gets
+  wrong; flipping the setting twice sorts it out. One attempt per change — a
+  module that does not answer is logged, and flipping again is the retry. A
   module that does not answer is left alone, logged, and retried next boot.
   A 30-byte frame every ~100 ms
   carries up to three **moving** targets as x/y/speed; coordinates are
@@ -165,8 +173,8 @@ history.
   without changing the screen. Render times are logged every 5 s, and only while
   frames are actually being flushed.
   **Brightness** is the master current (`0xC7`), 16 steps; it is one of the
-  knob's fields, comes up at `gfx_target.h`'s default and is not persisted,
-  shown as 0–15 in the bottom-right corner. The steps are not evenly spaced —
+  knob's fields, kept in `settings/disp_bright` (default 12) and shown as 0–15
+  in the bottom-right corner. The steps are not evenly spaced —
   0 → 1 doubles the current, 14 → 15 adds 7 %. Everything else that scales the
   same current is fixed in the init sequence: contrast (`0xC1`) at 255, which
   makes it the ceiling the current scales down from, and the pre-charge — phase 2
@@ -185,7 +193,15 @@ history.
   quantity, which window, brightness), **turning forward** cycles the picked
   field's value, all wrapping, so no turn is ever refused. A **click** switches the panel off
   (`0xAE`, and nothing is rendered or clocked out while it is dark) and another
-  brings it back (on at boot, not persisted). The selection is marked by a `GFX_HL` plate: on the
+  brings it back; the state is kept in `settings/disp_on`, so a panel switched
+  off stays dark across a reboot. Both it and the brightness are also readable
+  and settable over the HTTP API, which goes through the settings module and
+  never calls into the render task; that task compares the two settings with
+  what it last saw at the top of every frame and adopts whatever moved, so
+  panel commands stay on one task. A click is stored as it happens, a
+  brightness turn once it has settled for 2 s — one NVS write per detent is
+  what the delay avoids.
+  The selection is marked by a `GFX_HL` plate: on the
   quantity field it sits under the indoor reading being plotted and moves with
   it, on the window field under the badge below the chart, on brightness under
   the number in the bottom-right corner. The buzzer tells a
@@ -401,18 +417,18 @@ card belongs in that device's module, not in the caller — dew point in
 | `storage.c` | mounts the LittleFS `storage` partition at `/data` |
 | `telegram.c` | message queue + sender task; `telegram_notify(fmt, ...)` |
 | `weather_api.c` | Open-Meteo client; own task fetches the active location on the quarter-hour, `weather_api_refresh()` forces a reload |
-| `weather_store.c` | saved locations + their UTC offset + active index in NVS (`weather_loc`), mutex-protected |
+| `weather_store.c` | saved locations + their UTC offset + active index in NVS (`weather_loc`), mutex-protected; a change that makes the shown reading stale calls the `weather_store_on_change()` hook, which `weather_api.c` registers, so an edit refetches without its caller asking for it |
 | `sun.c` | sunrise/sunset/elevation for the active location; `sun_next_event()` is the countdown the display shows |
 | `zambretti.c` | 3 h barometric tendency fitted over the 1 d ring, and the Zambretti wording it selects with the sea-level pressure |
 | `alerts.c` | notification rules and thresholds; own task ticks every 1 s, air every 10 s |
-| `settings.c` | thin u8/u32/i32 get/set over the NVS namespace `settings` |
+| `settings.c` | every persistent scalar setting in one descriptor table (NVS key, API key, label, default, range) over the NVS namespace `settings`; values cached in RAM at `settings_init()`, `settings_set()` clamps to the range, writes only on a change and then calls the owning module's `settings_on_change()` hook, so a caller stores a setting without knowing who holds it. Hooks run on the caller's task and touch RAM only — the panel polls its two settings instead |
 
 ## HTTP API
 
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (gzipped) |
-| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `phase` `day`/`golden`/`civil`/`nautical`/`astro`/`night`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `radar` (`presence`, `near` — metres to the closest target — and `targets`, `x` / `y` in mm, up to three, plotted by the page; `null` while the LD2450 is silent), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system`, `settings` (`led_brightness`, `altitude`) |
+| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `phase` `day`/`golden`/`civil`/`nautical`/`astro`/`night`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `radar` (`presence`, `near` — metres to the closest target — and `targets`, `x` / `y` in mm, up to three, plotted by the page; `null` while the LD2450 is silent), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system`, `settings` (generated from the settings table: `led_brightness`, `buzzer_volume`, `display_on`, `display_brightness`, `radar_bt_off`, `altitude`) |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`); `{period, co2, temp, rh, press, lux, targets, near}`, each series gated on its own quantity so `null` is a gap in that series alone. `press` comes out reduced to sea level; `targets` is the slot's largest target count, `near` metres in quarter-metre steps and `null` for a slot with nobody in the fan |
 | `/api/history/reset` | POST | wipe all tiers, RAM rings and flash snapshots |
 | `/api/scan` | GET | Wi-Fi scan, `[{ssid, bssid, ch, rssi, auth}]`, one entry per BSSID |
@@ -420,7 +436,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `/api/locations` | GET / POST / DELETE | saved locations; POST `{"name", "lat", "lon"}`, DELETE `{"index"}` |
 | `/api/locations/active` | PUT | switch location; `{"index"}` (triggers an immediate refetch) |
 | `/api/connect` | POST | leave AP mode / restart the STA connection cycle |
-| `/api/settings` | POST | any subset of `{"led_brightness": 1–255, "altitude": −500…9000}` |
+| `/api/settings` | POST | any subset of the keys `/api/status` reports under `settings`, driven by the same table: `led_brightness` 1–255, `buzzer_volume` 1–50, `display_on` bool, `display_brightness` 0–15, `radar_bt_off` bool, `altitude` −500…9000. Out of range is clamped; an unknown key or a wrong type is a 400 naming it |
 | `/api/scd40/calibrate` | POST | forced recalibration; `{"ppm": 400–2000}`, returns the applied correction |
 | `/api/ota` | POST | firmware update; raw binary body, `X-OTA-Key` header; reboots on success |
 

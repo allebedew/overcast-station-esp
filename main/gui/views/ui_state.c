@@ -5,10 +5,10 @@
 #include "chart.h"
 #include "gfx_target.h"
 
-void ui_state_init(ui_state_t *s)
+void ui_state_init(ui_state_t *s, uint8_t bright, bool on)
 {
-    s->bright      = GFX_BRIGHTNESS_DEFAULT;
-    s->on          = true;
+    s->bright      = bright;
+    s->on          = on;
     s->focus       = UI_FOCUS_CHART_Q;
     s->chart_q     = HISTORY_Q_TEMP;
     s->chart_range = CHART_RANGE_1M;

@@ -24,6 +24,14 @@ typedef struct {
  * the user adds a location. */
 void weather_store_init(void);
 
+/* Called after a change that makes the shown reading stale — the active
+ * location is now a different place. Runs on the task that made the change.
+ * A callback rather than a direct call so whoever edits the list (the web API,
+ * and one day the knob) does not have to know that weather is refetched. */
+typedef void (*weather_store_change_fn)(void);
+
+void weather_store_on_change(weather_store_change_fn fn);
+
 /* Adds a location, or updates one with the same name. ESP_ERR_NO_MEM when the
  * list is full, ESP_ERR_INVALID_ARG on a bad name or coordinates. */
 esp_err_t weather_store_add(const char *name, float lat, float lon);

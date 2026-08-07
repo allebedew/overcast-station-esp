@@ -39,13 +39,6 @@ static const uint8_t CMD_TAIL[4] = { 0x04, 0x03, 0x02, 0x01 };
 #define CMD_BLUETOOTH 0x00A4
 #define CMD_ACK_MS    500
 
-/* Set once the module has confirmed Bluetooth off. The module keeps the
- * setting in its own flash, so the work is done for good; the flag is what
- * spares every later boot the write and the restart that follows it. Replacing
- * the module means clearing it by hand — there is no way to ask an LD2450
- * whether its Bluetooth is on. */
-#define NVS_BT_KEY "radar_bt_off"
-
 #define OFFLINE_MS       2000
 #define PRESENCE_HOLD_MS 5000 /* see ld2450_data_t.presence */
 
@@ -151,23 +144,20 @@ static esp_err_t send_cmd(uint16_t word, const uint8_t *val, size_t vlen)
 }
 
 /* Bluetooth is on out of the factory, and anyone in range can pull the same
- * target stream with the vendor's app. Switched off once, on the first boot
- * that reaches the module; the setting takes effect on the restart that
- * follows. */
-static void disable_bluetooth(void)
+ * target stream with the vendor's app. SETTING_RADAR_BT_OFF is the state the
+ * module is meant to be in; this is what puts it there, and the change takes
+ * effect on the restart the sequence ends with. Only the reader task may call
+ * it — it talks on the UART that task is draining. */
+static void apply_bluetooth(bool off)
 {
-    static const uint8_t on[2] = { 0x01, 0x00 };
-    static const uint8_t off[2] = { 0x00, 0x00 };
+    static const uint8_t enable[2] = { 0x01, 0x00 };
+    const uint8_t value[2] = { off ? 0x00 : 0x01, 0x00 };
 
-    if (settings_get_u8(NVS_BT_KEY, 0)) {
-        return;
-    }
-
-    if (send_cmd(CMD_ENABLE, on, sizeof(on)) != ESP_OK) {
+    if (send_cmd(CMD_ENABLE, enable, sizeof(enable)) != ESP_OK) {
         ESP_LOGW(TAG, "no reply to the config command — Bluetooth left as it is");
         return;
     }
-    esp_err_t err = send_cmd(CMD_BLUETOOTH, off, sizeof(off));
+    esp_err_t err = send_cmd(CMD_BLUETOOTH, value, sizeof(value));
     if (err == ESP_OK) {
         err = send_cmd(CMD_RESTART, NULL, 0);
     }
@@ -175,11 +165,11 @@ static void disable_bluetooth(void)
         /* Leaving it in configuration mode would leave it mute, and only a
          * power cycle would bring the stream back. */
         send_cmd(CMD_END, NULL, 0);
-        ESP_LOGW(TAG, "could not switch Bluetooth off: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "could not switch Bluetooth %s: %s", off ? "off" : "on",
+                 esp_err_to_name(err));
         return;
     }
-    settings_set_u8(NVS_BT_KEY, 1);
-    ESP_LOGI(TAG, "Bluetooth off, module restarting");
+    ESP_LOGI(TAG, "Bluetooth %s, module restarting", off ? "off" : "on");
 }
 
 static void ld2450_task(void *arg)
@@ -188,10 +178,14 @@ static void ld2450_task(void *arg)
     size_t len = 0;
     bool online = false, silent_logged = false;
 
-    /* Before the reader loop: the module is mute while it is configured, and
-     * the restart it ends with must not be read as a dead stream. */
-    disable_bluetooth();
-    const int64_t start_us = esp_timer_get_time();
+    /* What the module is taken to be holding already. Nothing is written at
+     * startup: the module keeps Bluetooth in its own flash and cannot be asked
+     * about it, so the stored setting is the only account of it there is, and
+     * writing it back every boot would cost a module restart each time. A
+     * module replaced under a station that already has the setting is the one
+     * case this gets wrong — flip the setting twice to sort it out. */
+    bool bt_off = settings_get(SETTING_RADAR_BT_OFF) != 0;
+    int64_t start_us = esp_timer_get_time();
 
     for (;;) {
         int n = uart_read_bytes(UART_PORT, buf + len, sizeof(buf) - len,
@@ -216,6 +210,23 @@ static void ld2450_task(void *arg)
 
             len -= i; /* what is left may be the head of the next frame */
             memmove(buf, buf + i, len);
+        }
+
+        /* The setting changed somewhere else — carry it into the module here,
+         * where the UART belongs to this task. One attempt per change: a module
+         * that does not answer is logged, and flipping the setting again is the
+         * retry, which beats hammering a silent module every 200 ms. The
+         * restart that follows leaves it mute for a moment, so the silence
+         * clock starts over just as it does at startup. */
+        bool want_bt_off = settings_get(SETTING_RADAR_BT_OFF) != 0;
+        if (want_bt_off != bt_off) {
+            bt_off = want_bt_off;
+            apply_bluetooth(bt_off);
+            taskENTER_CRITICAL(&s_lock);
+            s_frame_us = 0;
+            taskEXIT_CRITICAL(&s_lock);
+            start_us = esp_timer_get_time();
+            len = 0;
         }
 
         /* s_frame_us is written by this task alone, so it is read here without

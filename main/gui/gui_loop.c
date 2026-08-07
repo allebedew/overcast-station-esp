@@ -12,6 +12,7 @@
 #include "encoder.h"
 #include "gfx_canvas.h"
 #include "gfx_target.h"
+#include "settings.h"
 #include "ssd1322.h"
 #include "ui.h"
 #include "ui_state.h"
@@ -49,6 +50,46 @@ static bool s_panel_on = true;
 static ui_state_t s_state;
 static ui_model_t s_model;
 
+/* What the two panel settings held when the gui task last looked. A value that
+ * has since moved was written from outside and has to be adopted; comparing
+ * against the settings rather than against s_state is what keeps a knob change
+ * from being reverted over the seconds before it is persisted. */
+static uint8_t s_persisted_bright;
+static bool    s_persisted_on;
+
+/* One NVS write per detent is what the delay behind this exists to avoid; the
+ * gui task calls it once a turn has settled. */
+static void persist_brightness(void)
+{
+    settings_set(SETTING_DISPLAY_BRIGHT, s_state.bright);
+    s_persisted_bright = s_state.bright;
+}
+
+/* A click is a single event rather than a sweep, so it is stored as it happens
+ * — which also keeps what the API reports exact. */
+static void persist_on(void)
+{
+    settings_set(SETTING_DISPLAY_ON, s_state.on);
+    s_persisted_on = s_state.on;
+}
+
+/* A setting written from elsewhere (the web API talks to the settings module,
+ * not to this one), applied where the panel has its single owner. */
+static void adopt_display_settings(void)
+{
+    uint8_t bright = (uint8_t)settings_get(SETTING_DISPLAY_BRIGHT);
+    if (bright != s_persisted_bright) {
+        s_persisted_bright = bright;
+        s_state.bright = bright;
+        gfx_set_brightness(bright);
+    }
+    bool on = settings_get(SETTING_DISPLAY_ON) != 0;
+    if (on != s_persisted_on) {
+        s_persisted_on = on;
+        s_state.on = on;
+    }
+}
+
 /* Whatever the knob is currently on, on one line: the panel marks the selection
  * nowhere yet. Written at boot and after a change. */
 static void log_setting(void)
@@ -79,6 +120,8 @@ static void gui_task(void *arg)
     bool changed = false;
 
     for (;;) {
+        adopt_display_settings();
+
         encoder_input_t in;
         encoder_take(&in);
 
@@ -87,6 +130,10 @@ static void gui_task(void *arg)
             buzzer_play(EV_TUNE[ev]);
         }
         changed |= ev != UI_EV_NONE;
+
+        if (s_state.on != s_persisted_on) {
+            persist_on();
+        }
 
         /* A dark panel is drawn for and clocked to not at all: display-off
          * leaves its RAM alone, so s_shown keeps describing it. */
@@ -127,6 +174,7 @@ static void gui_task(void *arg)
         if (now >= setting_at) {
             if (changed) {
                 changed = false;
+                persist_brightness();
                 log_setting();
             }
             setting_at = now + SETTING_MS * 1000;
@@ -160,7 +208,9 @@ void gui_loop_init(void)
      * comes up undefined and the first rendered frame may well match s_shown. */
     gfx_present(&s_canvas);
 
-    ui_state_init(&s_state);
+    s_persisted_bright = (uint8_t)settings_get(SETTING_DISPLAY_BRIGHT);
+    s_persisted_on = settings_get(SETTING_DISPLAY_ON) != 0;
+    ui_state_init(&s_state, s_persisted_bright, s_persisted_on);
     log_setting();
 
     xTaskCreate(gui_task, "gui", 4096, NULL, 2, NULL);
