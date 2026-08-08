@@ -7,6 +7,7 @@
 #include "chart.h"   /* the window the series is sampled over */
 #include "climate.h"
 #include "history.h"
+#include "sun.h"
 #include "weather_api.h"
 #include "zambretti.h"
 
@@ -50,6 +51,21 @@ typedef struct {
     ui_link_t link;
     int       rssi;   /* dBm; meaningless unless UI_LINK_UP */
     bool      ap;     /* own SoftAP is up; the station side has nothing to show */
+
+    /* The sun for the active location, from sun.c rather than the forecast:
+     * today's crossings, where it stands right now, and how long until it next
+     * crosses. Each part carries its own flag — all three are false without a
+     * synced clock or an active location, and `next_ok` is also false through a
+     * polar day or night, where the next crossing is weeks out. */
+    struct {
+        sun_info_t day;
+        bool       day_ok;
+        double     elev_deg;
+        bool       elev_ok;
+        int32_t    next_s;
+        bool       next_is_rise;
+        bool       next_ok;
+    } sun;
 
     /* Monotonic since boot, for whatever moves on its own. Kept in the model so
      * a frame animates off one stamp rather than each widget reading a clock. */

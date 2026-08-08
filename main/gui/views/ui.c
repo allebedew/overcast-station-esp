@@ -13,7 +13,6 @@ const gfx_text_style_t UI_BOLD   = { u8g2_font_resoledbold_tr, GFX_FULL, GFX_LEF
 const gfx_text_style_t UI_TINY   = { u8g2_font_3x5im_tr,       GFX_FULL, GFX_LEFT  };
 const gfx_text_style_t UI_TINY_C = { u8g2_font_3x5im_tr,       GFX_FULL, GFX_CENTER };
 const gfx_text_style_t UI_TINY_R = { u8g2_font_3x5im_tr,       GFX_FULL, GFX_RIGHT };
-const gfx_text_style_t UI_MICRO_R = { u8g2_font_micro_tr,      GFX_FULL, GFX_RIGHT };
 
 int ui_row(ui_cursor_t *cur, const gfx_text_style_t *st)
 {

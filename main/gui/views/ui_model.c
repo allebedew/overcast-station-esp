@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "esp_timer.h"
+#include "sun.h"
 #include "timesync.h"
 #include "weather_store.h"
 #include "wifi.h"
@@ -30,6 +31,10 @@ void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
     const chart_range_def_t *range = &CHART_RANGES[chart_range];
     out->chart_n = history_series(range->tier, chart_q, range->stride,
                                   out->chart, CHART_SERIES_MAX);
+
+    out->sun.day_ok  = sun_get(0, &out->sun.day);
+    out->sun.elev_ok = sun_elevation_deg(&out->sun.elev_deg);
+    out->sun.next_ok = sun_next_event(&out->sun.next_s, &out->sun.next_is_rise);
 
     wifi_info_t wifi;
     wifi_get_info(&wifi);

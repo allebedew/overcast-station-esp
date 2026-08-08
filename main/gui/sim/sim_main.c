@@ -577,6 +577,22 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data, bool fetching,
     m.out_cond = "Clear sky";   // the longest weather_api_code_short() returns
     m.out.age_s = 63 * 60;
 
+    // The sun for the day m.now falls in: sun.c is firmware-only (it reads the
+    // clock and the location store), so the scene fills in what it would have
+    // published. Rise and set are UTC, the way sun_info_t carries them.
+    time_t local_midnight = (m.now + m.utc_off_s) / 86400 * 86400 - m.utc_off_s;
+    m.sun.day_ok   = true;
+    m.sun.day      = (sun_info_t){ .state     = SUN_RISES,
+                                   .rise      = local_midnight + 6 * 3600 + 15 * 60,
+                                   .set       = local_midnight + 21 * 3600 + 18 * 60,
+                                   .day_len_s = 15 * 3600 + 36 * 60,
+                                   .up        = true };
+    m.sun.elev_ok      = true;
+    m.sun.elev_deg     = 26.0;
+    m.sun.next_ok      = true;
+    m.sun.next_s       = 4 * 3600 + 38 * 60;
+    m.sun.next_is_rise = false;
+
     // Five days from m.now's local midnight, the same convention weather_api.c
     // stores: a GMT stamp already shifted by the location's offset. The spread
     // is wider than a real week so the bar has something to map, and the last

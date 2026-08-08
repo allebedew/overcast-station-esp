@@ -1,4 +1,3 @@
-#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -130,6 +129,36 @@ static void dots(gfx_canvas_t *c, int right, int baseline, int w, uint32_t anim_
     for (unsigned i = 0; i < DOTS; i++) {
         gfx_px(c, x0 + (int)i * DOT_DX, y, i == lit ? GFX_FULL : GFX_DIM);
     }
+}
+
+/* Ping-pong scroll for a run wider than the box it has to sit in: `over` px of
+ * overhang become an offset that walks a pixel every SCROLL_STEP_MS and rests
+ * SCROLL_HOLD_MS at either end, so the two halves of a long wording are each
+ * legible for a moment. A function of `anim_ms` alone, like the other moving
+ * parts — the screen keeps no state between frames. */
+#define SCROLL_STEP_MS 60
+#define SCROLL_HOLD_MS 15000
+
+static int scroll_off(uint32_t anim_ms, int over)
+{
+    if (over <= 0) {
+        return 0;
+    }
+    uint32_t hold  = SCROLL_HOLD_MS / SCROLL_STEP_MS;
+    uint32_t walk  = (uint32_t)over;
+    uint32_t cycle = 2 * (hold + walk);
+    uint32_t t     = anim_ms / SCROLL_STEP_MS % cycle;
+
+    if (t < hold) {                      // resting at the start
+        return 0;
+    }
+    if (t < hold + walk) {               // walking to the end
+        return (int)(t - hold);
+    }
+    if (t < 2 * hold + walk) {           // resting at the end
+        return over;
+    }
+    return over - (int)(t - (2 * hold + walk));   // walking back
 }
 
 /* Battery: a dim shell filled to `pct` at full brightness. Same anchor as
@@ -298,16 +327,7 @@ static void wx_icon(int code, const uint8_t **font, unsigned *cp, int *dy)
 static void wx_now(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
 {
     char cond[16];
-
-    if (m->out_ok) {
-        size_t i = 0;
-        for (; m->out_cond[i] && i < sizeof(cond) - 1; i++) {
-            cond[i] = (char)toupper((unsigned char)m->out_cond[i]);
-        }
-        cond[i] = '\0';
-    } else {
-        snprintf(cond, sizeof(cond), "--");
-    }
+    snprintf(cond, sizeof(cond), "%s", m->out_ok ? m->out_cond : "--");
     const int code = m->out_ok ? m->out.weather_code : -1;
 
     gfx_font_metrics_t fm, cm;
@@ -494,6 +514,170 @@ static void wx_forecast(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
     }
 }
 
+/* Daylight over the day: the bar's dim body is midnight to midnight and the lit
+ * checker is sunrise to sunset, with a pointer over the hour it is now, the two
+ * crossings beneath its ends, and between them the sun's elevation and the wait
+ * for the next crossing, each in turn. All of it from sun.c by way of the
+ * model — no forecast is involved. */
+#define SUN_BAR_H   3
+#define SUN_SWAP_MS 5000   /* how long each of the two centre readings holds */
+#define DAY_S       86400
+
+/* A UTC stamp to seconds since the location's local midnight. */
+static int sun_local_s(time_t t, int32_t utc_off_s)
+{
+    long v = (long)((t + utc_off_s) % DAY_S);
+    return (int)(v < 0 ? v + DAY_S : v);
+}
+
+/* A second of the day to its column on the bar. */
+static int sun_x(int s)
+{
+    return s * (GFX_W - 1) / DAY_S;
+}
+
+/* Sunrise and sunset as seconds since local midnight, or false when the day has
+ * no crossings — a polar day fills the bar, a polar night leaves it empty. */
+static bool sun_span(const ui_model_t *m, int *rise_s, int *set_s)
+{
+    if (!m->sun.day_ok || m->sun.day.state != SUN_RISES) {
+        return false;
+    }
+    *rise_s = sun_local_s(m->sun.day.rise, m->utc_off_s);
+    *set_s  = sun_local_s(m->sun.day.set,  m->utc_off_s);
+    return *rise_s < *set_s;   // a day running past midnight is not one span
+}
+
+/* One checkered stretch of the bar. gfx_checker anchors its first set square to
+ * the rect, so a stretch starting on an even column would come out a phase off
+ * the rest of the bar; swapping the roles of the two levels shifts it back
+ * without moving the rect, which is what keeps the daylight edge on its second.
+ */
+static void sun_fill(gfx_canvas_t *c, int x, int w, int y, gfx_level_t lv)
+{
+    bool flip = (x & 1) == 0;
+    gfx_checker(c, (gfx_rect_t){ (int16_t)x, (int16_t)y, (int16_t)w, SUN_BAR_H },
+                flip ? GFX_NONE : lv, flip ? lv : GFX_NONE, 1);
+}
+
+/* The scale itself, drawn from `y` down. The pointer hangs 2 px above the bar,
+ * so the caller owes it that much room. */
+static void sun_scale(gfx_canvas_t *c, int y, const ui_model_t *m)
+{
+    int rise_s = 0, set_s = 0;
+    bool span = sun_span(m, &rise_s, &set_s);
+    if (!span && m->sun.day_ok && m->sun.day.state == SUN_POLAR_DAY) {
+        rise_s = 0;
+        set_s  = DAY_S - 1;
+        span   = true;
+    }
+
+    sun_fill(c, 0, GFX_W, y, GFX_DIM);
+    if (span) {
+        int x0 = sun_x(rise_s);
+        int x1 = sun_x(set_s);
+        sun_fill(c, x0, x1 - x0 + 1, y, GFX_FULL);
+    }
+
+    // A solid tick every six hours, cleared either side, so the eye can count
+    // quarters off the bar. Each takes the level of the stretch it falls in, or
+    // it would read as daylight in the night and back.
+    for (int q = DAY_S / 4; q < DAY_S; q += DAY_S / 4) {
+        bool lit = span && q >= rise_s && q <= set_s;
+        int  qx  = sun_x(q);
+        gfx_vline(c, qx - 1, y, SUN_BAR_H, GFX_OFF, GFX_SOLID, 0);
+        gfx_vline(c, qx + 1, y, SUN_BAR_H, GFX_OFF, GFX_SOLID, 0);
+        gfx_vline(c, qx,     y, SUN_BAR_H, lit ? GFX_FULL : GFX_DIM, GFX_SOLID, 0);
+    }
+
+    // Where the sun is now: a pointer hanging over the bar, five columns for
+    // three, narrowing by a pixel a side per row down to the apex on the bar's
+    // top row. Each row is cleared two columns wider than it inks, or the fill
+    // it stands in swallows the steps and the shape stops reading as a pointer;
+    // below the apex one cleared row parts it from the rest of the bar.
+    struct tm tm;
+    if (!local_tm(m, &tm)) {
+        return;
+    }
+    int x = sun_x(tm.tm_hour * 3600 + tm.tm_min * 60 + tm.tm_sec);
+
+    for (int r = 0; r < 3; r++) {
+        int half = 2 - r;
+        gfx_hline(c, x - half - 2, y - 2 + r, 2 * half + 5, GFX_OFF, GFX_SOLID, 0);
+        gfx_hline(c, x - half,     y - 2 + r, 2 * half + 1, GFX_FULL, GFX_SOLID, 0);
+    }
+    gfx_hline(c, x - 1, y + 1, 3, GFX_OFF, GFX_SOLID, 0);
+}
+
+/* H:MM in the tiny face, whose own colon costs a whole character cell and reads
+ * heavy beside digits this small. The halves are drawn either side of a colon of
+ * two single pixels instead. `pad` zero-fills the hour, for a clock time rather
+ * than a span; a negative `s` is dashed out. Honours the style's alignment. */
+#define HHMM_COLON_W 3
+
+static void tiny_hhmm(gfx_canvas_t *c, int x, int baseline,
+                      const gfx_text_style_t *st, int s, bool pad)
+{
+    char h[3], m[3];
+    if (s < 0) {
+        snprintf(h, sizeof(h), "--");
+        snprintf(m, sizeof(m), "--");
+    } else {
+        snprintf(h, sizeof(h), pad ? "%02d" : "%d", s / 3600 % 24);
+        snprintf(m, sizeof(m), "%02d", s / 60 % 60);
+    }
+
+    gfx_text_style_t ls = *st;
+    ls.align = GFX_LEFT;
+
+    int w = gfx_text_w(&ls, h) + HHMM_COLON_W + gfx_text_w(&ls, m);
+    if (st->align == GFX_RIGHT) {
+        x -= w;
+    } else if (st->align == GFX_CENTER) {
+        x -= w / 2;
+    }
+
+    int hw = gfx_text(c, x, baseline, &ls, h);
+    gfx_px(c, x + hw + 1, baseline - 2, st->level);
+    gfx_px(c, x + hw + 1, baseline - 4, st->level);
+    gfx_text(c, x + hw + HHMM_COLON_W, baseline, &ls, m);
+}
+
+static void sun_bar(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
+{
+    // The scale takes the first row; its pointer hangs 2 px above the bar and
+    // borrows them from the gap the rule above left.
+    sun_scale(c, cur->y + 1, m);
+    ui_gap(cur, 1 + SUN_BAR_H + 3);
+
+    int rise_s = -1, set_s = -1;
+    sun_span(m, &rise_s, &set_s);
+
+    gfx_text_style_t ts = UI_TINY;
+
+    int baseline = ui_row(cur, &UI_TINY);
+    tiny_hhmm(c, 0, baseline, &ts, rise_s, true);
+    ts.align = GFX_RIGHT;
+    tiny_hhmm(c, UI_RX, baseline, &ts, set_s, true);
+
+    // Between the two times, under the stretch of bar it spans: the wait for the
+    // next crossing, and every other SUN_SWAP_MS the sun's elevation. One slot
+    // for both because the row has no width for two. The elevation is placed by
+    // hand — the degree sign is a pixel run of its own, outside the text.
+    ts.align = GFX_CENTER;
+    if (m->anim_ms / SUN_SWAP_MS % 2) {
+        char b[8];
+        snprintf(b, sizeof(b), m->sun.elev_ok ? "%+d" : "--",
+                 (int)lround(m->sun.elev_deg));
+        int x  = (UI_RX - (gfx_text_w(&UI_TINY, b) + 1 + DEG_W)) / 2;
+        int tw = gfx_text(c, x, baseline, &UI_TINY, b);
+        degree(c, x + tw + 1, baseline, &UI_TINY);
+    } else {
+        tiny_hhmm(c, UI_RX / 2, baseline, &ts,
+                  m->sun.next_ok && m->sun.next_s > 0 ? m->sun.next_s : -1, false);
+    }
+}
+
 // Built up element by element: what is drawn here reads the model, the blocks
 // still commented out are roughed-in layout waiting for theirs.
 void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
@@ -501,7 +685,7 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     // Background fill
 
     gfx_clear(c, GFX_OFF);
-    // gfx_checker(c, (gfx_rect_t){ 0, 0, GFX_W, GFX_H }, (gfx_level_t)1, GFX_NONE, 1);
+    gfx_checker(c, (gfx_rect_t){ 0, 0, GFX_W, GFX_H }, (gfx_level_t)1, GFX_NONE, 1);
 
     ui_cursor_t cur = { 0 };
 
@@ -617,9 +801,9 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     rule(c, &cur);
 
     // Brightness, pinned to the bottom corner: it is a knob field and needs a
-    // readout to be edited by. micro_tr has no descender, so the baseline is
-    // its last row, and it clears the burn-in shift's reserve above the edge.
-    gfx_textf_bg(c, UI_RX, GFX_H - 1 - GFX_SHIFT_MAX, &UI_MICRO_R,
+    // readout to be edited by. 3x5im has no descender, so the baseline is its
+    // last row, and it clears the burn-in shift's reserve above the edge.
+    gfx_textf_bg(c, UI_RX, GFX_H - 1 - GFX_SHIFT_MAX, &UI_TINY_R,
                  s->focus == UI_FOCUS_BRIGHT ? GFX_HL : GFX_NONE, "%u",
                  s->set.bright);
 
@@ -629,31 +813,42 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
                s->set.chart_range, s->focus == UI_FOCUS_CHART_RANGE);
     rule(c, &cur);
 
-    // Zambretti: the 3 h tendency, then the wording it selects. The number is
-    // measured first and the wording clipped to whatever is left of the row —
-    // even the shortened forms run past 64 px in the widest cases.
+    // Zambretti: the 3 h tendency, then the wording it selects. The tendency is
+    // a figure beside the words rather than a reading of its own, so it goes in
+    // the tiny face; the wording keeps the text face and, since even the
+    // shortened forms run past the row in the widest cases, scrolls back and
+    // forth inside whatever the number left of it.
 
     baseline = ui_row(&cur, &UI_TEXT);
-    char zb[8];
-    snprintf(zb, sizeof(zb), m->zb.ok ? "%+.1f" : "--", m->zb.delta_3h_hpa);
-    int zw = gfx_text(c, 0, baseline, &UI_TEXT, zb) + 3;
+    if (!m->zb.ok) {
+        // Nothing to word yet, so a single dash where the tendency goes rather
+        // than a second one saying the same about the wording.
+        gfx_text(c, 0, baseline, &UI_TINY, "--");
+    } else {
+        char zb[8];
+        snprintf(zb, sizeof(zb), "%+.1f", m->zb.delta_3h_hpa);
+        int zw = gfx_text(c, 0, baseline, &UI_TINY, zb) + 3;
 
-    gfx_text_style_t z_st = UI_TEXT;
-    z_st.level = GFX_DIM;
-    // gfx_push(c, (gfx_rect_t){ (int16_t)zw, 0, (int16_t)(UI_RX - zw), GFX_H });
-    gfx_text(c, zw, baseline, &z_st,
-             m->zb.ok ? zambretti_code_short(m->zb.code) : "--");
-    // gfx_pop(c);
+        gfx_text_style_t z_st = UI_TEXT;
+        z_st.level = GFX_DIM2;
+        const char *zt = zambretti_code_short(m->zb.code);
+        int off = scroll_off(m->anim_ms, gfx_text_w(&z_st, zt) - (UI_RX - zw));
+
+        // Inside the viewport x counts from its own left edge, so the run starts
+        // at the offset itself rather than at zw.
+        gfx_push(c, (gfx_rect_t){ (int16_t)zw, 0, (int16_t)(UI_RX - zw), GFX_H });
+        gfx_text(c, -off, baseline, &z_st, zt);
+        gfx_pop(c);
+    }
     rule(c, &cur);
 
-
-/*
     // Sun Position
 
-    baseline = ui_row(&cur, &UI_TEXT);
-    gfx_text(c, 0,     baseline, &UI_TEXT,   "--SUN--");
+    sun_bar(c, &cur, m);
     rule(c, &cur);
 
+
+    /*
     // A random animal pinned to the bottom edge. unifont_t_animals carries one
     // unbroken run of glyphs from 0x20, and its ink sits one row below the
     // baseline, which is what puts the last row on GFX_H - 1. Drawn once and

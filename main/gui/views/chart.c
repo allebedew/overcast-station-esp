@@ -222,7 +222,7 @@ void chart_draw(gfx_canvas_t *c, ui_cursor_t *cur, const float *v, int n,
     int  baseline = ui_row(cur, &UI_TINY);
     if (isfinite(lo)) {
         chart_label(b, sizeof(b), q, lo, false);
-        gfx_text(c, CHART_X, baseline, &UI_TINY, b);
+        gfx_text(c, 0, baseline, &UI_TINY, b);
     }
 
     gfx_text_bg(c, UI_RX/2, baseline, &UI_TINY_C, range_hl ? GFX_HL : GFX_NONE,
@@ -230,6 +230,6 @@ void chart_draw(gfx_canvas_t *c, ui_cursor_t *cur, const float *v, int n,
 
     if (isfinite(hi)) {
         chart_label(b, sizeof(b), q, hi, true);
-        gfx_text(c, UI_RX - CHART_X, baseline, &UI_TINY_R, b);
+        gfx_text(c, UI_RX, baseline, &UI_TINY_R, b);
     }
 }

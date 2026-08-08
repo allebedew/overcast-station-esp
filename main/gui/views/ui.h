@@ -22,9 +22,6 @@ extern const gfx_text_style_t UI_TINY;
 extern const gfx_text_style_t UI_TINY_C;
 extern const gfx_text_style_t UI_TINY_R;
 
-/* The smallest linked font, for a marker rather than a reading. */
-extern const gfx_text_style_t UI_MICRO_R;
-
 /* x for a right-aligned run: the advance width the alignment subtracts includes
  * the blank column the font leaves after the last glyph, so the anchor is the
  * width itself, not the last column. */
