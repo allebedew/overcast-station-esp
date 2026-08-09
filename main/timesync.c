@@ -10,6 +10,12 @@
 
 static const char *TAG = "timesync";
 
+/* The RTC timer keeps running across a software reset (OTA, panic, watchdog,
+ * reset button) and only a power cycle takes it back to 1970. SNTP is the sole
+ * writer of the clock, so a reading past this date can only have come from a
+ * sync in an earlier session and is trusted as one. */
+#define CLOCK_SANE_EPOCH 1767225600 /* 2026-01-01 UTC */
+
 /* Set from the SNTP callback, read elsewhere; a bool access is atomic here. */
 static volatile bool s_synced;
 
@@ -40,6 +46,16 @@ static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
 
 void timesync_init(void)
 {
+    time_t now = time(NULL);
+    if (now > CLOCK_SANE_EPOCH) {
+        s_synced = true;
+        struct tm utc;
+        char time_str[32];
+        gmtime_r(&now, &utc);
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &utc);
+        ESP_LOGI(TAG, "Clock survived the reset: %s UTC", time_str);
+    }
+
     /* clock runs in UTC; started from the IP event, not here */
     esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     cfg.start = false;

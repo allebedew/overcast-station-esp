@@ -40,6 +40,7 @@ void app_main(void)
     encoder_init();
 
     ESP_ERROR_CHECK(wifi_connect());
+    timesync_init(); /* right after: it hooks the got-IP event wifi is racing to */
     storage_init();
     climate_init(); /* before history: it samples climate every second */
     history_init();
@@ -57,7 +58,6 @@ void app_main(void)
     sensors_init();
     ld2450_init(); /* own UART, unrelated to the I2C bus above */
 
-    timesync_init();
     telegram_init();
     alerts_init();
     weather_api_init();

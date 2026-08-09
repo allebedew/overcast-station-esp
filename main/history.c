@@ -87,11 +87,16 @@ typedef struct {
     int64_t last_ts; /* unix time of the newest point; 0 = clock unsynced */
 } snap_hdr_t;
 
-/* Shared by save/restore: restore runs once at the first minute tick, the
- * earliest save minutes later. */
+/* Shared by save/restore: restore runs once early in the session, the earliest
+ * save minutes later. */
 static history_point_t s_snap_points[24 * 60]; /* sized for the largest tier */
 static TaskHandle_t s_save_task;
 static bool s_restored;
+
+/* Restoring needs the clock to place the downtime gap, so it waits for one.
+ * Past this the wait is written off and the stored points are joined on with a
+ * single hole, of the right shape and the wrong width. */
+#define RESTORE_DEADLINE_S (5 * 60)
 
 /* Callers hold s_lock. */
 static void ring_push(tier_t *t, const history_point_t *p)
@@ -135,9 +140,12 @@ static void save_snapshot(tier_t *t)
     ESP_LOGI(TAG, "%s: saved %u points", t->file, hdr.count);
 }
 
-/* Snapshot points, then a downtime gap (computable only when both clocks are
- * SNTP-anchored), then the points collected since boot. */
-static void restore_snapshot(tier_t *t)
+/* Snapshot points, then the downtime gap, then the points collected since boot.
+ * The gap needs both ends of the outage on an SNTP-anchored clock; without one
+ * `dated` is false and a lone hole stands in for it.
+ * The session's own points are merged in place: restore waits for the clock and
+ * so may run minutes in, by when they are too many to hold in a local. */
+static void restore_snapshot(tier_t *t, bool dated)
 {
     FILE *f = fopen(t->file, "rb");
     if (!f) {
@@ -155,42 +163,40 @@ static void restore_snapshot(tier_t *t)
         return;
     }
 
-    /* restore runs at the first minute tick, so the ring holds at most
-     * 60 / interval points collected since boot */
-    history_point_t fresh[60 / 5];
-    int fresh_n;
-
     taskENTER_CRITICAL(&s_lock);
-    fresh_n = t->count < (int)(sizeof(fresh) / sizeof(fresh[0]))
-                  ? t->count
-                  : (int)(sizeof(fresh) / sizeof(fresh[0]));
-    for (int i = 0; i < fresh_n; i++) {
-        fresh[i] = t->ring[(t->head - fresh_n + i + t->len) % t->len];
+    /* Nothing has rewound head since boot, so the session's points sit at the
+     * front of the ring and can be pushed along to make room. */
+    int fresh_n = t->head == t->count ? t->count : t->len;
+    int room = t->len - fresh_n;
+    if (room <= 0) {
+        taskEXIT_CRITICAL(&s_lock);
+        ESP_LOGW(TAG, "%s: ring already full, snapshot dropped", t->file);
+        return;
     }
-    taskEXIT_CRITICAL(&s_lock);
 
-    int gap = 0;
-    if (hdr.last_ts > 0 && timesync_is_synced()) {
+    int gap;
+    if (dated && hdr.last_ts > 0) {
         gap = (int)((time(NULL) - hdr.last_ts) / t->interval_s) - fresh_n - 1;
-        gap = gap < 0 ? 0 : gap > t->len ? t->len : gap;
+        gap = gap < 0 ? 0 : gap > room ? room : gap;
+    } else {
+        gap = 1; /* downtime of unknown width, drawn as a break rather than a lie */
     }
 
-    taskENTER_CRITICAL(&s_lock);
-    const history_point_t hole = { .have = 0 };
-    t->head = 0;
-    t->count = 0;
-    for (int i = 0; i < hdr.count; i++) {
-        ring_push(t, &s_snap_points[i]);
+    int n_snap = hdr.count < room - gap ? hdr.count : room - gap;
+    int lead = n_snap + gap;
+    memmove(&t->ring[lead], &t->ring[0], fresh_n * sizeof(history_point_t));
+    /* the oldest points are the ones that do not fit */
+    memcpy(&t->ring[0], &s_snap_points[hdr.count - n_snap],
+           n_snap * sizeof(history_point_t));
+    for (int i = n_snap; i < lead; i++) {
+        t->ring[i] = (history_point_t){ .have = 0 };
     }
-    for (int i = 0; i < gap; i++) {
-        ring_push(t, &hole);
-    }
-    for (int i = 0; i < fresh_n; i++) {
-        ring_push(t, &fresh[i]);
-    }
+    t->count = lead + fresh_n;
+    t->head = t->count % t->len;
     taskEXIT_CRITICAL(&s_lock);
-    ESP_LOGI(TAG, "%s: restored %u points, %d slot gap",
-             t->file, hdr.count, gap);
+
+    ESP_LOGI(TAG, "%s: restored %d of %u points, %d slot gap%s",
+             t->file, n_snap, hdr.count, gap, dated ? "" : " (undated)");
 }
 
 static void save_task(void *arg)
@@ -363,20 +369,22 @@ static void tick_cb(void *arg)
     ring_push(&s_tiers[HISTORY_5M], &p);
     taskEXIT_CRITICAL(&s_lock);
 
+    /* As early as the clock allows: the stored points are anchored in absolute
+     * time and joining them on before it is known would guess the gap. */
+    if (!s_restored && (timesync_is_synced() || ticks >= RESTORE_DEADLINE_S)) {
+        bool dated = timesync_is_synced();
+        s_restored = true;
+        for (int i = 0; i < HISTORY_TIER_COUNT; i++) {
+            if (s_tiers[i].file) {
+                restore_snapshot(&s_tiers[i], dated);
+            }
+        }
+    }
+
     if (ticks % s_tiers[HISTORY_1H].interval_s == 0) {
         flush_tier(&s_tiers[HISTORY_1H]);
     }
     if (ticks % s_tiers[HISTORY_1D].interval_s == 0) {
-        /* deferred to the first minute tick, by when SNTP has usually synced
-         * and the downtime gap can be computed */
-        if (!s_restored) {
-            s_restored = true;
-            for (int i = 0; i < HISTORY_TIER_COUNT; i++) {
-                if (s_tiers[i].file) {
-                    restore_snapshot(&s_tiers[i]);
-                }
-            }
-        }
         flush_tier(&s_tiers[HISTORY_1D]);
     }
 

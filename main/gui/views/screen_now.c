@@ -132,33 +132,36 @@ static void dots(gfx_canvas_t *c, int right, int baseline, int w, uint32_t anim_
 }
 
 /* Ping-pong scroll for a run wider than the box it has to sit in: `over` px of
- * overhang become an offset that walks a pixel every SCROLL_STEP_MS and rests
- * SCROLL_HOLD_MS at either end, so the two halves of a long wording are each
- * legible for a moment. A function of `anim_ms` alone, like the other moving
+ * overhang become an offset that walks a pixel every SCROLL_STEP_MS. The rest at
+ * home is the long one — that is the reading's own position, and the run is only
+ * pulled aside to show what did not fit; at the far end it waits just long
+ * enough to read the tail. A function of `anim_ms` alone, like the other moving
  * parts — the screen keeps no state between frames. */
 #define SCROLL_STEP_MS 60
-#define SCROLL_HOLD_MS 15000
+#define SCROLL_HOME_MS 15000
+#define SCROLL_END_MS  2000
 
 static int scroll_off(uint32_t anim_ms, int over)
 {
     if (over <= 0) {
         return 0;
     }
-    uint32_t hold  = SCROLL_HOLD_MS / SCROLL_STEP_MS;
+    uint32_t home  = SCROLL_HOME_MS / SCROLL_STEP_MS;
+    uint32_t end   = SCROLL_END_MS / SCROLL_STEP_MS;
     uint32_t walk  = (uint32_t)over;
-    uint32_t cycle = 2 * (hold + walk);
+    uint32_t cycle = home + walk + end + walk;
     uint32_t t     = anim_ms / SCROLL_STEP_MS % cycle;
 
-    if (t < hold) {                      // resting at the start
+    if (t < home) {                          // resting at home
         return 0;
     }
-    if (t < hold + walk) {               // walking to the end
-        return (int)(t - hold);
+    if (t < home + walk) {                   // walking to the end
+        return (int)(t - home);
     }
-    if (t < 2 * hold + walk) {           // resting at the end
+    if (t < home + walk + end) {             // resting at the end
         return over;
     }
-    return over - (int)(t - (2 * hold + walk));   // walking back
+    return over - (int)(t - (home + walk + end));   // walking back
 }
 
 /* Battery: a dim shell filled to `pct` at full brightness. Same anchor as
@@ -685,7 +688,7 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     // Background fill
 
     gfx_clear(c, GFX_OFF);
-    gfx_checker(c, (gfx_rect_t){ 0, 0, GFX_W, GFX_H }, (gfx_level_t)1, GFX_NONE, 1);
+    // gfx_checker(c, (gfx_rect_t){ 0, 0, GFX_W, GFX_H }, (gfx_level_t)1, GFX_NONE, 1);
 
     ui_cursor_t cur = { 0 };
 

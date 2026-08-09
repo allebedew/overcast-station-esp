@@ -309,7 +309,11 @@ history.
   follows from the counts, and the page computes it.
   The two longer rings are snapshotted to LittleFS (`/data/hist_1h.bin` every
   5 min, `/data/history.bin` every 10 min, both on graceful shutdown / OTA
-  reboot) and restored on boot; downtime shows as a gap anchored via SNTP time.
+  reboot) and restored as soon as the clock can be trusted, which anchors the
+  downtime gap; unsynced past 5 min they are joined on with a single hole
+  instead. The clock counts as trusted when SNTP answers, or at boot when the
+  RTC — which survives everything but a power cycle — still reads a plausible
+  date.
   The header is versioned and a file from older firmware is dropped.
   Charts are a dependency-free canvas sparkline per card: window 5 min / 1 h /
   1 d from `/api/history?p=`, re-polled at 2/10/60 s, with a hover crosshair
