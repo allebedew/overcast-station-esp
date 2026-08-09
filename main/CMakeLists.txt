@@ -13,7 +13,7 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             # it. gui/sim/ is the host build, not compiled here
                             "gui/gfx/gfx_canvas.c" "gui/gfx/gfx_text.c"
                             "gui/gfx/gfx_fonts.c" "gui/gfx/ssd1322.c"
-                            "gui/gui_loop.c"
+                            "gui/gui_loop.c" "gui/panel_hours.c"
                             "gui/views/ui_model.c" "gui/views/ui_state.c"
                             "gui/views/ui.c" "gui/views/chart.c"
                             "gui/views/screen_now.c" "gui/views/screen_ota.c"

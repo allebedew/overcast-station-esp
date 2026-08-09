@@ -37,13 +37,17 @@
     "temperature_2m_max,temperature_2m_min,precipitation_probability_max," \
     "weather_code,cloud_cover_mean,daylight_duration"
 
+/* Hourly series, from the current hour on (forecast_hours, not forecast_days,
+ * is what makes it start there rather than at local midnight). */
+#define WEATHER_API_HOURLY_FIELDS "precipitation_probability"
+
 #define WEATHER_API_UPDATE_INTERVAL_MS (15 * 60 * 1000)
 #define WEATHER_API_RETRY_INTERVAL_MS  (5 * 60 * 1000)  /* retry sooner after a failure */
 #define WEATHER_API_FIRST_RETRY_MS     15000            /* first retry after a network failure */
 #define WEATHER_API_MAX_AGE_MS         (60 * 60 * 1000) /* a reading older than this is dropped */
 #define WEATHER_API_NO_NET_DELAY_MS    10000            /* wait for the link, then re-check */
 #define WEATHER_API_HTTP_TIMEOUT_MS    10000
-#define WEATHER_API_MAX_RESPONSE       4096             /* current plus five daily rows is ~1.5 KB */
+#define WEATHER_API_MAX_RESPONSE       6144             /* current, five daily rows and 24 hourly is ~2 KB */
 
 static const char *TAG = "weather_api";
 
@@ -135,6 +139,27 @@ static int parse_days(const cJSON *daily, int utc_offset_s, float fallback_temp,
     return n;
 }
 
+/* Fills hour_prob_pct[] from the `hourly` block, returning how many were filled
+ * and taking the first hour's stamp through `start`. Same offset convention as
+ * parse_days(). */
+static int parse_hours(const cJSON *hourly, int utc_offset_s, time_t *start,
+                       int8_t *prob_pct)
+{
+    const cJSON *time = cJSON_GetObjectItem(hourly, "time");
+    const cJSON *prob = cJSON_GetObjectItem(hourly, "precipitation_probability");
+
+    int n = cJSON_GetArraySize(time);
+    if (n > WEATHER_API_FORECAST_HOURS) {
+        n = WEATHER_API_FORECAST_HOURS;
+    }
+    for (int i = 0; i < n; i++) {
+        long v = lround(jarrn(prob, i, -1));
+        prob_pct[i] = (int8_t)(v < 0 ? -1 : v > 100 ? 100 : v);
+    }
+    *start = n ? (time_t)jarrn(time, 0, 0) + utc_offset_s : 0;
+    return n;
+}
+
 /* `precipitation` is an accumulation over the model's own step, which `interval`
  * reports: 900 s for the 15-minute models, 3600 s for the hourly ones. Rescaling
  * to mm/h is what makes the number comparable to the usual light/moderate/heavy
@@ -184,6 +209,8 @@ static bool parse(const char *json, weather_api_data_t *out)
             .utc_offset_s = (int)lroundf(jnum(root, "utc_offset_seconds", 0)),
         };
         d.day_count = parse_days(daily, d.utc_offset_s, d.temp_c, d.days);
+        d.hour_count = parse_hours(cJSON_GetObjectItem(root, "hourly"),
+                                   d.utc_offset_s, &d.hour_start, d.hour_prob_pct);
         *out = d;
         ok = true;
     } else {
@@ -331,14 +358,16 @@ static fetch_result_t fetch_once(const weather_location_t *loc)
 
     /* timezone=auto makes the daily aggregates span the local calendar day and
      * fills utc_offset_seconds in the reply. */
-    char url[512];
+    char url[768];
     snprintf(url, sizeof(url),
              "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
              "&current=" WEATHER_API_CURRENT_FIELDS
              "&daily=" WEATHER_API_DAILY_FIELDS
+             "&hourly=" WEATHER_API_HOURLY_FIELDS
              "&models=" WEATHER_API_MODEL
-             "&timezone=auto&timeformat=unixtime&forecast_days=%d",
-             loc->lat, loc->lon, WEATHER_API_FORECAST_DAYS);
+             "&timezone=auto&timeformat=unixtime&forecast_days=%d&forecast_hours=%d",
+             loc->lat, loc->lon, WEATHER_API_FORECAST_DAYS,
+             WEATHER_API_FORECAST_HOURS);
 
     fetch_result_t r = http_get(url, &ctx);
     if (r != FETCH_OK) {

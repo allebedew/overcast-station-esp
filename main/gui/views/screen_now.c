@@ -390,6 +390,58 @@ static void wx_now(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
     ui_gap(cur, fm.ascent + UI_GAP + cm.line_height);
 }
 
+/* Rain over the next 24 hours: one column an hour, the leftmost the hour running
+ * now. Every column is the same height and it is the brightness that carries the
+ * probability, over the dim2..full range; a dry hour, an hour no forecast
+ * reaches and the whole strip without data stay at dim. A 1 px column at a 2 px
+ * pitch, broken by a wider gap at midnight, 06:00, noon and 18:00 local, is what
+ * lets all 24 fit side by side on a 64 px panel and still be read against the
+ * time of day. The strip is a group narrower on the hours where the first of
+ * those falls on the first column: worth it for gaps that mean an hour rather
+ * than an offset. */
+#define RAIN_HOURS WEATHER_API_FORECAST_HOURS
+#define RAIN_H     3                              /* column height, px */
+#define RAIN_DX    2                              /* column pitch: 1 px inked, 1 px apart */
+#define RAIN_GROUP 6                              /* hours between the wider gaps */
+#define RAIN_GAP   3                              /* extra advance at a group boundary, px */
+#define RAIN_X0    3                              /* left margin, px */
+
+static void wx_rain(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
+{
+    // The series starts at the hour it was fetched in, which is not the hour it
+    // is being drawn in: skip the ones already gone, so the first column stays
+    // the current hour as the reading ages.
+    int skip = 0;
+    if (m->out_ok && m->now && m->out.hour_count > 0) {
+        skip = (int)(((m->now + m->utc_off_s) - m->out.hour_start) / 3600);
+        if (skip < 0) { skip = 0; }
+    }
+
+    // Local hour of the first column, so the gaps land on the wall clock. An
+    // unsynced clock leaves it 0 and the groups fall back to plain sixes.
+    int hour0 = m->now ? (int)(((m->now + m->utc_off_s) / 3600) % 24) : 0;
+
+    int x = RAIN_X0;
+    for (int i = 0; i < RAIN_HOURS; i++) {
+        if (i && (hour0 + i) % RAIN_GROUP == 0) {
+            x += RAIN_GAP;
+        }
+        int h = skip + i;
+
+        int prob = m->out_ok && h < m->out.hour_count && m->out.hour_prob_pct[h] > 0
+                       ? m->out.hour_prob_pct[h]
+                       : 0;
+        // Probability spans dim2..full, clear of the dim a dry hour -- and an
+        // hour no forecast reaches -- is drawn at.
+        int level = prob ? GFX_DIM2 + (GFX_FULL - GFX_DIM2) * prob / 100 : GFX_DIM;
+
+        gfx_vline(c, x, cur->y, RAIN_H, (gfx_level_t)level, GFX_SOLID, 0);
+        x += RAIN_DX;
+    }
+
+    ui_gap(cur, RAIN_H + UI_GAP);
+}
+
 /* One row per day: weekday, the day's low, a bar, the day's high. The bar's dim
  * body is the range of the whole forecast and is the same on every row, so the
  * lit segment — that day's low to high, mapped into it — can be compared across
@@ -688,7 +740,7 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     // Background fill
 
     gfx_clear(c, GFX_OFF);
-    // gfx_checker(c, (gfx_rect_t){ 0, 0, GFX_W, GFX_H }, (gfx_level_t)1, GFX_NONE, 1);
+    gfx_checker(c, (gfx_rect_t){ 0, 0, GFX_W, GFX_H }, (gfx_level_t)1, GFX_NONE, 1);
 
     ui_cursor_t cur = { 0 };
 
@@ -771,6 +823,11 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
 
     rule(c, &cur);
 
+    // Rain, 24 h
+
+    wx_rain(c, &cur, m);
+    rule(c, &cur);
+
     // Forecast
 
     wx_forecast(c, &cur, m);
@@ -806,9 +863,14 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     // Brightness, pinned to the bottom corner: it is a knob field and needs a
     // readout to be edited by. 3x5im has no descender, so the baseline is its
     // last row, and it clears the burn-in shift's reserve above the edge.
-    gfx_textf_bg(c, UI_RX, GFX_H - 1 - GFX_SHIFT_MAX, &UI_TINY_R,
-                 s->focus == UI_FOCUS_BRIGHT ? GFX_HL : GFX_NONE, "%u",
-                 s->set.bright);
+    int bw = gfx_textf_bg(c, UI_RX, GFX_H - 1 - GFX_SHIFT_MAX, &UI_TINY_R,
+                          s->focus == UI_FOCUS_BRIGHT ? GFX_HL : GFX_NONE, "%u",
+                          s->set.bright);
+
+    // The burn-in offset the frame is currently drawn at, left of it: read-only,
+    // so it stays off the plate the focus draws under the brightness.
+    gfx_textf(c, UI_RX - bw - 2, GFX_H - 1 - GFX_SHIFT_MAX, &UI_TINY_R, "+%d",
+              gfx_shift(c));
 
     // Chart
 

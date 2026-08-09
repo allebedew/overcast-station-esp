@@ -1596,6 +1596,9 @@
                     chipTemp: "Температура чипа",
                     tasksConns: "Задачи / Соединения",
                     uptime: "Аптайм",
+                    /* 50kh is the datasheet's rating to half brightness */
+                    oledHours: "Наработка OLED (50kh)",
+                    oledEquiv: "экв.",
                     resetReason: "Причина перезагрузки",
                     timeUtc: "Время (UTC)",
                     firmware: "Прошивка",
@@ -1824,6 +1827,8 @@
                     chipTemp: "Chip temperature",
                     tasksConns: "Tasks / Connections",
                     uptime: "Uptime",
+                    oledHours: "OLED runtime (50kh)",
+                    oledEquiv: "equiv.",
                     resetReason: "Reset reason",
                     timeUtc: "Time (UTC)",
                     firmware: "Firmware",
@@ -1968,6 +1973,17 @@
             }
 
             const fmtKib = (b) => (b / 1024).toFixed(0) + " " + t("kb");
+
+            /* The panel is rated in hours, so its wear reads in hours whatever
+               it comes to — days would have to be converted back to compare. */
+            const fmtHours = (s) => Math.floor(s / 3600) + " " + t("uH");
+
+            /* Datasheet lifetime to half brightness, hours. The share spent is
+               taken from the weighted seconds, the only one of the two counters
+               that is on the same scale as the rating. */
+            const OLED_LIFE_H = 50000;
+            const fmtOledPct = (s) =>
+                ((s / 3600 / OLED_LIFE_H) * 100).toFixed(1) + " %";
 
             /* Compact "time ago" for the outside-weather freshness stamp. */
             function fmtAgo(s) {
@@ -2550,6 +2566,12 @@
                     [t("tasksConns"), `${txt(sy.tasks)}/${txt(sy.http_conns)}`],
                     ["NVS", `${txt(sy.nvs_used)}/${txt(sy.nvs_total)}`],
                     [t("uptime"), num(sy.uptime, fmtUptime)],
+                    [
+                        t("oledHours"),
+                        sy.panel
+                            ? `${fmtHours(sy.panel.on_s)} · ${fmtHours(sy.panel.dose_s)} ${t("oledEquiv")} · ${fmtOledPct(sy.panel.dose_s)}`
+                            : NA,
+                    ],
                     [t("resetReason"), sy.reset_reason],
                     [t("timeUtc"), sy.time],
                     [

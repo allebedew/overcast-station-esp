@@ -614,6 +614,16 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data, bool fetching,
         };
     }
 
+    // The hourly probabilities, starting at m.now's own hour: a wet spell, a dry
+    // one and a couple of missing hours, so the strip shows its whole range.
+    static const int8_t HR[WEATHER_API_FORECAST_HOURS] = {
+         0,  5, 20, 35, 55, 80, 70, 40, 15, 10,  0, 25,
+        60, 90, 100, 75, 45, 30, 10, -1, -1, 50, 15,  0,
+    };
+    m.out.hour_start = (m.now + m.utc_off_s) / 3600 * 3600;
+    m.out.hour_count = WEATHER_API_FORECAST_HOURS;
+    memcpy(m.out.hour_prob_pct, HR, sizeof(HR));
+
     // The chart's series, which on the panel comes out of the history rings:
     // a drifting wave, so both the shape and the axis labels have something to
     // show. One gap, to draw the break a dead sensor leaves.

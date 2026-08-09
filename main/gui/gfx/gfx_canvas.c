@@ -32,6 +32,11 @@ void gfx_set_shift(gfx_canvas_t *c, int dy)
     c->vp[0].oy = (int16_t)dy;
 }
 
+int gfx_shift(const gfx_canvas_t *c)
+{
+    return c->vp[0].oy;
+}
+
 void gfx_clear(gfx_canvas_t *c, gfx_level_t level)
 {
     if (level == GFX_NONE) {

@@ -24,6 +24,7 @@
 #include "ota.h"
 #include "ld2450.h"
 #include "sensors.h"
+#include "panel_hours.h"
 #include "sysinfo.h"
 #include "timesync.h"
 #include "weather_api.h"
@@ -239,6 +240,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     sysinfo_runtime_t run;
     sysinfo_get_runtime(&run);
 
+    uint32_t panel_on_s, panel_dose_s;
+    panel_hours_get(&panel_on_s, &panel_dose_s);
+
     scd40_data_t air = {0};
     bool air_ok = sensors_scd40_get(&air);
 
@@ -427,7 +431,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"reset_reason\":\"%s\",\"cpu_load\":%d,\"tasks\":%u,"
         "\"http_conns\":%d,"
         "\"heap_free\":%u,\"heap_min\":%u,\"heap_total\":%u,\"heap_largest\":%u,"
-        "\"nvs_used\":%u,\"nvs_total\":%u},"
+        "\"nvs_used\":%u,\"nvs_total\":%u,"
+        "\"panel\":{\"on_s\":%lu,\"dose_s\":%lu}},"
         "\"settings\":%s}",
         sta_json, ap_json,
         cl_temp, cl_rh, cl_co2, cl_press, cl_msl, cl_lux,
@@ -455,6 +460,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         http_conn_count(),
         run.heap_free, run.heap_min, run.heap_total, run.heap_largest,
         (unsigned)sys->nvs_used_entries, (unsigned)sys->nvs_total_entries,
+        (unsigned long)panel_on_s, (unsigned long)panel_dose_s,
         settings_json);
 
     return jbuf_send(req, &j);

@@ -14,6 +14,7 @@
 #include "gfx_target.h"
 #include "ld2450.h"
 #include "ota.h"
+#include "panel_hours.h"
 #include "screen_ota.h"
 #include "settings.h"
 #include "ssd1322.h"
@@ -246,6 +247,8 @@ static void gui_task(void *arg)
             /* Lit only for someone who is there to read it. */
             bool want_on = s_state.set.on && presence_now();
 
+            panel_hours_track(want_on, s_state.set.bright);
+
             /* A dark panel is drawn for and clocked to not at all: display-off
              * leaves its RAM alone, so s_shown keeps describing it. */
             if (want_on) {
@@ -328,6 +331,8 @@ void gui_loop_init(void)
     /* Blank the panel, to put it in the state s_shown claims it is in: its RAM
      * comes up undefined and the first rendered frame may well match s_shown. */
     gfx_present(&s_canvas);
+
+    panel_hours_init();
 
     load_ui_settings(&s_persisted);
     ui_state_init(&s_state, &s_persisted);

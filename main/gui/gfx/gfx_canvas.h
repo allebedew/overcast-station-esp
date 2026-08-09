@@ -55,6 +55,7 @@ void gfx_clear(gfx_canvas_t *c, gfx_level_t level);
 // Sets the root viewport, so it may only be called between frames.
 #define GFX_SHIFT_MAX 5
 void gfx_set_shift(gfx_canvas_t *c, int dy);
+int  gfx_shift(const gfx_canvas_t *c);
 
 // Every primitive takes local coordinates and is clipped to the current viewport.
 // gfx_push returns false when the box is entirely clipped away -- drawing through

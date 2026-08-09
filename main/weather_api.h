@@ -4,7 +4,8 @@
 #include <stdint.h>
 #include <time.h>
 
-#define WEATHER_API_FORECAST_DAYS 5
+#define WEATHER_API_FORECAST_DAYS  5
+#define WEATHER_API_FORECAST_HOURS 24
 
 /* One day of the daily forecast; index 0 is today. */
 typedef struct {
@@ -44,6 +45,12 @@ typedef struct {
     int32_t age_s;          /* seconds since the last successful fetch, -1 if none */
     weather_api_day_t days[WEATHER_API_FORECAST_DAYS];
     int day_count;          /* days[] entries filled; today's min/max is days[0] */
+    /* Hourly precipitation probability, %; -1 where unknown. hour_start is the
+     * top of the hour hour_prob_pct[0] covers, in the same shifted form as
+     * day.date, so an ageing reading can be re-indexed against the clock. */
+    time_t hour_start;
+    int8_t hour_prob_pct[WEATHER_API_FORECAST_HOURS];
+    int hour_count;
 } weather_api_data_t;
 
 void weather_api_init(void);
