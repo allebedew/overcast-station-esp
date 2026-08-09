@@ -75,6 +75,12 @@ void gfx_vline(gfx_canvas_t *c, int x, int y, int len, gfx_level_t level, uint8_
 // be GFX_NONE.
 void gfx_rect(gfx_canvas_t *c, gfx_rect_t r, gfx_level_t stroke, gfx_level_t fill, uint8_t dash);
 
+// Dissolve: hides every pixel whose own pseudo-random threshold is at or above
+// t, so a frame walked from t = 0 to 255 fills in at random and one walked the
+// other way empties out. seed picks the pattern -- held for the length of a
+// transition, changed between them so the same order never repeats.
+void gfx_dissolve(gfx_canvas_t *c, uint8_t t, uint32_t seed);
+
 // Checkerboard of cell x cell squares: level for the top-left square and its
 // diagonal, bg for the other one (GFX_NONE leaves those pixels alone). A cell of
 // 1 is the finest halftone the panel can hold, 0 means a solid `level` fill; the

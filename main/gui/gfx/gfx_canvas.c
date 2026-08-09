@@ -148,6 +148,36 @@ void gfx_vline(gfx_canvas_t *c, int x, int y, int len, gfx_level_t level, uint8_
     }
 }
 
+// Two thresholds per byte out of one hash: the pattern only has to look
+// unordered, and hashing each pixel separately would double the cost of a step.
+static inline uint32_t hash32(uint32_t v)
+{
+    v ^= v >> 16;
+    v *= 0x7feb352du;
+    v ^= v >> 15;
+    v *= 0x846ca68bu;
+    v ^= v >> 16;
+    return v;
+}
+
+void gfx_dissolve(gfx_canvas_t *c, uint8_t t, uint32_t seed)
+{
+    if (t == 0xFF) {
+        return;
+    }
+
+    uint8_t *p = &c->buf[0][0];
+    for (int x = 0; x < GFX_W; x++) {
+        for (int i = 0; i < GFX_H / 2; i++, p++) {
+            uint32_t h = hash32(seed ^ ((uint32_t)x << 16) ^ (uint32_t)i);
+            uint8_t  b = *p;
+            if ((uint8_t)(h >> 24) >= t) { b &= 0x0F; }   // even y, high nibble
+            if ((uint8_t)(h >> 8)  >= t) { b &= 0xF0; }
+            *p = b;
+        }
+    }
+}
+
 void gfx_checker(gfx_canvas_t *c, gfx_rect_t r, gfx_level_t level, gfx_level_t bg, int cell)
 {
     if (r.w <= 0 || r.h <= 0 || cell < 0) {

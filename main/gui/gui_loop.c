@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -27,6 +28,15 @@ static const char *TAG = "gui";
 /* The FreeRTOS tick is 10 ms, so every period quantises to it. 10 frames/s is
  * as fast as anything on this screen needs to move. */
 #define FRAME_MS 100
+
+/* The panel does not come up or go dark at once: the pixels of the frame are
+ * added, and removed, in random order over this long. */
+#define FADE_US (400 * 1000)
+
+/* The frame period while that runs. At FRAME_MS the fade would be four steps
+ * and read as a blink rather than as a dissolve; the tick is 10 ms, and this is
+ * the shortest multiple of it that leaves the 8.3 ms present room. */
+#define FADE_FRAME_MS 20
 
 /* How often the frame numbers are logged, and only while the screen is actually
  * changing -- an idle panel says nothing. Long, because they only ever say the
@@ -57,6 +67,41 @@ static uint8_t s_shown[GFX_W][GFX_H / 2];
 /* Whether the panel is driving its pixels, as opposed to ui_state_t's `on`,
  * which is what the knob asked for. The init script leaves it on. */
 static bool s_panel_on = true;
+
+/* How far the dissolve has got, 0 = dark, FADE_US = the whole frame, plus the
+ * pattern it is running and when it last moved. */
+static int32_t  s_fade_us;
+static uint32_t s_fade_seed;
+static int64_t  s_fade_prev;
+
+/* Walks the dissolve towards want_on in real time rather than a step per frame,
+ * so the second it takes holds whatever the loop is actually running at, and a
+ * reversal picks up from where the frame stands. */
+static void fade_step(bool want_on, int64_t now)
+{
+    int64_t dt = now - s_fade_prev;
+    s_fade_prev = now;
+
+    /* A gap this large is the first step of a transition, or a stall (OTA holds
+     * the loop for the length of an upload) -- either way not time the frame
+     * spent fading. */
+    if (dt < 0 || dt > FADE_US) {
+        dt = 0;
+    }
+
+    if (s_fade_us == 0 && want_on) {
+        s_fade_seed = esp_random();
+    }
+
+    s_fade_us += want_on ? (int32_t)dt : -(int32_t)dt;
+    if (s_fade_us < 0)       { s_fade_us = 0; }
+    if (s_fade_us > FADE_US) { s_fade_us = FADE_US; }
+}
+
+static uint8_t fade_level(void)
+{
+    return (uint8_t)((int64_t)s_fade_us * 255 / FADE_US);
+}
 
 static ui_state_t s_state;
 static ui_model_t s_model;
@@ -189,6 +234,11 @@ static void ota_frame(void)
     screen_ota(&s_canvas, received, total);
     present_if_changed();
 
+    /* The progress screen is taken over whole, with no dissolve of its own; the
+     * frame counts as fully faded in so that the normal path resumes from a lit
+     * panel rather than blinking it back through one. */
+    s_fade_us = FADE_US;
+
     if (!s_panel_on) {
         gfx_set_on(true);
         s_panel_on = true;
@@ -250,8 +300,9 @@ static void gui_task(void *arg)
             panel_hours_track(want_on, s_state.set.bright);
 
             /* A dark panel is drawn for and clocked to not at all: display-off
-             * leaves its RAM alone, so s_shown keeps describing it. */
-            if (want_on) {
+             * leaves its RAM alone, so s_shown keeps describing it. A frame on
+             * its way out still counts as lit. */
+            if (want_on || s_fade_us > 0) {
                 /* Only a lit panel ages, so a dark one holds the offset where
                  * it stands rather than walking it invisibly. */
                 if (now >= shift_at) {
@@ -279,15 +330,27 @@ static void gui_task(void *arg)
                     render_max_us = render_us;
                 }
 
+                fade_step(want_on, now);
+                gfx_dissolve(&s_canvas, fade_level(), s_fade_seed);
+
                 if (present_if_changed()) {
                     flushes++;
                 }
 
                 /* Powered up only once a fresh frame is in the panel's RAM —
-                 * the other order flashes the one it was switched off on. */
+                 * the other order flashes the one it was switched off on. The
+                 * first frame of a fade-in is empty, so nothing is on screen
+                 * before the dissolve puts it there. */
                 if (!s_panel_on) {
                     gfx_set_on(true);
                     s_panel_on = true;
+                }
+
+                /* The fade-out ends on an empty frame; the panel goes dark for
+                 * real in the same pass, not a frame later. */
+                if (!want_on && s_fade_us == 0) {
+                    gfx_set_on(false);
+                    s_panel_on = false;
                 }
             } else if (s_panel_on) {
                 gfx_set_on(false);
@@ -314,10 +377,12 @@ static void gui_task(void *arg)
             }
         }
 
+        const bool fading = s_fade_us > 0 && s_fade_us < FADE_US;
+
         /* A render that overran the period leaves the task runnable, and it
          * outranks idle on this single core -- without the yield the watchdog
          * trips on IDLE within 5 s. */
-        if (!xTaskDelayUntil(&last, pdMS_TO_TICKS(FRAME_MS))) {
+        if (!xTaskDelayUntil(&last, pdMS_TO_TICKS(fading ? FADE_FRAME_MS : FRAME_MS))) {
             taskYIELD();
         }
     }

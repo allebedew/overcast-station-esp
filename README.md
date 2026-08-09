@@ -175,6 +175,11 @@ history.
   because a reading that moves below its displayed resolution changes the model
   without changing the screen. Render times are logged every 5 s, and only while
   frames are actually being flushed.
+  Switching the panel on and off is a **0.4 s dissolve**: the lit pixels of the
+  frame are added, and removed, in random order, and the frame period drops to
+  20 ms while it runs. The controller's display-on comes first and display-off
+  last, so the hardware is only driving pixels while there is something to see;
+  OTA takes the panel over without one.
   Against burn-in the whole frame is drawn 0–5 rows lower than its layout puts
   it, one row every 10 min, walking the range and turning round at each end;
   only a lit panel advances it, and OTA draws at 0. The shift clips at the
