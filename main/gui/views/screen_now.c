@@ -747,16 +747,30 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     // Status bar
 
     struct tm tm;
-    char day[4]   = "--";
-    char hhmm[6]  = "--:--";
-    if (local_tm(m, &tm)) {
-        strftime(day,  sizeof(day),  "%a",    &tm);
-        strftime(hhmm, sizeof(hhmm), "%H:%M", &tm);
+    char day[4] = "--";
+    char hh[3]  = "--", mm[3] = "--";
+    bool synced = local_tm(m, &tm);
+    if (synced) {
+        strftime(day, sizeof(day), "%a",  &tm);
+        strftime(hh,  sizeof(hh),  "%H",  &tm);
+        strftime(mm,  sizeof(mm),  "%M",  &tm);
     }
 
     int baseline = ui_row(&cur, &UI_TEXT);
     gfx_text(c, 0, baseline, &UI_TEXT, day);
-    gfx_text(c, UI_RX/2, baseline, &UI_TEXT_C, hhmm);
+    // Halves drawn either side of the colon's own cell, so the digits keep their
+    // place while it blinks. Off anim_ms rather than the clock: free-running, but
+    // nothing in the model carries a fraction of a second.
+    {
+        int cw = gfx_text_w(&UI_TEXT, ":") + 2;   // a blank column each side
+        int hw = gfx_text_w(&UI_TEXT, hh);
+        int x  = UI_RX / 2 - (hw + cw + gfx_text_w(&UI_TEXT, mm)) / 2;
+        gfx_text(c, x, baseline, &UI_TEXT, hh);
+        if (!synced || m->anim_ms % 2000 < 1000) {
+            gfx_text(c, x + hw + 1, baseline, &UI_TEXT, ":");
+        }
+        gfx_text(c, x + hw + cw, baseline, &UI_TEXT, mm);
+    }
     if (m->ap) {
         ap_badge(c, UI_RX, baseline);
     } else {
