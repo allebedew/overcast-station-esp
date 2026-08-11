@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 
 #include "buzzer.h"
+#include "climate.h"
 #include "encoder.h"
 #include "gfx_canvas.h"
 #include "gfx_target.h"
@@ -115,6 +116,7 @@ static ui_settings_t s_persisted;
 static void load_ui_settings(ui_settings_t *u)
 {
     u->bright      = (uint8_t)settings_get(SETTING_DISPLAY_BRIGHT);
+    u->auto_bright = settings_get(SETTING_DISPLAY_AUTO_BRIGHT) != 0;
     u->on          = settings_get(SETTING_DISPLAY_ON) != 0;
     u->chart_q     = (history_quantity_t)settings_get(SETTING_CHART_Q);
     u->chart_range = (chart_range_t)settings_get(SETTING_CHART_RANGE);
@@ -126,6 +128,7 @@ static void load_ui_settings(ui_settings_t *u)
 static void store_ui_settings(const ui_settings_t *u)
 {
     settings_set(SETTING_DISPLAY_BRIGHT, u->bright);
+    settings_set(SETTING_DISPLAY_AUTO_BRIGHT, u->auto_bright);
     settings_set(SETTING_DISPLAY_ON, u->on);
     settings_set(SETTING_CHART_Q, u->chart_q);
     settings_set(SETTING_CHART_RANGE, u->chart_range);
@@ -182,9 +185,13 @@ static void adopt_display_settings(void)
     ui_settings_t now;
     load_ui_settings(&now);
 
+    /* The level itself is pushed to the panel by ui_state_light(), which runs
+     * every frame. */
     if (now.bright != s_persisted.bright) {
         s_state.set.bright = now.bright;
-        gfx_set_brightness(now.bright);
+    }
+    if (now.auto_bright != s_persisted.auto_bright) {
+        s_state.set.auto_bright = now.auto_bright;
     }
     if (now.on != s_persisted.on) {
         s_state.set.on = now.on;
@@ -294,10 +301,15 @@ static void gui_task(void *arg)
             }
             sync_location(now);
 
+            /* The panel's brightness, manual or off the light sensor. */
+            climate_t cl;
+            climate_get(&cl);
+            ui_state_light(&s_state, cl.lux_ok, cl.lux);
+
             /* Lit only for someone who is there to read it. */
             bool want_on = s_state.set.on && presence_now();
 
-            panel_hours_track(want_on, s_state.set.bright);
+            panel_hours_track(want_on, s_state.bright_now);
 
             /* A dark panel is drawn for and clocked to not at all: display-off
              * leaves its RAM alone, so s_shown keeps describing it. A frame on

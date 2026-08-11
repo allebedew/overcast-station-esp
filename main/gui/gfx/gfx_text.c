@@ -16,6 +16,8 @@ static struct {
     gfx_level_t    level;
     const uint8_t *font;
     bool           ready;
+    bool           mirror;    // reflect the decoder's output across x = mirror_sum/2
+    int            mirror_sum;
 } g;
 
 static void update_dimension(u8g2_t *u8g2)
@@ -45,10 +47,17 @@ static void draw_l90(u8g2_t *u8g2, u8g2_uint_t x, u8g2_uint_t y, u8g2_uint_t len
     if (u8g2->draw_color == 0 || g.canvas == NULL) {
         return;
     }
+    int px = (int16_t)x;   // u8g2 wraps a glyph reaching past the left edge
     if (dir == 0) {
-        gfx_hline(g.canvas, (int16_t)x, (int16_t)y, (int)len, g.level, GFX_SOLID, 0);
+        if (g.mirror) {
+            px = g.mirror_sum - (px + (int)len - 1);
+        }
+        gfx_hline(g.canvas, (int16_t)px, (int16_t)y, (int)len, g.level, GFX_SOLID, 0);
     } else {
-        gfx_vline(g.canvas, (int16_t)x, (int16_t)y, (int)len, g.level, GFX_SOLID, 0);
+        if (g.mirror) {
+            px = g.mirror_sum - px;
+        }
+        gfx_vline(g.canvas, (int16_t)px, (int16_t)y, (int)len, g.level, GFX_SOLID, 0);
     }
 }
 
@@ -182,6 +191,40 @@ int gfx_glyph(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st, 
     char s[5];
     encode(cp, s);
     return gfx_text(c, x, baseline, st, s);
+}
+
+int gfx_glyph_m(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st,
+                unsigned cp, bool mirror)
+{
+    if (!mirror) {
+        return gfx_glyph(c, x, baseline, st, cp);
+    }
+    char s[5];
+    encode(cp, s);
+
+    select_font(st->font);
+    int w  = (int)u8g2_GetUTF8Width(&g.u8g2, s);
+    int dx = align_x(x, st, w);
+
+    // u8g2 clips a run before it reaches draw_l90, which for a glyph hanging off
+    // an edge would trim the wrong side of the mirrored image. So it is decoded
+    // at a position that is wholly on the canvas and reflected from there into
+    // the real one, leaving the clipping to gfx_canvas.
+    int safe = (GFX_W - w) / 2;
+    if (safe < 0) {
+        safe = 0;
+    }
+
+    if (st->level != GFX_NONE) {
+        g.canvas     = c;
+        g.level      = st->level;
+        g.mirror     = true;
+        g.mirror_sum = dx + w - 1 + safe;
+        u8g2_DrawUTF8(&g.u8g2, (u8g2_uint_t)safe, (u8g2_uint_t)baseline, s);
+        g.mirror     = false;
+        g.canvas     = NULL;
+    }
+    return w;
 }
 
 int gfx_glyph_w(const gfx_text_style_t *st, unsigned cp)

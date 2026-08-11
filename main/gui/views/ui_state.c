@@ -1,17 +1,86 @@
 #include "ui_state.h"
 
+#include <math.h>
 #include <stdio.h>
 
 #include "chart.h"
 #include "gfx_target.h"
 
+/* The room's illuminance mapped to the panel's 16 steps, by decade: the eye is
+ * logarithmic and a linear map would leave the panel dark all the way through a
+ * lit room. Full drive from AUTO_FULL_LX up, the dimmest step at and below
+ * AUTO_DARK_LX. */
+#define AUTO_FULL_LX 200.0f
+#define AUTO_DARK_LX 1.0f
+
+/* How far the computed level has to sit past the current step before it is
+ * taken. Without it a room resting between two steps flickers between them.
+ * It is a dead band, not a delay: a real change in the light is followed on the
+ * frame it arrives on. */
+#define AUTO_HYST 0.6f
+
+static float auto_level(float lux)
+{
+    if (lux <= AUTO_DARK_LX) {
+        return 0.0f;
+    }
+    if (lux >= AUTO_FULL_LX) {
+        return (float)GFX_BRIGHTNESS_MAX;
+    }
+    return (float)GFX_BRIGHTNESS_MAX * log10f(lux) / log10f(AUTO_FULL_LX);
+}
+
+/* The level the panel is driven at right now, as opposed to bright_want, which
+ * is where it is heading. */
+static void apply_bright(ui_state_t *s, uint8_t level)
+{
+    if (level != s->bright_now) {
+        s->bright_now = level;
+        gfx_set_brightness(level);
+    }
+}
+
+/* One step of the ramp towards the target. A step a frame, so the widest sweep
+ * takes a second and a half and a single detent is over in a frame: the panel
+ * slides to a new light level instead of jumping, and there is no delay before
+ * it starts. */
+static void ramp_bright(ui_state_t *s)
+{
+    if (s->bright_now < s->bright_want) {
+        apply_bright(s, (uint8_t)(s->bright_now + 1));
+    } else if (s->bright_now > s->bright_want) {
+        apply_bright(s, (uint8_t)(s->bright_now - 1));
+    }
+}
+
 void ui_state_init(ui_state_t *s, const ui_settings_t *set)
 {
-    s->set       = *set;
-    s->focus     = UI_FOCUS_NONE;
-    s->loc_sel   = 0;
-    s->loc_count = 0;
-    gfx_set_brightness(s->set.bright);
+    s->set        = *set;
+    s->focus      = UI_FOCUS_NONE;
+    s->loc_sel    = 0;
+    s->loc_count  = 0;
+    s->bright_want = s->set.bright;
+    s->bright_now  = 0;
+
+    /* At boot the panel takes the level outright; there is nothing on screen
+     * yet for a ramp to be seen on. */
+    apply_bright(s, s->set.bright);
+}
+
+void ui_state_light(ui_state_t *s, bool lux_ok, float lux)
+{
+    /* Manual mode still comes through here: it is the one call a frame that
+     * reconciles the panel with the setting, wherever the setting was changed. */
+    if (!s->set.auto_bright) {
+        s->bright_want = s->set.bright;
+    } else if (lux_ok) {
+        float want = auto_level(lux);
+        if (fabsf(want - (float)s->bright_want) >= AUTO_HYST) {
+            s->bright_want = (uint8_t)lroundf(want);
+        }
+    }
+
+    ramp_bright(s);
 }
 
 ui_event_t ui_state_input(ui_state_t *s, const encoder_input_t *in)
@@ -54,13 +123,19 @@ ui_event_t ui_state_input(ui_state_t *s, const encoder_input_t *in)
             }
             s->loc_sel = (uint8_t)((s->loc_sel + fwd) % s->loc_count);
             break;
-        default:
-            /* 0 is the dimmest step the panel has, not off, so wrapping through
-             * it costs nothing. */
-            s->set.bright =
-                (uint8_t)((s->set.bright + fwd) % (GFX_BRIGHTNESS_MAX + 1));
-            gfx_set_brightness(s->set.bright);
+        default: {
+            /* One ring: the 16 manual steps, then auto past the top. 0 is the
+             * dimmest step the panel has, not off, so wrapping through it costs
+             * nothing. */
+            int pos = s->set.auto_bright ? GFX_BRIGHTNESS_MAX + 1 : s->set.bright;
+            pos = (pos + fwd) % (GFX_BRIGHTNESS_MAX + 2);
+
+            s->set.auto_bright = pos > GFX_BRIGHTNESS_MAX;
+            if (!s->set.auto_bright) {
+                s->set.bright = (uint8_t)pos;
+            }
             break;
+        }
         }
     }
 
@@ -74,8 +149,9 @@ void ui_state_format(const ui_state_t *s, char *buf, int n)
     static const char *const FIELD[UI_FOCUS_COUNT] = { "nothing", "location", "quantity",
                                                        "range", "brightness" };
 
-    snprintf(buf, (size_t)n, "chart %s %s, bright %u, location %u/%u, knob on %s",
+    snprintf(buf, (size_t)n, "chart %s %s, bright %u%s, location %u/%u, knob on %s",
              chart_quantity_name(s->set.chart_q),
-             CHART_RANGES[s->set.chart_range].label, s->set.bright, s->loc_sel,
-             s->loc_count, FIELD[s->focus]);
+             CHART_RANGES[s->set.chart_range].label, s->bright_now,
+             s->set.auto_bright ? " auto" : "", s->loc_sel, s->loc_count,
+             FIELD[s->focus]);
 }

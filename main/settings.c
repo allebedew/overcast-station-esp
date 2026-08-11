@@ -36,6 +36,13 @@ static const entry_t s_tab[SETTING_COUNT] = {
         { .key = "disp_bright", .api = "display_brightness",
           .name = "Display brightness", .def = GFX_BRIGHTNESS_DEFAULT,
           .min = 0, .max = GFX_BRIGHTNESS_MAX }, NVS_TYPE_U8 },
+    /* Manual brightness above stays what the knob left it on, so leaving auto
+     * comes back to a level the user picked rather than to whatever the room
+     * was lit at. */
+    [SETTING_DISPLAY_AUTO_BRIGHT] = {
+        { .key = "disp_auto", .api = "display_auto_brightness",
+          .name = "Display auto brightness", .def = 1, .min = 0, .max = 1,
+          .as_bool = true }, NVS_TYPE_U8 },
     [SETTING_ALTITUDE_M] = {
         { .key = "altitude_m", .api = "altitude", .name = "Site altitude",
           .def = 0, .min = CLIMATE_ALTITUDE_MIN, .max = CLIMATE_ALTITUDE_MAX },

@@ -166,6 +166,7 @@ static int scroll_off(uint32_t anim_ms, int over)
 
 /* Battery: a dim shell filled to `pct` at full brightness. Same anchor as
  * bars(), so the two line up on one row. */
+/*
 #define BATT_W 7
 #define BATT_H 4
 
@@ -204,6 +205,7 @@ static void battery(gfx_canvas_t *c, int right, int baseline, int pct)
         gfx_vline(c, x, y, BATT_H, GFX_FULL, GFX_SOLID, 0);
     }
 }
+*/
 
 /* Local time of the weather location: the clock runs in UTC and the offset is
  * applied by hand, so gmtime_r() over the shifted stamp gives local fields.
@@ -243,24 +245,27 @@ static void age_str(char *buf, size_t n, int32_t s)
  * it, or a marked row reads as a block of ink rather than as a value. The
  * degree sign is a plain pixel run and keeps whatever the plate left behind. */
 static void value(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st,
-                  const char *s, const char *label, bool deg, gfx_level_t bg)
+                  const char *s, const char *label, bool deg, gfx_level_t bg,
+                  bool blink)
 {
     gfx_text_style_t ls = *st;
     ls.level = GFX_DIM;
 
+    // Blinked off, the run still measures so the row keeps its place, but
+    // nothing is drawn: value and label come and go together.
+    if (st->align == GFX_RIGHT && deg) { x -= DEG_W + 1; }
+    int w = blink ? gfx_text_w(st, s) : gfx_text_bg(c, x, baseline, st, bg, s);
+
     if (st->align == GFX_RIGHT) {
-        if (deg) { x -= DEG_W + 1; }
-        int w = gfx_text_bg(c, x, baseline, st, bg, s);
-        if (deg) { degree(c, x + 1, baseline, st); }
-        if (label) { gfx_text(c, x - w - 3, baseline, &ls, label); }
+        if (deg && !blink) { degree(c, x + 1, baseline, st); }
+        if (label && !blink) { gfx_text(c, x - w - 3, baseline, &ls, label); }
     } else {
-        int w = gfx_text_bg(c, x, baseline, st, bg, s);
         int r = x + w;
         if (deg) {
-            degree(c, r + 1, baseline, st);
+            if (!blink) { degree(c, r + 1, baseline, st); }
             r += DEG_W + 1;
         }
-        if (label) { gfx_text(c, r + 3, baseline, &ls, label); }
+        if (label && !blink) { gfx_text(c, r + 3, baseline, &ls, label); }
     }
 }
 
@@ -270,7 +275,7 @@ static void value(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *
  * row keeps the width of its digits. */
 static void reading(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st,
                     bool ok, const char *fmt, const char *na, double v,
-                    const char *label, bool deg, gfx_level_t bg)
+                    const char *label, bool deg, gfx_level_t bg, bool blink)
 {
     char b[16];
     if (ok) {
@@ -278,7 +283,23 @@ static void reading(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t
     } else {
         snprintf(b, sizeof(b), "%s", na);
     }
-    value(c, x, baseline, st, b, label, deg, bg);
+    value(c, x, baseline, st, b, label, deg, bg, blink);
+}
+
+/* Comfort band [lo, hi) -- a reading outside it blinks to be noticed; an open
+ * side is +-INFINITY. Both the threshold and the phase live here so a call site
+ * stays one expression. Off anim_ms, like the clock's colon. */
+#define AL_MS      1000   /* blink period, half of it dark */
+#define AL_TEMP_LO   23.0
+#define AL_TEMP_HI   29.0
+#define AL_RH_LO     30.0
+#define AL_RH_HI     70.0
+#define AL_CO2_HI  1000.0
+#define AL_UVI_HI     8.0
+
+static bool blink(uint32_t anim_ms, bool ok, double v, double lo, double hi)
+{
+    return ok && (v < lo || v >= hi) && anim_ms % AL_MS >= AL_MS / 2;
 }
 
 /* The sensor rows are where the chart's quantity is picked, so while the knob
@@ -292,36 +313,67 @@ static gfx_level_t q_bg(const ui_state_t *s, history_quantity_t q)
 
 /* WMO code to a glyph. unifont_t_weather re-encodes its icons into the ASCII
  * range, so '.' is the sun there; the snowman it has no glyph for and comes
- * from unifont_t_77 instead. Both are 16x16. The table is filled in code by
- * code, so a code not in it yet — and no reading at all — falls back to the
- * first entry, the sun. */
+ * from unifont_t_76 instead. Both are 16x16. */
 #define WX_ICON_H 16
 
-static const struct {
-    int            code;
+/* The text column starts at a fixed offset: the glyphs' advance widths differ,
+ * and the rows next to them must not move with the icon. */
+#define WX_ICON_W 16
+
+/* Both fonts hang their icons a couple of rows below the baseline, so the
+ * baseline sits this far above the bottom of the 16 px box. */
+#define WX_ICON_BASE (WX_ICON_H - 2)
+
+#define WX_CP_SUN     46
+#define WX_CP_MOON    44
+#define WX_CP_UNKNOWN 49
+#define WX_CP_RAIN    55
+#define WX_CP_DRIZZLE 56
+#define WX_CP_STORM   57
+#define WX_CP_FOG     59
+#define WX_CP_SNOW    9731   /* the only one out of unifont_t_76 */
+
+/* The bare cloud has no glyph of its own: it is the rain one with everything
+ * below its body clipped away. 11 px of the box, counted from the top, keep the
+ * cloud and drop the two rows of fall lines under it. */
+#define WX_CLOUD_KEEP 11
+
+typedef struct {
     const uint8_t *font;
     unsigned       cp;
-    int8_t         dy;    /* baseline shift; the two fonts hang their glyphs
-                           * differently and only the drawing shows by how much */
-} WX_ICONS[] = {
-    { 0,  u8g2_font_unifont_t_weather,   46, -3 },   /* clear sky: the sun */
-    { 71, u8g2_font_unifont_t_77,      9924, -2 },   /* snow, all three rates */
-    { 73, u8g2_font_unifont_t_77,      9924, -2 },
-    { 75, u8g2_font_unifont_t_77,      9924, -2 },
-};
+    int8_t         dy;     /* baseline nudge, positive down; measured off the
+                            * drawing, not derivable from the font */
+    uint8_t        keep;   /* rows kept from the top of the box, 0 = all of it */
+} wx_glyph_t;
 
-static void wx_icon(int code, const uint8_t **font, unsigned *cp, int *dy)
+/* Open-Meteo reports a fixed subset of WMO 4677, all of it below. The three
+ * intensities of a group share one glyph, as do rain and showers and the
+ * freezing forms. Anything else — including no reading at all — is the unknown
+ * mark. */
+static wx_glyph_t wx_icon(int code, bool night)
 {
-    size_t hit = 0;
-    for (size_t i = 1; i < sizeof(WX_ICONS) / sizeof(WX_ICONS[0]); i++) {
-        if (WX_ICONS[i].code == code) {
-            hit = i;
-            break;
-        }
+    const uint8_t *w = u8g2_font_unifont_t_weather;
+
+    switch (code) {
+    case 0: case 1:
+        return (wx_glyph_t){ w, night ? WX_CP_MOON : WX_CP_SUN, 0, 0 };
+    case 2: case 3:
+        return (wx_glyph_t){ w, WX_CP_RAIN, 0, WX_CLOUD_KEEP };
+    case 45: case 48:
+        return (wx_glyph_t){ w, WX_CP_FOG, 0, 0 };
+    case 51: case 53: case 55: case 56: case 57:
+        return (wx_glyph_t){ w, WX_CP_DRIZZLE, -1, 0 };
+    case 61: case 63: case 65: case 66: case 67:
+    case 80: case 81: case 82:
+        /* the fall lines hang low under the cloud */
+        return (wx_glyph_t){ w, WX_CP_RAIN, -1, 0 };
+    case 71: case 73: case 75: case 77: case 85: case 86:
+        return (wx_glyph_t){ u8g2_font_unifont_t_76, WX_CP_SNOW, 0, 0 };
+    case 95: case 96: case 99:
+        return (wx_glyph_t){ w, WX_CP_STORM, 0, 0 };
+    default:
+        return (wx_glyph_t){ w, WX_CP_UNKNOWN, 0, 0 };
     }
-    *font = WX_ICONS[hit].font;
-    *cp   = WX_ICONS[hit].cp;
-    *dy   = WX_ICONS[hit].dy;
 }
 
 /* Current conditions as one block: the icon on the left edge, the temperature
@@ -337,16 +389,19 @@ static void wx_now(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
     gfx_font_metrics(UI_BOLD.font, &fm);
     gfx_font_metrics(UI_TEXT.font, &cm);
 
-    const uint8_t *icon_font;
-    unsigned       icon_cp;
-    int            icon_dy;
-    wx_icon(code, &icon_font, &icon_cp, &icon_dy);
+    wx_glyph_t g = wx_icon(code, m->sun.elev_ok && m->sun.elev_deg < 0);
 
-    gfx_text_style_t is = { icon_font, GFX_FULL, GFX_LEFT };
+    gfx_text_style_t is = { g.font, GFX_FULL, GFX_LEFT };
     int top = cur->y;
-    int x   = gfx_glyph_w(&is, icon_cp) + UI_GAP;
+    int x   = WX_ICON_W + UI_GAP;
 
-    gfx_glyph(c, 0, top + WX_ICON_H + icon_dy, &is, icon_cp);
+    if (g.keep) {
+        gfx_push(c, (gfx_rect_t){ 0, (int16_t)top, WX_ICON_W, g.keep });
+        gfx_glyph(c, 0, WX_ICON_BASE + g.dy, &is, g.cp);   // local to the box
+        gfx_pop(c);
+    } else {
+        gfx_glyph(c, 0, top + WX_ICON_BASE + g.dy, &is, g.cp);
+    }
 
     // Whole degrees carry the reading and stay bold; the tenth is a detail and
     // drops to the text face. Split off the formatted string so rounding and the
@@ -380,10 +435,18 @@ static void wx_now(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
         int pw     = gfx_text_w(&ps, precip);
         int p_base = baseline - 1;
 
-        gfx_rect(c, (gfx_rect_t){ (int16_t)(UI_RX - pw - 2 * AP_PAD),
-                                  (int16_t)(p_base - cm.ascent - 1),
-                                  (int16_t)(pw + 2 * AP_PAD), (int16_t)(cm.ascent + 2) },
-                 GFX_NONE, GFX_FULL, GFX_SOLID);
+        gfx_rect_t plate = { (int16_t)(UI_RX - pw - 2 * AP_PAD),
+                             (int16_t)(p_base - cm.ascent - 1),
+                             (int16_t)(pw + 2 * AP_PAD), (int16_t)(cm.ascent + 2) };
+        gfx_rect(c, plate, GFX_NONE, GFX_FULL, GFX_SOLID);
+
+        // Corners knocked back out, so the plate reads as rounded.
+        int px1 = plate.x + plate.w - 1, py1 = plate.y + plate.h - 1;
+        gfx_px(c, plate.x, plate.y, GFX_OFF);
+        gfx_px(c, px1,     plate.y, GFX_OFF);
+        gfx_px(c, plate.x, py1,     GFX_OFF);
+        gfx_px(c, px1,     py1,     GFX_OFF);
+
         gfx_text(c, UI_RX - AP_PAD, p_base, &ps, precip);
     }
 
@@ -733,6 +796,47 @@ static void sun_bar(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
     }
 }
 
+/* An animal walking the width of the screen and back along the bottom edge, a new
+ * one each time it has left the frame. unifont_t_animals reports no usable
+ * metrics — its glyphs are 16 px tall with the ink one row below the baseline,
+ * and 14..17 wide, so the travel takes the widest of them and the vertical
+ * placement is by hand. It shares the bottom rows with the brightness readout and
+ * is allowed to walk over it. */
+#define ZOO_STEP_MS  1000          /* per pixel of travel */
+#define ZOO_PAUSE_MS 10000         /* spent off-screen between legs */
+#define ZOO_W        17            /* widest glyph, what has to clear the edge */
+#define ZOO_GLYPHS   99            /* the unbroken run from 0x20; there are holes past it */
+#define ZOO_CAT      0x28          /* U+1F408 in the font's own run, the one that opens the show */
+
+static void zoo(gfx_canvas_t *c, uint32_t anim_ms, uint32_t seed)
+{
+    const int span  = GFX_W + ZOO_W + 1;   /* fully off one edge to fully off the other */
+    const int cycle = span + ZOO_PAUSE_MS / ZOO_STEP_MS;
+
+    uint32_t t   = anim_ms / ZOO_STEP_MS;
+    uint32_t leg = t / (uint32_t)cycle;
+    int      p   = (int)(t % (uint32_t)cycle);
+
+    if (p >= span) {
+        return;   // waiting out the pause, off-screen
+    }
+
+    // A function of anim_ms and the per-boot seed, like the other moving parts,
+    // so the walk keeps no state: the leg number is what the animal is picked by,
+    // which is why a new one turns up after every exit. The first one is the cat,
+    // by hand; the seed still shuffles everything that follows it.
+    unsigned cp = leg == 0 ? ZOO_CAT
+                           : 0x20 + (unsigned)(((leg + seed) * 2654435761u >> 13) % ZOO_GLYPHS);
+
+    const gfx_text_style_t st = { u8g2_font_unifont_t_animals, GFX_FULL, GFX_LEFT };
+    int x = (leg & 1) ? GFX_W - p : p - ZOO_W;
+
+    // Ink one row below the baseline, and the burn-in shift's reserve kept clear
+    // above the edge, so at shift 0 it stands GFX_SHIFT_MAX rows off the bottom.
+    // The glyphs face left, so the rightward leg is the one that gets flipped.
+    gfx_glyph_m(c, x, GFX_H - 2 - GFX_SHIFT_MAX, &st, cp, !(leg & 1));
+}
+
 // Built up element by element: what is drawn here reads the model, the blocks
 // still commented out are roughed-in layout waiting for theirs.
 void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
@@ -813,13 +917,13 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
 
     baseline = ui_row(&cur, &UI_TEXT);
     reading(c, 0, baseline, &UI_TEXT, ok, "%.1f", "--.-", m->out.feels_c, "FL", true,
-            GFX_NONE);
+            GFX_NONE, false);
     reading(c, UI_RX, baseline, &UI_TEXT_R, ok, "%.1f", "---.-",
-            m->out.pressure_msl_hpa, NULL, false, GFX_NONE);
+            m->out.pressure_msl_hpa, NULL, false, GFX_NONE, false);
 
     baseline = ui_row(&cur, &UI_TEXT);
     reading(c, 0, baseline, &UI_TEXT, ok, "%.0f%%", "--%", m->out.humidity_pct,
-            NULL, false, GFX_NONE);
+            NULL, false, GFX_NONE, false);
     // Speed and gusts as one range, in the units the API reports.
     if (ok) {
         gfx_textf(c, UI_RX, baseline, &UI_TEXT_R, "%s%.0f-%.0f",
@@ -831,9 +935,10 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
 
     baseline = ui_row(&cur, &UI_TEXT);
     reading(c, 0, baseline, &UI_TEXT, ok && m->out.uvi >= 0, "%.1f", "--.-",
-            m->out.uvi, "UV", false, GFX_NONE);
+            m->out.uvi, "UV", false, GFX_NONE,
+            blink(m->anim_ms, ok && m->out.uvi >= 0, m->out.uvi, -INFINITY, AL_UVI_HI));
     reading(c, UI_RX, baseline, &UI_TEXT_R, ok, "%.0f%%", "--%",
-            (double)m->out.cloud_pct, "CL", false, GFX_NONE);
+            (double)m->out.cloud_pct, "CL", false, GFX_NONE, false);
 
     rule(c, &cur);
 
@@ -853,38 +958,29 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
 
     baseline = ui_row(&cur, &UI_TEXT);
     reading(c, 0, baseline, &UI_TEXT, cl->temp_ok, "%.2f", "--.--", cl->temp_c,
-            NULL, true, q_bg(s, HISTORY_Q_TEMP));
+            NULL, true, q_bg(s, HISTORY_Q_TEMP),
+            blink(m->anim_ms, cl->temp_ok, cl->temp_c, AL_TEMP_LO, AL_TEMP_HI));
     reading(c, UI_RX, baseline, &UI_TEXT_R, cl->press_ok, "%.3f", "---.---",
-            cl->press_msl_hpa, NULL, false, q_bg(s, HISTORY_Q_PRESS));
+            cl->press_msl_hpa, NULL, false, q_bg(s, HISTORY_Q_PRESS), false);
 
     baseline = ui_row(&cur, &UI_TEXT);
     reading(c, 0, baseline, &UI_TEXT, cl->rh_ok, "%.1f%%", "--.-%", cl->rh_pct,
-            NULL, false, q_bg(s, HISTORY_Q_RH));
+            NULL, false, q_bg(s, HISTORY_Q_RH),
+            blink(m->anim_ms, cl->rh_ok, cl->rh_pct, AL_RH_LO, AL_RH_HI));
     reading(c, UI_RX, baseline, &UI_TEXT_R, cl->co2_ok, "%.0f", "---",
-            (double)cl->co2_ppm, "CO2", false, q_bg(s, HISTORY_Q_CO2));
+            (double)cl->co2_ppm, "CO2", false, q_bg(s, HISTORY_Q_CO2),
+            blink(m->anim_ms, cl->co2_ok, cl->co2_ppm, -INFINITY, AL_CO2_HI));
 
     baseline = ui_row(&cur, &UI_TEXT);
     char lx[8] = "--";
     if (cl->lux_ok) {
         ui_lux_str(lx, sizeof(lx), cl->lux);
     }
-    value(c, 0, baseline, &UI_TEXT, lx, "Lx", false, q_bg(s, HISTORY_Q_LUX));
+    value(c, 0, baseline, &UI_TEXT, lx, "Lx", false, q_bg(s, HISTORY_Q_LUX), false);
     reading(c, UI_RX, baseline, &UI_TEXT_R, cl->rh_ok, "%.1f", "--.-",
-            cl->dew_c, "DW", true, GFX_NONE);
+            cl->dew_c, "DW", true, GFX_NONE, false);
 
     rule(c, &cur);
-
-    // Brightness, pinned to the bottom corner: it is a knob field and needs a
-    // readout to be edited by. 3x5im has no descender, so the baseline is its
-    // last row, and it clears the burn-in shift's reserve above the edge.
-    int bw = gfx_textf_bg(c, UI_RX, GFX_H - 1 - GFX_SHIFT_MAX, &UI_TINY_R,
-                          s->focus == UI_FOCUS_BRIGHT ? GFX_HL : GFX_NONE, "%u",
-                          s->set.bright);
-
-    // The burn-in offset the frame is currently drawn at, left of it: read-only,
-    // so it stays off the plate the focus draws under the brightness.
-    gfx_textf(c, UI_RX - bw - 2, GFX_H - 1 - GFX_SHIFT_MAX, &UI_TINY_R, "+%d",
-              gfx_shift(c));
 
     // Chart
 
@@ -926,19 +1022,26 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     sun_bar(c, &cur, m);
     rule(c, &cur);
 
+    // Debug info, pinned to the bottom corner: the burn-in offset the frame is
+    // currently drawn at, then the
+    // brightness, prefixed by the mode ('A' auto, '-' manual); it is a knob field
+    // and needs a readout to be edited by. One run on one plate, so focusing the
+    // brightness lights the whole strip.
+    // 3x5im has no descender, so the baseline is its last row, and it clears the
+    // burn-in shift's reserve above the edge.
+    bool bright_focus = s->focus == UI_FOCUS_BRIGHT;
 
-    /*
-    // A random animal pinned to the bottom edge. unifont_t_animals carries one
-    // unbroken run of glyphs from 0x20, and its ink sits one row below the
-    // baseline, which is what puts the last row on GFX_H - 1. Drawn once and
-    // kept: rolled per frame it would be a different animal ten times a second.
-    static unsigned cp;
-    if (cp == 0) {
-        cp = 0x20 + (unsigned)(rand() % 99);
-    }
+    // Dim, being debug: GFX_DIM is a level below GFX_HL, so under focus it has to
+    // go back to full or the plate would swallow it.
+    gfx_text_style_t dbg = UI_TINY_R;
+    dbg.level = bright_focus ? GFX_FULL : GFX_DIM;
 
-    const gfx_text_style_t zoo = { u8g2_font_unifont_t_animals, GFX_FULL, GFX_CENTER };
-    gfx_glyph(c, GFX_W / 2, GFX_H - 2, &zoo, cp);
+    // The mode marks the brightness, which is the level the panel is actually
+    // driven at whichever mode picked it.
+    gfx_textf_bg(c, UI_RX, GFX_H - 1 - GFX_SHIFT_MAX, &dbg,
+                 bright_focus ? GFX_HL : GFX_OFF, "+%d %s%u",
+                 gfx_shift(c), s->set.auto_bright ? "A " : "- ", s->bright_now);
 
-    */
+    // Last, so the animal walks over the debug line rather than under it.
+    zoo(c, m->anim_ms, m->boot_seed);
 }

@@ -47,7 +47,7 @@
 #define WEATHER_API_MAX_AGE_MS         (60 * 60 * 1000) /* a reading older than this is dropped */
 #define WEATHER_API_NO_NET_DELAY_MS    10000            /* wait for the link, then re-check */
 #define WEATHER_API_HTTP_TIMEOUT_MS    10000
-#define WEATHER_API_MAX_RESPONSE       6144             /* current, five daily rows and 24 hourly is ~2 KB */
+#define WEATHER_API_MAX_RESPONSE       6144             /* current, seven daily rows and 24 hourly is ~2 KB */
 
 static const char *TAG = "weather_api";
 

@@ -50,6 +50,9 @@ int gfx_textf_bg(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *s
 /* One glyph by code point, for icon fonts whose glyphs are picked by number
  * rather than typed. */
 int  gfx_glyph(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st, unsigned cp);
+// The same, optionally flipped left-to-right within its own advance width.
+int  gfx_glyph_m(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t *st,
+                 unsigned cp, bool mirror);
 int  gfx_glyph_w(const gfx_text_style_t *st, unsigned cp);
 
 int  gfx_text_w(const gfx_text_style_t *st, const char *s);

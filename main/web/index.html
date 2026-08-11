@@ -1200,6 +1200,14 @@
 
                     <div class="set-row">
                         <div class="head">
+                            <span class="name" data-i18n="displayAutoBrightness"
+                                >Авто-яркость дисплея</span
+                            ><input type="checkbox" id="dispAutoBri" />
+                        </div>
+                    </div>
+
+                    <div class="set-row">
+                        <div class="head">
                             <span class="name" data-i18n="displayBrightness"
                                 >Яркость дисплея</span
                             ><span class="val" id="dispBriVal">—</span>
@@ -1477,6 +1485,7 @@
                     buzzerVolume: "Громкость зуммера",
                     displayOn: "Дисплей включён",
                     displayBrightness: "Яркость дисплея",
+                    displayAutoBrightness: "Авто-яркость дисплея",
                     radarBtOff: "Bluetooth радара отключён",
                     settingSaved: "Настройка сохранена",
                     sensWhiteRatio: "Соотношение white/lux",
@@ -1701,6 +1710,7 @@
                     buzzerVolume: "Buzzer volume",
                     displayOn: "Display on",
                     displayBrightness: "Display brightness",
+                    displayAutoBrightness: "Display auto brightness",
                     radarBtOff: "Radar Bluetooth switched off",
                     settingSaved: "Setting saved",
                     sensWhiteRatio: "White/lux ratio",
@@ -2590,6 +2600,7 @@
                 syncSetting("volRange", st.buzzer_volume, "volVal");
                 syncSetting("dispBriRange", st.display_brightness, "dispBriVal");
                 syncSetting("dispOn", st.display_on);
+                syncSetting("dispAutoBri", st.display_auto_brightness);
                 syncSetting("radarBtOff", st.radar_bt_off);
                 syncSetting("altInput", st.altitude);
             }
@@ -3803,6 +3814,11 @@
                 "settingSaved",
             );
             wireCheckbox("dispOn", "display_on", "settingSaved");
+            wireCheckbox(
+                "dispAutoBri",
+                "display_auto_brightness",
+                "settingSaved",
+            );
             wireCheckbox("radarBtOff", "radar_bt_off", "settingSaved");
 
             /* Site altitude: the one input to the sea-level reduction. Saved on

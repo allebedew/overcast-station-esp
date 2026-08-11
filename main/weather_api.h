@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <time.h>
 
-#define WEATHER_API_FORECAST_DAYS  5
+#define WEATHER_API_FORECAST_DAYS  7
 #define WEATHER_API_FORECAST_HOURS 24
 
 /* One day of the daily forecast; index 0 is today. */

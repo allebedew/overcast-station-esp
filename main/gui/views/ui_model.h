@@ -71,6 +71,10 @@ typedef struct {
      * a frame animates off one stamp rather than each widget reading a clock. */
     uint32_t anim_ms;
 
+    /* Fixed for the run, random across boots: what a stateless animation mixes
+     * into its picks so they do not repeat the same order after a restart. */
+    uint32_t boot_seed;
+
     /* The chart's series, sampled here rather than under the screen so that
      * rendering keeps reading the model and nothing else. Oldest first, NAN for
      * a gap; chart_n is short of the window until the ring has filled it. */

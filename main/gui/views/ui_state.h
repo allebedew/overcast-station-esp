@@ -40,7 +40,8 @@ typedef enum {
  * therefore boots dark, and one whose chart was on a day of pressure comes back
  * to it. */
 typedef struct {
-    uint8_t            bright;
+    uint8_t            bright; /* the manual level, kept across a stay in auto */
+    bool               auto_bright;
     bool               on;
     history_quantity_t chart_q;
     chart_range_t      chart_range;
@@ -58,6 +59,13 @@ typedef struct {
      * after it settles rather than per detent. */
     uint8_t loc_sel;
     uint8_t loc_count;
+
+    /* What the panel is actually driven at, and the level it is walking towards
+     * a step a frame — the manual setting, or what the room works out to under
+     * auto. The screen shows bright_now either way. */
+    uint8_t bright_now;
+    uint8_t bright_want;
+
 } ui_state_t;
 
 /* What an input handler did, for whoever owns the sound. Kept out of the
@@ -74,6 +82,11 @@ typedef enum {
 void ui_state_init(ui_state_t *s, const ui_settings_t *set);
 
 ui_event_t ui_state_input(ui_state_t *s, const encoder_input_t *in);
+
+/* Drives the panel's brightness, once a frame: the manual level, or the light
+ * sensor mapped under auto, which follows it without a delay of its own. `lux`
+ * is ignored when `lux_ok` is false, and outside auto mode. */
+void ui_state_light(ui_state_t *s, bool lux_ok, float lux);
 
 /* The selection on one line, for the log: nothing on the panel marks it yet. */
 void ui_state_format(const ui_state_t *s, char *buf, int n);

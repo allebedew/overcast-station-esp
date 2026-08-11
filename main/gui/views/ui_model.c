@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_random.h"
 #include "esp_timer.h"
 #include "sun.h"
 #include "timesync.h"
@@ -45,4 +46,12 @@ void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
     out->ap   = wifi.ap_active;
 
     out->anim_ms = (uint32_t)(esp_timer_get_time() / 1000);
+
+    // Drawn once per boot: an animation that is a function of anim_ms alone would
+    // otherwise replay the same picks in the same order after every restart.
+    static uint32_t seed;
+    if (seed == 0) {
+        seed = esp_random() | 1u;
+    }
+    out->boot_seed = seed;
 }

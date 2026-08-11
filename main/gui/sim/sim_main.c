@@ -43,9 +43,9 @@ void gfx_set_precharge(uint8_t phase2, uint8_t second, uint8_t voltage)
     (void)voltage;
 }
 
-static const uint8_t *F_TINY  = u8g2_font_4x6_tr;
-static const uint8_t *F_TEXT  = u8g2_font_6x10_mr;
-static const uint8_t *F_CAP   = u8g2_font_micro_tr;   // captions in the scenes themselves
+static const uint8_t *F_TINY  = u8g2_font_3x5im_tr;
+static const uint8_t *F_TEXT  = u8g2_font_04b_03_tr;
+static const uint8_t *F_CAP   = u8g2_font_3x5im_tr;   // captions in the scenes themselves
 
 // --- every gray level, to check the nibble packing and the ramp -------------
 
@@ -91,11 +91,11 @@ static void utf8_encode(unsigned cp, char out[5])
     out[n] = '\0';
 }
 
-// Not a property of the data: open_iconic and unifont both carry letters too,
-// so the intent has to come from the name.
+// Not a property of the data: unifont carries letters too, so the intent has to
+// come from the name.
 static bool is_icon_font(const char *name)
 {
-    return strstr(name, "iconic") != NULL || strstr(name, "unifont") != NULL;
+    return strstr(name, "unifont") != NULL;
 }
 
 // gfx_font_table is in link order; specimens and the width table read far better
@@ -231,10 +231,9 @@ static void scene_pairs(gfx_canvas_t *c)
     gfx_clear(c, GFX_OFF);
 
     struct { const uint8_t *label, *value; const char *tag; } combos[] = {
-        { u8g2_font_micro_tr,     u8g2_font_6x10_mr,        "micro + 6x10"      },
-        { u8g2_font_4x6_tr,       u8g2_font_resoledbold_tr, "4x6 + resoled"     },
-        { u8g2_font_3x5im_tr,     u8g2_font_micropixel_tr,  "3x5im + micropixel"},
-        { u8g2_font_04b_03_tr,    u8g2_font_6x10_mr,        "04b03 + 6x10"      },
+        { u8g2_font_3x5im_tr,     u8g2_font_04b_03_tr,      "3x5im + 04b03"     },
+        { u8g2_font_3x5im_tr,     u8g2_font_resoledbold_tr, "3x5im + resoled"   },
+        { u8g2_font_04b_03_tr,    u8g2_font_resoledbold_tr, "04b03 + resoled"   },
     };
 
     int top = 2;
@@ -540,6 +539,7 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data, bool fetching,
     m.out.age_s    = -1;
     m.out_fetching = fetching;
     m.anim_ms      = anim_ms;
+    m.boot_seed    = (uint32_t)rand();   // stands in for esp_random() on the panel
 
     // The knob's own state, which on the panel ui_state_init() sets: the chart
     // is drawn from what it has picked.
@@ -640,7 +640,11 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data, bool fetching,
     m.link = UI_LINK_UP;
     m.rssi = -68;
 
-    st.set.bright = 12;   // the knob's own state, shown in the corner
+    // The knob's own state, shown in the corner: manual mode at level 12, which
+    // is also what the panel is driven at.
+    st.set.bright  = 12;
+    st.bright_now  = 12;
+    st.bright_want = 12;
 
     ui_render(c, &m, &st);
 }

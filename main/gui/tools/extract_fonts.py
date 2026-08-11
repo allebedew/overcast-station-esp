@@ -25,18 +25,13 @@ OUT_C = os.path.join(GUI, "gfx", "gfx_fonts.c")
 # simulator renders its specimens in.
 FONTS = [
     # text
-    "u8g2_font_micro_tr",
     "u8g2_font_3x5im_tr",
     "u8g2_font_04b_03_tr",
-    "u8g2_font_4x6_tr",
-    "u8g2_font_micropixel_tr",
     "u8g2_font_resoledbold_tr",
-    "u8g2_font_6x10_mr",
     # icons
-    "u8g2_font_open_iconic_all_1x_t",
     "u8g2_font_unifont_t_weather",
     "u8g2_font_unifont_t_animals",
-    "u8g2_font_unifont_t_77",
+    "u8g2_font_unifont_t_76",
 ]
 
 
