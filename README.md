@@ -52,12 +52,11 @@ history.
   N clients; green blinking — connecting; solid — connected, color by CO₂
   (green ≤400, yellow 800, red ≥1200 ppm), dipping off on every HTTP request.
 - **Buzzer** (passive piezo KPT-1410 on GPIO19, straight on the pin) — one LEDC
-  channel, nineteen tunes, a new one cuts off whatever is playing: three clicks
+  channel, seventeen tunes, a new one cuts off whatever is playing: three clicks
   at different pitches, two bare tones well below resonance (2.5 and 1.5 kHz,
   there to be listened to), `OK`/`WARN`/`ALARM`/`ERROR`, one per CO₂ zone edge in
   each direction (the motif repeats once per zone crossed, rising going up and
-  falling coming down), `STORM`, `ARRIVE`/`LEAVE` on the radar's raw presence
-  flag and the boot chirp. The
+  falling coming down), `STORM` and the boot chirp. The
   element resonates at 4 kHz and drops off
   steeply either side, so tunes differ by rhythm inside 3.5–4.5 kHz, not by
   pitch. Volume is the PWM duty, 1–50 % of full swing (the fundamental goes as
@@ -231,10 +230,11 @@ history.
   (`0xAE`, and nothing is rendered or clocked out while it is dark) and another
   brings it back; the state is kept in `settings/disp_on`, so a panel switched
   off stays dark across a reboot. The panel is lit only when that state and the
-  radar's presence flag agree — the same flag the arrive/leave sounds follow,
-  with its own 5 s hold, so the screen goes dark on the beep and needs no hold
-  of its own; a silent radar counts as present, so a dead module cannot blank
-  the panel. Both it and the brightness are also readable
+  radar's presence flag agree — the flag's own 5 s hold is what keeps the panel
+  from flickering, so it needs none of its own; a silent radar counts as
+  present, so a dead module cannot blank the panel. Every change of that lit
+  state plays `CLICK`, suppressed when the knob is what caused it, since the
+  click for the press has already sounded. Both it and the brightness are also readable
   and settable over the HTTP API, which goes through the settings module and
   never calls into the render task; that task compares the two settings with
   what it last saw at the top of every frame and adopts whatever moved, so
@@ -375,9 +375,7 @@ history.
   crossing 800/1200/2000 ppm (±25 ppm hysteresis), and arrival/departure from
   the radar's presence flag, reported with how long the previous state lasted.
   A departure counts only after 5 min of confirmed absence, since the radar
-  loses whoever sits still; an arrival after 3 s. The buzzer does not wait for
-  either: `ARRIVE`/`LEAVE` play on the raw presence flag, whose own 5 s hold is
-  what keeps them from chattering. Token and chat id are
+  loses whoever sits still; an arrival after 3 s. Token and chat id are
   compile-time constants in `telegram.c`; left empty, the module disables
   itself.
 - **Outside weather (Open-Meteo)** — the active location fetched over HTTPS

@@ -199,9 +199,8 @@ static void adopt_display_settings(void)
     s_persisted = now;
 }
 
-/* The radar's own flag, the same one the arrive/leave sounds follow, so the
- * panel goes dark on the beep rather than on a hold of its own. A silent module
- * counts as present: a dead radar must not blank the panel for good. */
+/* The radar's own flag, with no hold of its own on top. A silent module counts
+ * as present: a dead radar must not blank the panel for good. */
 static bool presence_now(void)
 {
     ld2450_data_t r;
@@ -276,6 +275,10 @@ static void gui_task(void *arg)
 
     bool changed = false;
 
+    /* Seeded from the state the panel boots in, so the first frame is not an
+     * edge and does not click over BUZZER_BOOT. */
+    bool lit = s_state.set.on;
+
     for (;;) {
         if (ota_is_active()) {
             ota_frame();
@@ -286,6 +289,8 @@ static void gui_task(void *arg)
 
             encoder_input_t in;
             encoder_take(&in);
+
+            bool on_before = s_state.set.on;
 
             ui_event_t ev = ui_state_input(&s_state, &in);
             if (ev != UI_EV_NONE) {
@@ -308,6 +313,13 @@ static void gui_task(void *arg)
 
             /* Lit only for someone who is there to read it. */
             bool want_on = s_state.set.on && presence_now();
+
+            /* The panel changing state gets the click, except when the knob is
+             * what changed it -- ui_state_input() has just clicked for that. */
+            if (want_on != lit && s_state.set.on == on_before) {
+                buzzer_play(BUZZER_CLICK);
+            }
+            lit = want_on;
 
             panel_hours_track(want_on, s_state.bright_now);
 

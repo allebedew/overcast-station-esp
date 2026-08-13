@@ -5,7 +5,6 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "buzzer.h"
 #include "esp_timer.h"
 #include "ld2450.h"
 #include "sensors.h"
@@ -90,25 +89,6 @@ static void format_span(char *buf, size_t n, int64_t ms)
     }
 }
 
-/* The buzzer follows the raw flag rather than the confirmed edges below: the
- * point of it is to answer at once, and the flag's own 5 s hold already keeps
- * it from chattering. */
-static void presence_sound(bool present)
-{
-    static bool armed, last;
-
-    if (!armed) {
-        armed = true;
-        last = present;
-        return;
-    }
-    if (present == last) {
-        return;
-    }
-    last = present;
-    buzzer_play(present ? BUZZER_ARRIVE : BUZZER_LEAVE);
-}
-
 /* Confirmed arrivals and departures. Both edges are dated by when the raw flag
  * actually flipped, not by when the confirmation window expired, so the
  * reported durations exclude the window. */
@@ -122,8 +102,6 @@ static void check_presence(void)
     if (!ld2450_get(&r)) { /* radar silent: state unknown, not empty */
         return;
     }
-
-    presence_sound(r.presence);
 
     int64_t now = now_ms();
     if (!armed) {
