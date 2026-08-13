@@ -174,11 +174,12 @@ history.
   8 MHz, mounted rotated so everything above the transport works in portrait
   64x256. A render task at **10 frames/s** refreshes the model, folds in the
   encoder and draws; the frame is then compared with the 8 KB copy of what the
-  panel is showing and flushed only if a pixel differs — `gfx_present` costs a
-  fixed 8.3 ms of SPI whatever changed, and the comparison is at pixel level
-  because a reading that moves below its displayed resolution changes the model
-  without changing the screen. Render times are logged every 5 s, and only while
-  frames are actually being flushed.
+  panel is showing and flushed only if a pixel differs — `gfx_present` takes a
+  fixed 8.3 ms of SPI whatever changed (DMA, with the task blocked rather than
+  spinning), and the comparison is at pixel level because a reading that moves
+  below its displayed resolution changes the model without changing the screen.
+  Render times are logged every 10 min, and only while frames are actually being
+  flushed.
   Switching the panel on and off is a **0.4 s dissolve**: the lit pixels of the
   frame are added, and removed, in random order, and the frame period drops to
   20 ms while it runs. The controller's display-on comes first and display-off

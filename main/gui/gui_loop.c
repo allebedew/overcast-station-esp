@@ -59,7 +59,7 @@ static const char *TAG = "gui";
 static gfx_canvas_t s_canvas;
 
 /* What the panel is showing. A frame that comes out identical is not flushed:
- * present costs a fixed 8.3 ms of SPI whatever changed, and comparing 8 KB
+ * present takes a fixed 8.3 ms of SPI whatever changed, and comparing 8 KB
  * costs tens of microseconds. Comparing pixels rather than the model is what
  * makes this work at all -- a temperature moving in its third decimal changes
  * the model many times per reading it changes on screen. */

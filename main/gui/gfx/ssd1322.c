@@ -51,6 +51,12 @@ static void dc_pre_cb(spi_transaction_t *t)
     gpio_set_level(PIN_DC, (int)(intptr_t)t->user);
 }
 
+/* Above this many bytes the transfer goes out over DMA and the caller blocks on
+ * the driver's interrupt instead of spinning: a full frame is 8 KB, 8.3 ms at
+ * SPI_HZ, and that was the single largest consumer of CPU in the system. Below
+ * it the interrupt round trip costs more than the spin it saves. */
+#define TX_DMA_MIN 64
+
 static void tx(const uint8_t *p, size_t n, int dc)
 {
     spi_transaction_t t = {
@@ -63,7 +69,12 @@ static void tx(const uint8_t *p, size_t n, int dc)
     } else {
         t.tx_buffer = p;
     }
-    ESP_ERROR_CHECK(spi_device_polling_transmit(s_dev, &t));
+
+    if (n >= TX_DMA_MIN) {
+        ESP_ERROR_CHECK(spi_device_transmit(s_dev, &t));
+    } else {
+        ESP_ERROR_CHECK(spi_device_polling_transmit(s_dev, &t));
+    }
 }
 
 static void cmd(uint8_t c)
