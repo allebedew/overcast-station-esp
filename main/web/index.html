@@ -121,7 +121,6 @@
             }
             body.stale .grid-sensors,
             body.stale .card.weather,
-            body.stale .card.sensors,
             body.stale .grid-bottom {
                 opacity: 0.45;
             }
@@ -289,10 +288,14 @@
                 background: rgba(91, 102, 117, 0.18);
                 color: var(--text-faint);
             }
-            /* One line under the chart: the forecast wording on the pressure
-               card. Ellipsised rather than wrapped — the card height is shared
-               with every other sensor card in the grid. */
+            /* One line under the chart: a wording on the left and, on cards
+               that have one, a secondary value pinned to the right edge.
+               Ellipsised rather than wrapped — the card height is shared with
+               every other sensor card in the grid. */
             .cardfoot {
+                display: flex;
+                align-items: baseline;
+                gap: 6px;
                 margin-top: auto;
                 padding-top: 12px;
                 /* into the card's own bottom padding: the line reads as part of
@@ -302,17 +305,32 @@
                 font-weight: 600;
                 color: var(--text);
                 white-space: nowrap;
+            }
+            .cardfoot > .cf-l {
                 overflow: hidden;
                 text-overflow: ellipsis;
             }
+            .cardfoot > .cf-r {
+                margin-left: auto;
+            }
+            /* label dim, value in the text colour — the same pairing the
+               pressure tendency uses */
+            .cf-k {
+                color: var(--text-dim);
+            }
             /* Bullet in the badge's colour, so the grade the arrow carries is
-               repeated where the wording is. */
+               repeated where the wording is. Only the graded footers have one. */
             .cardfoot::before {
-                content: "• ";
-                /* larger than the text it marks, nudged back onto its baseline */
+                content: "•";
+                /* larger than the text it marks, nudged back onto its baseline
+                   (as a flex item it is baseline-aligned, not vertical-align'd) */
                 font-size: 2em;
                 line-height: 1;
-                vertical-align: -0.13em;
+                position: relative;
+                top: 0.13em;
+            }
+            .cardfoot.plain::before {
+                content: none;
             }
             .cardfoot.good::before {
                 color: var(--co2);
@@ -389,43 +407,14 @@
                 /* reserve one line so nothing below jumps when data loads */
                 min-height: 1.3em;
             }
-            /* --- I2C sensors card ---
-             * One nested card per device, holding metric tiles built like the
-             * outside-weather ones a size down. Diagnostic values (raw counts,
-             * gain, integration time) go to a footer line instead of a tile:
-             * they explain the readings rather than being readings. */
-            .card.sensors {
-                margin-top: 12px;
-            }
-            .sens-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-                /* every device card the same height, whatever it holds — the
-                 * row count varies from one metric (TMP117) to three */
-                grid-auto-rows: 1fr;
-                gap: 10px;
-            }
-            .sens-dev {
-                display: flex;
-                flex-direction: column;
-                padding: 10px 12px 11px;
-                border-radius: 10px;
-                background: var(--panel-2);
-                border: 1px solid var(--border);
-            }
-            .sens-head {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                margin-bottom: 9px;
-            }
-            .sens-name {
-                font-size: 12px;
+            /* The sun line carries readings, not provenance, so it reads like a
+               card footer rather than like the location line above it. */
+            .weather-meta.sun {
+                font-size: 11.5px;
                 font-weight: 600;
-                letter-spacing: 0.03em;
+                color: var(--text);
             }
-            /* liveness indicator in front of the part number, replaces the
-             * former online/offline text badge. */
+            /* Liveness indicator in a card header, in front of the name. */
             .sens-dot {
                 flex: none;
                 width: 10px;
@@ -433,45 +422,8 @@
                 border-radius: 50%;
                 background: var(--co2);
             }
-            .sens-dev.off .sens-dot {
+            .sens-dot.off {
                 background: var(--co2-bad);
-            }
-            .sens-metrics {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
-                gap: 8px 12px;
-                /* take the slack from the equal-height row so the tiles stay
-                 * at the top and the footer line sits on the bottom edge */
-                flex: 1;
-                align-content: start;
-            }
-            .sens-metric .sv {
-                font-size: 20px;
-                font-weight: 700;
-                letter-spacing: -0.02em;
-                font-variant-numeric: tabular-nums;
-            }
-            .sens-metric .su {
-                font-size: 11px;
-                color: var(--text-dim);
-                font-weight: 500;
-                margin-left: 3px;
-            }
-            .sens-metric .sl {
-                display: block;
-                font-size: 10.5px;
-                color: var(--text-faint);
-            }
-            .sens-aux {
-                margin-top: 9px;
-                padding-top: 8px;
-                border-top: 1px solid var(--border);
-                font-size: 10.5px;
-                color: var(--text-faint);
-                font-variant-numeric: tabular-nums;
-            }
-            .sens-dev.off .sens-metric .sv {
-                color: var(--text-faint);
             }
 
             /* --- Location switcher (chips in the weather card) --- */
@@ -1112,16 +1064,6 @@
                  every card is always present, with "--" where no reading is -->
             <div class="grid-sensors" id="sensorCards"></div>
 
-            <!-- I2C SENSORS (raw readings, one nested card per device) -->
-            <div class="card sensors">
-                <h2>
-                    <span data-i18n="sensorsTitle">Датчики</span>
-                </h2>
-                <div class="sens-grid" id="sensorsGrid">
-                    <div class="sens-dev" data-i18n="loading">Загрузка…</div>
-                </div>
-            </div>
-
             <!-- OUTSIDE WEATHER (Open-Meteo, hourly) -->
             <div class="card weather">
                 <h2>
@@ -1133,8 +1075,8 @@
                      the decoded conditions; the full set of tiles is always
                      laid out, data or not -->
                 <div class="weather-grid" id="weatherGrid"></div>
-                <div class="weather-meta" id="sunMeta"></div>
                 <div class="weather-meta" id="weatherMeta"></div>
+                <div class="weather-meta sun" id="sunMeta"></div>
             </div>
 
             <!-- BOTTOM ROW -->
@@ -1426,6 +1368,15 @@
             const num = (v, f) =>
                 typeof v === "number" && Number.isFinite(v) ? f(v) : NA;
             const txt = (v) => (v === undefined || v === null || v === "" ? NA : String(v));
+            /* Liveness dot in a card header, the same one the device cards
+             * carry; the title is set here so a language switch reaches it. */
+            const setDot = (id, ok) => {
+                const el = $(id);
+                el.className = "sens-dot" + (ok ? "" : " off");
+                el.title = ok ? t("sensOk") : t("sensOff");
+            };
+            /* card footer pair: dim label, value in the text colour */
+            const footKV = (k, v) => `<span class="cf-k">${esc(k)}:</span> ${esc(v)}`;
 
             /* ---------- i18n ---------- */
             const I18N = {
@@ -1466,7 +1417,6 @@
                     sunNautical: "навигационные сумерки",
                     sunAstro: "астрономические сумерки",
                     sunNight: "ночь",
-                    sensorsTitle: "Датчики",
                     sensOk: "Работает",
                     sensOff: "Нет ответа",
                     co2: "CO₂",
@@ -1488,10 +1438,9 @@
                     displayAutoBrightness: "Авто-яркость дисплея",
                     radarBtOff: "Bluetooth радара отключён",
                     settingSaved: "Настройка сохранена",
-                    sensWhiteRatio: "Соотношение white/lux",
-                    sensGain: "Усиление",
-                    sensIt: "Интегрирование",
-                    uLux: "лк",
+                    sensWhiteRatio: "white/lux",
+                    sensGain: "усиление",
+                    sensIt: "интегр.",
                     uMs: "мс",
                     locAdd: "Добавить локацию",
                     locAddTitle: "Добавить локацию",
@@ -1691,7 +1640,6 @@
                     sunNautical: "nautical twilight",
                     sunAstro: "astronomical twilight",
                     sunNight: "night",
-                    sensorsTitle: "Sensors",
                     sensOk: "Online",
                     sensOff: "No response",
                     co2: "CO₂",
@@ -1713,10 +1661,9 @@
                     displayAutoBrightness: "Display auto brightness",
                     radarBtOff: "Radar Bluetooth switched off",
                     settingSaved: "Setting saved",
-                    sensWhiteRatio: "White/lux ratio",
-                    sensGain: "Gain",
-                    sensIt: "Integration",
-                    uLux: "lx",
+                    sensWhiteRatio: "white/lux",
+                    sensGain: "gain",
+                    sensIt: "integr.",
                     uMs: "ms",
                     locAdd: "Add location",
                     locAddTitle: "Add location",
@@ -2038,103 +1985,6 @@
                 );
             }
 
-            /* ---------- I2C sensors card ----------
-             * One block per device, readings grouped under it exactly as
-             * /api/status delivers them. Adding a sensor is a table entry:
-             * `u` is a literal unit, `ui` an i18n key, `f` formats the value. */
-            const SENSOR_DEVS = [
-                {
-                    key: "tmp117",
-                    name: "TMP117",
-                    metrics: [
-                        {
-                            k: "temp",
-                            l: "temperature",
-                            u: "°C",
-                            f: (v) => v.toFixed(2),
-                        },
-                    ],
-                },
-                {
-                    key: "scd40",
-                    name: "SCD40",
-                    metrics: [
-                        {
-                            k: "co2",
-                            l: "co2",
-                            u: "ppm",
-                            f: (v) => String(v),
-                        },
-                        {
-                            k: "temp",
-                            l: "temperature",
-                            u: "°C",
-                            f: (v) => v.toFixed(1),
-                        },
-                        {
-                            k: "rh",
-                            l: "humidity",
-                            u: "%",
-                            f: (v) => v.toFixed(1),
-                        },
-                        {
-                            k: "dew",
-                            l: "sensDew",
-                            u: "°C",
-                            f: (v) => v.toFixed(1),
-                        },
-                    ],
-                },
-                {
-                    key: "bmp581",
-                    name: "BMP581",
-                    metrics: [
-                        {
-                            k: "press",
-                            l: "sensPress",
-                            u: "hPa",
-                            f: (v) => v.toFixed(3),
-                        },
-                        {
-                            k: "temp",
-                            l: "temperature",
-                            u: "°C",
-                            f: (v) => v.toFixed(2),
-                        },
-                    ],
-                },
-                {
-                    key: "veml7700",
-                    name: "VEML7700",
-                    metrics: [
-                        {
-                            k: "lux",
-                            l: "sensLux",
-                            ui: "uLux",
-                            f: (v) => v.toFixed(1),
-                        },
-                        {
-                            k: "white_ratio",
-                            l: "sensWhiteRatio",
-                            f: (v) => v.toFixed(2),
-                        },
-                        {
-                            k: "gain",
-                            l: "sensGain",
-                            f: (v) => "×" + v,
-                            aux: true,
-                        },
-                        {
-                            k: "it",
-                            l: "sensIt",
-                            ui: "uMs",
-                            f: (v) => String(v),
-                            aux: true,
-                        },
-                    ],
-                },
-            ];
-
             /* Rows go in as plain values and are escaped here, once, so no
              * caller has to remember which of them the device controls. */
             function kvRows(rows) {
@@ -2145,61 +1995,6 @@
                             : `<tr><td>${esc(r[0])}</td><td>${esc(txt(r[1]))}</td></tr>`,
                     )
                     .join("");
-            }
-
-            /* One nested card per device: identity and liveness in the header,
-             * readings as tiles, `aux` metrics folded into a footer line. An
-             * offline device keeps its card, dimmed, with placeholder values. */
-            function renderSensors(sn) {
-                $("sensorsGrid").innerHTML = SENSOR_DEVS.map((dev) => {
-                    const d = sn[dev.key] || {};
-                    const ok = !!d.ok;
-                    /* `gain` arrives as a string ("1/8"), the rest as numbers,
-                     * so this checks for a usable value rather than for a
-                     * finite number. */
-                    const val = (m) => {
-                        const v = d[m.k];
-                        const bad =
-                            v === undefined ||
-                            v === null ||
-                            (typeof v === "number" && !Number.isFinite(v));
-                        return ok && !bad ? esc(m.f(v)) : NA;
-                    };
-                    const unit = (m) => esc(m.ui ? t(m.ui) : m.u || "");
-
-                    const tiles = dev.metrics
-                        .filter((m) => !m.aux)
-                        .map((m) => {
-                            const u = unit(m);
-                            return (
-                                '<div class="sens-metric"><div>' +
-                                `<span class="sv">${val(m)}</span>` +
-                                (u ? `<span class="su">${u}</span>` : "") +
-                                `</div><span class="sl">${t(m.l)}</span></div>`
-                            );
-                        })
-                        .join("");
-
-                    const aux = dev.metrics
-                        .filter((m) => m.aux)
-                        .map((m) => {
-                            const u = unit(m);
-                            return `${t(m.l)} ${val(m)}${u ? " " + u : ""}`;
-                        })
-                        .join(" · ");
-
-                    return (
-                        `<div class="sens-dev${ok ? "" : " off"}">` +
-                        '<div class="sens-head">' +
-                        `<span class="sens-dot" title="${
-                            ok ? t("sensOk") : t("sensOff")
-                        }"></span>` +
-                        `<span class="sens-name">${dev.name}</span></div>` +
-                        `<div class="sens-metrics">${tiles}</div>` +
-                        (aux ? `<div class="sens-aux">${aux}</div>` : "") +
-                        "</div>"
-                    );
-                }).join("");
             }
 
             /* ---------- outside weather card ----------
@@ -2365,9 +2160,9 @@
                     typeof s.next_in === "number"
                         ? ` · ${s.next_is_rise ? "↑" : "↓"} in ${fmtSpan(s.next_in)}`
                         : "";
-                el.textContent =
-                    "Sun: " +
-                    (s.state === "rises"
+                el.innerHTML =
+                    '<span class="cf-k">Sun:</span> ' +
+                    esc(s.state === "rises"
                         ? `↑${clock(s.rise)} · ↓${clock(s.set)} · ` +
                           `${fmtSpan(s.day_len)} · ${angle}${phase}${next}`
                         : `${t(
@@ -2487,7 +2282,12 @@
                 const cl = s.climate || {};
                 SERIES.forEach((sr) => {
                     $(sr.k + "Val").textContent = num(cl[sr.src], sr.fmt);
+                    setDot(sr.k + "Dot", !!(sn[sr.dev] || {}).ok);
                 });
+                /* Both radar cards read one module, which drops out of the
+                 * reply as a whole rather than carrying an `ok`. */
+                setDot("oDot", !!s.radar);
+                setDot("rDot", !!s.radar);
 
                 /* Cards whose badge replaces the window trend arrow: the CO₂
                  * level and the pressure tendency. The callback returns
@@ -2498,18 +2298,20 @@
                     b.className = "badge " + (info ? info.cls : "off");
                     b.textContent = info ? info.text : t("noData");
                 });
-                /* The footer waits for its value dimmed, then reads as text
-                 * bulleted in the same grade colour as the badge above. */
+                /* The footer waits for its value dimmed, then reads as text on
+                 * the left and an optional second value on the right edge. A
+                 * graded footer is bulleted in the badge's colour; the rest ask
+                 * for `plain` and carry no bullet. */
                 SERIES.filter((sr) => sr.footer).forEach((sr) => {
-                    const info = sr.footer(cl, s);
+                    const info = sr.footer(cl, s) || { cls: "pending", html: NA };
                     const el = $(sr.k + "Foot");
-                    el.className = "cardfoot " + (info ? info.cls : "pending");
-                    el.textContent = info ? info.text : t("noTrend");
+                    el.className = "cardfoot " + info.cls;
+                    el.children[0].innerHTML = info.html;
+                    el.children[1].innerHTML = info.right || "";
                 });
 
                 renderWeather(s.weather || {});
                 renderSun(s.sun, (s.weather && s.weather.loc) || {});
-                renderSensors(sn);
                 renderRadar(s.radar);
 
                 /* system card: Wi-Fi station and access point shown as
@@ -2665,33 +2467,64 @@
              * One entry drives the whole column: the card markup, the reading,
              * the min/max pair, the trend arrow and the chart under it. `src`
              * names the field in /api/status `climate`, `hist` the array in
-             * /api/history. `span`/`trendFmt` fall back to `fmt`.
+             * /api/history, `dev` the device behind it, whose liveness the dot
+             * in the card header shows. `span`/`trendFmt` fall back to `fmt`.
              * `scale: "log"` is for illuminance only — a linear axis over six
              * decades leaves everything below noon flat on the baseline. */
             const SERIES = [
                 {
                     k: "t",
                     src: "temp",
+                    dev: "tmp117",
                     hist: "temp",
                     title: "temperature",
                     unit: "°C",
                     color: "--temp",
                     fmt: (v) => v.toFixed(2),
                     span: (v) => v.toFixed(2) + "°",
+                    /* what the other two thermometers on the board read: both
+                     * sit elsewhere and neither feeds the chart, so they are a
+                     * cross-check rather than a reading. */
+                    footer: (cl, s) => {
+                        const sn = s.sensors || {};
+                        const one = (name, d, f) =>
+                            footKV(name, (d && d.ok ? num(d.temp, f) : NA) + "°");
+                        return {
+                            cls: "plain",
+                            html:
+                                one("SCD40", sn.scd40, (v) => v.toFixed(1)) +
+                                "&nbsp;&nbsp;&nbsp;" +
+                                one("BMP581", sn.bmp581, (v) => v.toFixed(2)),
+                        };
+                    },
                 },
                 {
                     k: "h",
                     src: "rh",
+                    dev: "scd40",
                     hist: "rh",
                     title: "humidity",
                     unit: "%",
                     color: "--hum",
                     fmt: (v) => v.toFixed(1),
                     span: (v) => v.toFixed(1) + "%",
+                    /* derived on the SCD40 from the same reading as the RH */
+                    footer: (cl, s) => {
+                        const d = (s.sensors || {}).scd40 || {};
+                        return {
+                            cls: "plain",
+                            html: footKV(
+                                t("sensDew"),
+                                (d.ok ? num(d.dew, (v) => v.toFixed(1)) : NA) +
+                                    "°",
+                            ),
+                        };
+                    },
                 },
                 {
                     k: "c",
                     src: "co2",
+                    dev: "scd40",
                     hist: "co2",
                     title: "co2",
                     unit: "ppm",
@@ -2712,6 +2545,7 @@
                      * chart, the min/max and the trend follow along. */
                     src: "press_msl",
                     hist: "press",
+                    dev: "bmp581",
                     title: "sensPress",
                     unit: "hPa",
                     color: "--press",
@@ -2721,23 +2555,51 @@
                      * the 5 m / 1 h / 1 d segment. The arrow repeats with the
                      * grade — one head slow, three rapid. */
                     badge: (cl, s) => trendBadge(s.zambretti),
-                    footer: (cl, s) =>
-                        s.zambretti
-                            ? {
-                                  text: t("zcode")[s.zambretti.code],
-                                  cls: trendBadge(s.zambretti).cls,
-                              }
-                            : null,
+                    /* the forecast wording, and on the right edge the pressure
+                     * as measured — the card itself shows it reduced */
+                    footer: (cl, s) => ({
+                        html: s.zambretti
+                            ? t("zcode")[s.zambretti.code]
+                            : t("noTrend"),
+                        cls: s.zambretti
+                            ? trendBadge(s.zambretti).cls
+                            : "pending",
+                        right: num(cl.press, (v) => v.toFixed(3)) + " hPa",
+                    }),
                 },
                 {
                     k: "l",
                     src: "lux",
+                    dev: "veml7700",
                     hist: "lux",
                     title: "sensLux",
                     unit: "lx",
                     color: "--lux",
                     scale: "log",
                     fmt: fmtLux,
+                    /* the white/lux ratio reads the light source, the gain and
+                     * the integration time explain the reading it came from */
+                    footer: (cl, s) => {
+                        const d = (s.sensors || {}).veml7700 || {};
+                        const gap = "&nbsp;&nbsp;&nbsp;";
+                        return {
+                            cls: "plain",
+                            html:
+                                footKV(
+                                    t("sensWhiteRatio"),
+                                    d.ok
+                                        ? num(d.white_ratio, (v) => v.toFixed(2))
+                                        : NA,
+                                ) +
+                                gap +
+                                footKV(t("sensGain"), d.ok ? "×" + txt(d.gain) : NA) +
+                                gap +
+                                footKV(
+                                    t("sensIt"),
+                                    (d.ok ? num(d.it, String) : NA) + " " + t("uMs"),
+                                ),
+                        };
+                    },
                 },
             ];
 
@@ -2775,6 +2637,7 @@
                         : `<span class="trend flat" id="${sr.k}Trend">—</span>`;
                     return (
                         '<div class="card sensor"><h2>' +
+                        `<span class="sens-dot" id="${sr.k}Dot"></span>` +
                         `<span data-i18n="${sr.title}"></span>${head}</h2>` +
                         '<div class="reading">' +
                         `<span class="value" id="${sr.k}Val">${NA}</span>` +
@@ -2785,7 +2648,8 @@
                         "</div></div>" +
                         `<canvas id="${sr.k}Chart"></canvas>` +
                         (sr.footer
-                            ? `<div class="cardfoot pending" id="${sr.k}Foot"></div>`
+                            ? `<div class="cardfoot pending" id="${sr.k}Foot">` +
+                              `<span class="cf-l"></span><span class="cf-r"></span></div>`
                             : "") +
                         "</div>"
                     );
@@ -2799,6 +2663,7 @@
                      * columns under it. The live distance heads the card, and
                      * the held state its badge — the card is named for it. */
                     '<div class="card sensor"><h2>' +
+                        '<span class="sens-dot" id="oDot"></span>' +
                         '<span data-i18n="presenceTitle"></span>' +
                         '<span class="badge off" id="oBadge" data-i18n="noData"></span></h2>' +
                         '<div class="reading">' +
@@ -2811,6 +2676,7 @@
                     /* The plan view closes the grid — the one card that plots
                      * instead of charting. */
                     '<div class="card sensor"><h2>' +
+                        '<span class="sens-dot" id="rDot"></span>' +
                         '<span data-i18n="radarTitle"></span></h2>' +
                         '<div class="reading">' +
                         `<span class="value" id="rCount">${NA}</span>` +

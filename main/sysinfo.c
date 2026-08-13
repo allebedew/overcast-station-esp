@@ -1,5 +1,6 @@
 #include "sysinfo.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "freertos/FreeRTOS.h"
@@ -19,6 +20,8 @@ static const char *TAG = "sysinfo";
 static temperature_sensor_handle_t s_temp_sensor;
 
 static sysinfo_static_t s_static;
+
+static void cpu_log_task(void *arg);
 
 /* The run-time counters are global, so the load is measured once for everyone.
  * Per-caller windows would follow each caller's polling rate, and two open
@@ -65,6 +68,8 @@ void sysinfo_init(void)
     s_prev_idle = ulTaskGetIdleRunTimeCounter();
     s_prev_total = (uint32_t)esp_timer_get_time();
     s_next_us = esp_timer_get_time() + SYSINFO_CPU_WINDOW_US;
+
+    xTaskCreate(cpu_log_task, "cpu_log", 3072, NULL, 1, NULL);
 
     ESP_LOGI(TAG, "system info ready");
 }
@@ -116,6 +121,111 @@ void sysinfo_get_runtime(sysinfo_runtime_t *out)
     out->heap_min = esp_get_minimum_free_heap_size();
     out->heap_total = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
     out->heap_largest = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
+}
+
+/* Per-task CPU share, sampled over the whole period: one snapshot per tick,
+ * each line the delta against the previous one. Tasks that came or went in
+ * between have no counterpart and are skipped. */
+#define CPU_LOG_PERIOD_MS 30000
+
+typedef struct {
+    TaskHandle_t handle;
+    uint32_t runtime;
+} task_run_t;
+
+typedef struct {
+    const char *name;
+    unsigned pct10; /* tenths of a percent */
+} task_load_t;
+
+static int load_cmp(const void *a, const void *b)
+{
+    return (int)((const task_load_t *)b)->pct10 - (int)((const task_load_t *)a)->pct10;
+}
+
+static void cpu_log_task(void *arg)
+{
+    (void)arg;
+
+    task_run_t *prev = NULL;
+    unsigned prev_count = 0;
+    int64_t prev_us = 0;
+
+    for (;;) {
+        /* Slack for tasks started between the count and the walk. */
+        unsigned cap = uxTaskGetNumberOfTasks() + 4;
+        TaskStatus_t *cur = malloc(cap * sizeof(*cur));
+        task_run_t *next = malloc(cap * sizeof(*next));
+        task_load_t *load = malloc(cap * sizeof(*load));
+        if (cur == NULL || next == NULL || load == NULL) {
+            ESP_LOGW(TAG, "CPU usage: out of memory");
+            free(cur);
+            free(next);
+            free(load);
+            vTaskDelay(pdMS_TO_TICKS(CPU_LOG_PERIOD_MS));
+            continue;
+        }
+
+        unsigned count = uxTaskGetSystemState(cur, cap, NULL);
+        int64_t now = esp_timer_get_time();
+        uint32_t window = (uint32_t)now - (uint32_t)prev_us;
+
+        unsigned n = 0;
+        for (unsigned i = 0; i < count; i++) {
+            next[i].handle = cur[i].xHandle;
+            next[i].runtime = cur[i].ulRunTimeCounter;
+
+            for (unsigned j = 0; j < prev_count; j++) {
+                if (prev[j].handle != cur[i].xHandle) {
+                    continue;
+                }
+                uint32_t d = cur[i].ulRunTimeCounter - prev[j].runtime;
+                if (d > window) {
+                    break; /* counter wrapped past the window; drop the line */
+                }
+                load[n].name = cur[i].pcTaskName;
+                load[n].pct10 = window ? (unsigned)((uint64_t)1000 * d / window) : 0;
+                n++;
+                break;
+            }
+        }
+
+        if (n > 0) {
+            qsort(load, n, sizeof(*load), load_cmp);
+
+            /* configMAX_TASK_NAME_LEN plus the padded percentage. */
+            size_t len = n * (configMAX_TASK_NAME_LEN + 12) + 1;
+            char *text = malloc(len);
+            if (text != NULL) {
+                size_t off = 0;
+                unsigned quiet = 0;
+                for (unsigned i = 0; i < n && off < len; i++) {
+                    if (load[i].pct10 == 0) {
+                        quiet++;
+                        continue;
+                    }
+                    off += snprintf(text + off, len - off, "%-16s %3u.%u%%\n",
+                                    load[i].name, load[i].pct10 / 10,
+                                    load[i].pct10 % 10);
+                }
+                if (quiet > 0 && off < len) {
+                    snprintf(text + off, len - off, "%u task(s) below 0.1%%\n", quiet);
+                }
+                ESP_LOGI(TAG, "CPU usage over %us:\n%s",
+                         (unsigned)(window / 1000000), text);
+                free(text);
+            }
+        }
+
+        free(prev);
+        free(cur);
+        free(load);
+        prev = next;
+        prev_count = count;
+        prev_us = now;
+
+        vTaskDelay(pdMS_TO_TICKS(CPU_LOG_PERIOD_MS));
+    }
 }
 
 void sysinfo_log_tasks(void)

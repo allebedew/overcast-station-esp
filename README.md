@@ -20,14 +20,15 @@ history.
 - **Web UI** — single page embedded in the firmware (gzipped at build time),
   `http://weather.local` (mDNS), polled every 1 s, bilingual RU/EN from an
   in-page dictionary. Five sensor cards (temperature, humidity, CO₂,
-  pressure, illuminance) with trend, min/max and a sparkline, then two radar
+  pressure, illuminance) with trend, min/max, a sparkline and a liveness dot
+  for the device behind the quantity, then two radar
   cards closing the same grid, each quantity read once: the presence card reads
   the live distance to the nearest target with the window's largest target count
   beside it, over a chart of distance as a line and target count as columns and
   under a badge carrying the live held state, and the radar card reads the
   number of targets with the nearest target's x/y in metres beside it and
   plots them instead of charting;
-  a card per I2C device with a liveness dot; an outside-weather card with a location chip row (a typed
+  an outside-weather card with a location chip row (a typed
   city name is geocoded in-browser, so adding one needs internet on the
   client); system, settings and Wi-Fi cards behind the header gear. Settings:
   LED brightness, buzzer volume, display on, its auto-brightness and its
@@ -36,10 +37,13 @@ history.
   follows the device on each poll except while the control has the focus, so
   what the knob changes shows up here without overwriting a moving hand.
   Every reading is a fixed slot generated from the tables at the top of the
-  script (`SERIES`, `WEATHER_TILES`, `SENSOR_DEVS`) and renders as `--` when
+  script (`SERIES`, `WEATHER_TILES`) and renders as `--` when
   absent — adding a metric is a table entry, not markup. `badge` replaces a card's
   trend arrow with a chip (CO₂ level, pressure tendency) and `footer` adds a
-  line under its chart (the forecast wording). The altitude field is
+  line under its chart — wording on the left, an optional value on the right
+  edge (the other thermometers, the dew point, the measured pressure, the
+  white/lux ratio with the VEML7700's gain and integration time, the forecast
+  wording). The altitude field is
   written back from the device only once per page load, so the poll cannot
   overwrite typing.
 - **OTA** — push model: `./flash-ota.sh [host]` builds and uploads to
@@ -295,8 +299,8 @@ history.
   the way out — so a later altitude correction re-reduces the whole history.
   The **dew point** (Magnus-Tetens) is the one derived quantity, from the
   SCD40's own temperature and humidity — its warm offset cancels there, and the
-  driver computes it. Follows the humidity. Not in the history: shown on the
-  SCD40 card, and nowhere else.
+  driver computes it. Follows the humidity. Not in the history: shown in the
+  humidity card's footer, and nowhere else.
 - **Site altitude** — metres above sea level, −500…9000, NVS
   `settings/altitude_m` (default 0). A wrong altitude shifts every pressure
   readout and chart, never the stored history.
@@ -453,7 +457,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `sensors/bmp581.c` | address auto-detection, chip-ID check, soft reset out of deep standby, DSP/IIR + OSR/ODR setup, 6-byte burst read |
 | `radar/ld2450.c` | LD2450 on its own UART: reader task, frame resync and decode, the published snapshot with presence and the nearest target |
 | `sensors/veml7700.c` | command registers, auto-ranging table with its settle deadline, lux conversion with the >1000 lx correction, white/ALS ratio |
-| `sysinfo.c` | the station's own health: a boot-time snapshot of what cannot change plus live counters, the SoC temperature sensor, reset reason. CPU load is measured in one 1 s window shared by all callers |
+| `sysinfo.c` | the station's own health: a boot-time snapshot of what cannot change plus live counters, the SoC temperature sensor, reset reason. CPU load is measured in one 1 s window shared by all callers; a background task logs the per-task CPU share every 30 s |
 | `gui/gfx/ssd1322.c` | the panel's transport and the only implementation of `gfx_target.h`: SPI setup, reset, the datasheet's init sequence, and a present that is one 8 KB DMA write because the canvas is packed the way the controller scans. The only file tied to this display |
 | `gui/gfx/gfx_canvas.c` | drawing surface for the SSD1322 panel: a 64x256 portrait framebuffer already packed the way the controller wants it, a viewport stack carrying origin and clip, points, dashed h/v lines, rectangles |
 | `gui/gfx/gfx_text.c` | text at a given level and alignment, baseline-positioned, optionally over a filled line box (`gfx_text_bg`). Drives u8g2's font decoder through its own `u8g2_cb_t`, so glyphs land in the canvas at the caller's gray level with no compositing pass |
