@@ -2484,11 +2484,19 @@
                     span: (v) => v.toFixed(2) + "°",
                     /* what the other two thermometers on the board read: both
                      * sit elsewhere and neither feeds the chart, so they are a
-                     * cross-check rather than a reading. */
+                     * cross-check rather than a reading, each with its
+                     * deviation from the TMP117 in brackets. */
                     footer: (cl, s) => {
                         const sn = s.sensors || {};
-                        const one = (name, d, f) =>
-                            footKV(name, (d && d.ok ? num(d.temp, f) : NA) + "°");
+                        const ref = sn.tmp117 && sn.tmp117.ok ? sn.tmp117.temp : null;
+                        const one = (name, d, f) => {
+                            if (!d || !d.ok) return footKV(name, NA + "°");
+                            const dev =
+                                typeof ref === "number"
+                                    ? " (" + num(d.temp - ref, (v) => (v < 0 ? "-" : "+") + f(Math.abs(v))) + ")"
+                                    : "";
+                            return footKV(name, num(d.temp, f) + "°" + dev);
+                        };
                         return {
                             cls: "plain",
                             html:

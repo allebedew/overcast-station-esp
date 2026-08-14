@@ -290,10 +290,10 @@ static void reading(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t
  * side is +-INFINITY. Both the threshold and the phase live here so a call site
  * stays one expression. Off anim_ms, like the clock's colon. */
 #define AL_MS      1000   /* blink period, half of it dark */
-#define AL_TEMP_LO   23.0
-#define AL_TEMP_HI   29.0
-#define AL_RH_LO     30.0
-#define AL_RH_HI     70.0
+#define AL_TEMP_LO   22.0
+#define AL_TEMP_HI   30.0
+#define AL_RH_LO     20.0
+#define AL_RH_HI     80.0
 #define AL_CO2_HI  1000.0
 #define AL_UVI_HI     8.0
 
