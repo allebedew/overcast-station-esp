@@ -10,6 +10,35 @@
 #include "weather_store.h"
 #include "wifi.h"
 
+/* Zones are stepped from their own previous value, so this keeps the only state
+ * in the model. Called once a frame from the one GUI task. */
+static void refresh_alerts(ui_model_t *out)
+{
+    static int zone[ALERT_Q_COUNT];
+    static bool armed;
+
+    if (!armed) {
+        armed = true;
+        for (int q = 0; q < ALERT_Q_COUNT; q++) {
+            zone[q] = alert_comfort(q);
+        }
+    }
+
+    const alert_inputs_t in = {
+        .cl = &out->climate, .wx = &out->out, .wx_ok = out->out_ok,
+        .zb = &out->zb,
+    };
+    for (int q = 0; q < ALERT_Q_COUNT; q++) {
+        double v;
+        if (!alert_sample(q, &in, &v)) {
+            out->alert[q] = 0;
+            continue;
+        }
+        zone[q] = alert_zone(q, v, zone[q]);
+        out->alert[q] = (int8_t)alert_severity(q, zone[q]);
+    }
+}
+
 void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
                       chart_range_t chart_range, uint8_t loc_sel)
 {
@@ -23,6 +52,8 @@ void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
     out->out_ok       = weather_api_get(&out->out);
     out->out_cond     = weather_api_code_short(out->out.weather_code);
     out->out_fetching = weather_api_is_fetching();
+
+    refresh_alerts(out);
 
     weather_location_t loc;
     if (weather_store_get(loc_sel, &loc)) {

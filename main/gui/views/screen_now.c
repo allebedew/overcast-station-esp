@@ -286,20 +286,19 @@ static void reading(gfx_canvas_t *c, int x, int baseline, const gfx_text_style_t
     value(c, x, baseline, st, b, label, deg, bg, blink);
 }
 
-/* Comfort band [lo, hi) -- a reading outside it blinks to be noticed; an open
- * side is +-INFINITY. Both the threshold and the phase live here so a call site
- * stays one expression. Off anim_ms, like the clock's colon. */
-#define AL_MS      1000   /* blink period, half of it dark */
-#define AL_TEMP_LO   22.0
-#define AL_TEMP_HI   30.0
-#define AL_RH_LO     20.0
-#define AL_RH_HI     80.0
-#define AL_CO2_HI  1000.0
-#define AL_UVI_HI     8.0
+/* A reading outside its comfort band blinks to be noticed, its label and plate
+ * holding their place. Which readings are out, and how far, is decided in
+ * alert_rules.c and carried by the model; what is left here is the phase. Two
+ * zones out blinks twice as fast. Off anim_ms, like the clock's colon. */
+#define AL_MS 1000   /* blink period, half of it dark */
 
-static bool blink(uint32_t anim_ms, bool ok, double v, double lo, double hi)
+static bool blink(uint32_t anim_ms, int severity)
 {
-    return ok && (v < lo || v >= hi) && anim_ms % AL_MS >= AL_MS / 2;
+    if (!severity) {
+        return false;
+    }
+    uint32_t p = (severity <= -2 || severity >= 2) ? AL_MS / 2 : AL_MS;
+    return anim_ms % p >= p / 2;
 }
 
 /* The sensor rows are where the chart's quantity is picked, so while the knob
@@ -936,7 +935,7 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     baseline = ui_row(&cur, &UI_TEXT);
     reading(c, 0, baseline, &UI_TEXT, ok && m->out.uvi >= 0, "%.1f", "--.-",
             m->out.uvi, "UV", false, GFX_NONE,
-            blink(m->anim_ms, ok && m->out.uvi >= 0, m->out.uvi, -INFINITY, AL_UVI_HI));
+            blink(m->anim_ms, m->alert[ALERT_Q_UVI]));
     reading(c, UI_RX, baseline, &UI_TEXT_R, ok, "%.0f%%", "--%",
             (double)m->out.cloud_pct, "CL", false, GFX_NONE, false);
 
@@ -959,17 +958,17 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     baseline = ui_row(&cur, &UI_TEXT);
     reading(c, 0, baseline, &UI_TEXT, cl->temp_ok, "%.2f", "--.--", cl->temp_c,
             NULL, true, q_bg(s, HISTORY_Q_TEMP),
-            blink(m->anim_ms, cl->temp_ok, cl->temp_c, AL_TEMP_LO, AL_TEMP_HI));
+            blink(m->anim_ms, m->alert[ALERT_Q_TEMP]));
     reading(c, UI_RX, baseline, &UI_TEXT_R, cl->press_ok, "%.3f", "---.---",
             cl->press_msl_hpa, NULL, false, q_bg(s, HISTORY_Q_PRESS), false);
 
     baseline = ui_row(&cur, &UI_TEXT);
     reading(c, 0, baseline, &UI_TEXT, cl->rh_ok, "%.1f%%", "--.-%", cl->rh_pct,
             NULL, false, q_bg(s, HISTORY_Q_RH),
-            blink(m->anim_ms, cl->rh_ok, cl->rh_pct, AL_RH_LO, AL_RH_HI));
+            blink(m->anim_ms, m->alert[ALERT_Q_RH]));
     reading(c, UI_RX, baseline, &UI_TEXT_R, cl->co2_ok, "%.0f", "---",
             (double)cl->co2_ppm, "CO2", false, q_bg(s, HISTORY_Q_CO2),
-            blink(m->anim_ms, cl->co2_ok, cl->co2_ppm, -INFINITY, AL_CO2_HI));
+            blink(m->anim_ms, m->alert[ALERT_Q_CO2]));
 
     baseline = ui_row(&cur, &UI_TEXT);
     char lx[8] = "--";

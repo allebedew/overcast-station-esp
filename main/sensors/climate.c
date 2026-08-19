@@ -81,6 +81,11 @@ void climate_get(climate_t *out)
         out->press_msl_hpa = climate_to_sea_level(bmp581.press_hpa);
     }
 
+    if (out->temp_ok && out->rh_ok) {
+        out->dew_spread_ok = true;
+        out->dew_spread_c = out->temp_c - out->dew_c;
+    }
+
     veml7700_data_t veml7700;
     if (sensors_veml7700_get(&veml7700)) {
         out->lux_ok = true;

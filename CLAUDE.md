@@ -34,14 +34,14 @@
   the user asked for a build, the change touches CMake / Kconfig / partitions /
   `sdkconfig.defaults`, or the edit is large enough that a compile error is a
   real possibility rather than a formality.
-- When a build *is* warranted, always use exactly this command — the login
-  shell is fish and does not have the IDF environment, so it is run through
-  bash with `export.sh` sourced explicitly:
+- When a build *is* warranted, always use the wrapper from the project root —
+  it sources the IDF environment itself, which the fish login shell lacks:
 
   ```
-  bash -c 'set -e; . /Users/alex/esp/esp-idf/export.sh >/dev/null; cd /Users/alex/Desktop/Weather/station/src; idf.py build' 2>&1 | tail -30
+  ./build.sh 2>&1 | tail -30
   ```
 
   Target is `esp32c6` and is already fixed in `sdkconfig`; do not pass
   `set-target`, it would wipe the config. Same form for other actions —
-  substitute `idf.py flash monitor`, `idf.py size`, `idf.py fullclean`.
+  `./build.sh flash monitor`, `./build.sh size`, `./build.sh fullclean`.
+  `IDF_PATH` defaults to `~/esp/esp-idf`; set it to use another checkout.

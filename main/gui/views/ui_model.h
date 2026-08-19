@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <time.h>
 
+#include "alert_rules.h"
 #include "chart.h"   /* the window the series is sampled over */
 #include "climate.h"
 #include "history.h"
@@ -37,6 +38,12 @@ typedef struct {
     int32_t utc_off_s;   /* of the active weather location */
 
     climate_t climate;   /* the room; each quantity carries its own _ok */
+
+    /* Comfort-band state per quantity, signed severity from alert_rules.h; 0
+     * both for a reading in its band and for one with no sensor behind it. Held
+     * here rather than worked out while drawing: the hysteresis needs the
+     * previous zone, and a frame is a pure function of the model. */
+    int8_t alert[ALERT_Q_COUNT];
 
     zambretti_t zb;      /* the local forecast; ok is false for the first 3 h */
 

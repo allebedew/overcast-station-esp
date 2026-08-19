@@ -47,6 +47,13 @@ typedef struct {
 
     bool lux_ok;
     float lux; /* VEML7700, ALS channel */
+
+    /* How far the air is from condensing: the TMP117 temperature less the
+     * SCD40's dew point. Cross-device, so it is composed here rather than in
+     * either driver; a small spread is condensation on the cold surfaces of
+     * the room, which are colder still than the air. */
+    bool dew_spread_ok;
+    float dew_spread_c;
 } climate_t;
 
 /* Loads the stored site altitude. Call once, after NVS is up. */
