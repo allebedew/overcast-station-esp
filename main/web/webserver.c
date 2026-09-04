@@ -23,6 +23,7 @@
 #include "led.h"
 #include "ota.h"
 #include "ld2450.h"
+#include "pir.h"
 #include "sensors.h"
 #include "panel_hours.h"
 #include "sysinfo.h"
@@ -421,7 +422,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"veml7700\":{\"ok\":%s,"
         "\"lux\":%.1f,\"white_ratio\":%.2f,"
         "\"gain\":\"%s\",\"it\":%u}},"
-        "\"radar\":%s,"
+        "\"radar\":%s,\"pir\":%s,"
         "\"weather\":{\"loc\":%s,\"current\":%s},"
         "\"system\":{"
         "\"uptime\":%lld,\"time\":\"%s\",\"time_synced\":%s,"
@@ -445,7 +446,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         veml_ok ? "true" : "false",
         veml.lux, veml.white_ratio,
         veml.gain, veml.it_ms,
-        radar_json,
+        radar_json, pir_present() ? "true" : "false",
         wx_loc, wx_cur,
         run.uptime_s,
         time_str,

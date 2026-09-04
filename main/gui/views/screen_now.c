@@ -453,14 +453,14 @@ static void wx_now(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
 }
 
 /* Rain over the next 24 hours: one column an hour, the leftmost the hour running
- * now. Every column is the same height and it is the brightness that carries the
+ * now. A wet hour is a full-height column whose brightness carries the
  * probability, over the dim2..full range; a dry hour, an hour no forecast
- * reaches and the whole strip without data stay at dim. A 1 px column at a 2 px
- * pitch, broken by a wider gap at midnight, 06:00, noon and 18:00 local, is what
- * lets all 24 fit side by side on a 64 px panel and still be read against the
- * time of day. The strip is a group narrower on the hours where the first of
- * those falls on the first column: worth it for gaps that mean an hour rather
- * than an offset. */
+ * reaches and the whole strip without data shrink to a dim dot on the middle
+ * row. A 1 px column at a 2 px pitch, broken by a wider gap at midnight, 06:00,
+ * noon and 18:00 local, is what lets all 24 fit side by side on a 64 px panel
+ * and still be read against the time of day. The strip is a group narrower on
+ * the hours where the first of those falls on the first column: worth it for
+ * gaps that mean an hour rather than an offset. */
 #define RAIN_HOURS WEATHER_API_FORECAST_HOURS
 #define RAIN_H     3                              /* column height, px */
 #define RAIN_DX    2                              /* column pitch: 1 px inked, 1 px apart */
@@ -497,7 +497,11 @@ static void wx_rain(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
         // hour no forecast reaches -- is drawn at.
         int level = prob ? GFX_DIM2 + (GFX_FULL - GFX_DIM2) * prob / 100 : GFX_DIM;
 
-        gfx_vline(c, x, cur->y, RAIN_H, (gfx_level_t)level, GFX_SOLID, 0);
+        if (prob) {
+            gfx_vline(c, x, cur->y, RAIN_H, (gfx_level_t)level, GFX_SOLID, 0);
+        } else {
+            gfx_px(c, x, cur->y + RAIN_H / 2, (gfx_level_t)level);
+        }
         x += RAIN_DX;
     }
 

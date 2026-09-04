@@ -2288,6 +2288,12 @@
                  * reply as a whole rather than carrying an `ok`. */
                 setDot("oDot", !!s.radar);
                 setDot("rDot", !!s.radar);
+                /* The plan view under it is the radar's, but the badge is the
+                 * PIR's — a separate sensor on its own pin, and the only
+                 * presence source wired at the moment. */
+                const pirBadge = $("rBadge");
+                pirBadge.className = "badge " + (s.pir ? "good" : "off");
+                pirBadge.textContent = t(s.pir ? "radarPresent" : "radarEmpty");
 
                 /* Cards whose badge replaces the window trend arrow: the CO₂
                  * level and the pressure tendency. The callback returns
@@ -2685,7 +2691,8 @@
                      * instead of charting. */
                     '<div class="card sensor"><h2>' +
                         '<span class="sens-dot" id="rDot"></span>' +
-                        '<span data-i18n="radarTitle"></span></h2>' +
+                        '<span data-i18n="radarTitle"></span>' +
+                        '<span class="badge off" id="rBadge" data-i18n="noData"></span></h2>' +
                         '<div class="reading">' +
                         `<span class="value" id="rCount">${NA}</span>` +
                         '<span class="unit" data-i18n="radarTargets"></span>' +

@@ -21,7 +21,12 @@ static temperature_sensor_handle_t s_temp_sensor;
 
 static sysinfo_static_t s_static;
 
+/* Per-task CPU share logging: development aid, off in normal builds. */
+#define CPU_LOG_ENABLED 0
+
+#if CPU_LOG_ENABLED
 static void cpu_log_task(void *arg);
+#endif
 
 /* The run-time counters are global, so the load is measured once for everyone.
  * Per-caller windows would follow each caller's polling rate, and two open
@@ -69,7 +74,9 @@ void sysinfo_init(void)
     s_prev_total = (uint32_t)esp_timer_get_time();
     s_next_us = esp_timer_get_time() + SYSINFO_CPU_WINDOW_US;
 
+#if CPU_LOG_ENABLED
     xTaskCreate(cpu_log_task, "cpu_log", 3072, NULL, 1, NULL);
+#endif
 
     ESP_LOGI(TAG, "system info ready");
 }
@@ -122,6 +129,8 @@ void sysinfo_get_runtime(sysinfo_runtime_t *out)
     out->heap_total = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
     out->heap_largest = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
 }
+
+#if CPU_LOG_ENABLED
 
 /* Per-task CPU share, sampled over the whole period: one snapshot per tick,
  * each line the delta against the previous one. Tasks that came or went in
@@ -227,6 +236,8 @@ static void cpu_log_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(CPU_LOG_PERIOD_MS));
     }
 }
+
+#endif /* CPU_LOG_ENABLED */
 
 void sysinfo_log_tasks(void)
 {

@@ -27,7 +27,8 @@ history.
   beside it, over a chart of distance as a line and target count as columns and
   under a badge carrying the live held state, and the radar card reads the
   number of targets with the nearest target's x/y in metres beside it and
-  plots them instead of charting;
+  plots them instead of charting, under a badge that is the PIR's rather than
+  the radar's;
   an outside-weather card with a location chip row (a typed
   city name is geocoded in-browser, so adding one needs internet on the
   client); system, settings and Wi-Fi cards behind the header gear. Settings:
@@ -127,7 +128,10 @@ history.
     energy), per noise-floor move and a disturber count per minute; a detection
     also plays `BUZZER_STORM`. Not yet on the web page, the panel or in the
     history, and none of it is a setting yet.
-- **mmWave radar (HLK-LD2450)** — UART1 at 256000 8N1, module TX on GPIO10,
+- **mmWave radar (HLK-LD2450)** — **unplugged, and `ld2450_init()` is not
+  called**: the PIR below sits on its GPIO11. The driver stays in the build and
+  every reader of it copes with silence, so plugging the module back in is one
+  line in `app_main`. UART1 at 256000 8N1, module TX on GPIO10,
   module RX on GPIO11, 5 V. The tracking stream is unprompted, so the only
   thing ever sent is one configuration sequence: **Bluetooth on or off**, which
   the module ships with on and which serves the same target stream to anyone in
@@ -154,6 +158,17 @@ history.
   Shown on its own web card — a plan view of the fan with a dot per target —
   recorded in the history rings beside the climate quantities, and `presence`
   is what used to light the panel.
+- **PIR motion sensor** — one digital line on GPIO11 (the radar's old TX),
+  polled at 10 Hz with the pin pulled down, so an unplugged sensor reads as an
+  empty room. The module holds the line high for about 3 s after the last
+  movement, which bridges a step across the room but not somebody sitting
+  still, so `HOLD_MS` (60 s) holds it further and is what decides when the room
+  counts as empty. Both edges are dated by the movement, not by the hold
+  expiring. Every change is a
+  line under the tag `pir` with how long the previous state lasted, and a
+  `BUZZER_ARRIVE` / `BUZZER_LEAVE` chirp. It is what lights the panel and what
+  the web page's radar card shows a badge for; the history rings and the
+  Telegram arrival/departure notices still read the radar and so are quiet.
 - **Rotary encoder (DFRobot SEN0235, EC11)** — A on GPIO23, B on GPIO22, button
   on GPIO21; four wires, no supply. The module's own 47 kΩ pull-ups (R1–R3) are
   **desoldered** — without VCC they would drag the three lines through a
@@ -236,11 +251,9 @@ history.
   (`0xAE`, and nothing is rendered or clocked out while it is dark) and another
   brings it back; the state is kept in `settings/disp_on`, so a panel switched
   off stays dark across a reboot. The panel is lit only when that state and the
-  radar's presence flag agree — the flag's own 5 s hold is what keeps the panel
-  from flickering, so it needs none of its own; a silent radar counts as
-  present, so a dead module cannot blank the panel. Every change of that lit
-  state plays `CLICK`, suppressed when the knob is what caused it, since the
-  click for the press has already sounded. Both it and the brightness are also readable
+  PIR agree — the sensor's own hold is what keeps the panel from flickering, so
+  it needs none of its own, and the chirp for the change comes from `pir.c`
+  rather than from here. Both it and the brightness are also readable
   and settable over the HTTP API, which goes through the settings module and
   never calls into the render task; that task compares the two settings with
   what it last saw at the top of every frame and adopts whatever moved, so
@@ -396,7 +409,7 @@ history.
   that one fails too),
   cloud cover, wind speed / gusts / direction, precipitation, daylight flag and
   the WMO code, plus today's daylight duration from `daily`. `daily` also
-  carries a seven-day forecast — date, min/max temperature, precipitation
+  carries a five-day forecast — date, min/max temperature, precipitation
   probability, mean cloud cover and WMO code per day, index 0 being today, which
   is where today's min/max comes from. `hourly` adds precipitation probability
   for the next 24 hours, `forecast_hours` making the series start at the current
@@ -460,9 +473,10 @@ card belongs in that device's module, not in the caller — dew point in
 | `sensors/scd40.c` | Sensirion command protocol with CRC-8, phased start, pressure compensation, FRC, dew point |
 | `sensors/tmp117.c` | address auto-detection, device-ID check, config, temperature register |
 | `sensors/bmp581.c` | address auto-detection, chip-ID check, soft reset out of deep standby, DSP/IIR + OSR/ODR setup, 6-byte burst read |
+| `pir.c` | the PIR line: a polling task, the published flag, and the log line and chirp on every change |
 | `radar/ld2450.c` | LD2450 on its own UART: reader task, frame resync and decode, the published snapshot with presence and the nearest target |
 | `sensors/veml7700.c` | command registers, auto-ranging table with its settle deadline, lux conversion with the >1000 lx correction, white/ALS ratio |
-| `sysinfo.c` | the station's own health: a boot-time snapshot of what cannot change plus live counters, the SoC temperature sensor, reset reason. CPU load is measured in one 1 s window shared by all callers; a background task logs the per-task CPU share every 30 s |
+| `sysinfo.c` | the station's own health: a boot-time snapshot of what cannot change plus live counters, the SoC temperature sensor, reset reason. CPU load is measured in one 1 s window shared by all callers; per-task CPU share logging every 30 s is available behind `CPU_LOG_ENABLED` (off by default) |
 | `gui/gfx/ssd1322.c` | the panel's transport and the only implementation of `gfx_target.h`: SPI setup, reset, the datasheet's init sequence, and a present that is one 8 KB DMA write because the canvas is packed the way the controller scans. The only file tied to this display |
 | `gui/gfx/gfx_canvas.c` | drawing surface for the SSD1322 panel: a 64x256 portrait framebuffer already packed the way the controller wants it, a viewport stack carrying origin and clip, points, dashed h/v lines, rectangles |
 | `gui/gfx/gfx_text.c` | text at a given level and alignment, baseline-positioned, optionally over a filled line box (`gfx_text_bg`). Drives u8g2's font decoder through its own `u8g2_cb_t`, so glyphs land in the canvas at the caller's gray level with no compositing pass |
@@ -473,7 +487,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `gui/views/ui_state.c` | what the UI remembers about itself and the whole encoder scheme: the click switches the panel off, a turn back walks the knob's fields, a turn forward cycles the value of the one in focus. The weather location is the first of those fields, the chart's quantity and window the next two and the panel brightness the last (its ring being the 16 levels then auto, which follows the light sensor), with an empty focus ahead of them that the state boots on, which is why the selection lives here and not under the screen. They are `ui_settings_t`, exactly what is kept in NVS: the GUI task reads the struct in at boot and writes it back once a turn has settled. The location is held as an index into the store, whose count the GUI task feeds in, so the state machine stays free of esp headers |
 | `gui/gui_loop.c` | the panel as the rest of the firmware sees it: owns the single 8 KB canvas, brings up the transport, draws a frame, and applies what the knob moved — the panel settings and the active location — once the turn has settled. The only firmware-only file in `gui/` |
 | `gui/panel_hours.c` | the panel's own wear meter: lit seconds and brightness-weighted seconds, fed one frame at a time by the GUI task, packed into a single `u64` in the NVS namespace `panel` so a power cut cannot split them |
-| `gui/views/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; live so far are the status bar (weekday, local time of the weather location, Wi-Fi bars, sweeping while an association attempt is on the air and replaced by an inverted `AP` badge while the SoftAP is up, location name, age of the fetch) the outdoor block (a 16x16 icon for the WMO code — sun, moon after sunset, cloud, drizzle, rain, snow, thunderstorm, fog, or a mark for an unknown code; temperature; conditions), the rows under it (feels-like, sea-level pressure, humidity, wind with gusts, UV index, cloud cover), the 24-hour rain strip (one column an hour from the current one, grouped by a wider gap at midnight, 06:00, noon and 18:00 local; every hour a 3 px column, its brightness rising from dim2 to full with the precipitation probability, a dry one and an hour without a forecast left at dim), the seven-day forecast (weekday letter, dim and a shade brighter at the weekend; min/max with a striped bar over the whole forecast's range; precipitation probability in tens, its brightness rising with its value; mean cloud cover as a one-pixel-wide column whose height (1, 3 or 5 px) and brightness (1..15) both rise with the clear sky, so a sunny day is a tall bright column) and the indoor rows (temperature, sea-level pressure, humidity, CO2, illuminance, dew point). A value outside its comfort band blinks, its label and plate holding their place — 1 Hz one zone out, 2 Hz two or more; the bands themselves are `alert_rules.c` and the severity comes ready-made in the model. Illuminance is the one value shown at less than its stored resolution: tenths below 1 lx, whole lux to 1000, thousands above. The battery is drawn empty — the board has no charge source. Below them a chart of one history quantity, 60 columns, with the ends of its scale and the window it covers labelled under it. The scale is the series' own min..max but never narrower than a per-quantity minimum set at the sensors' own noise (0.2 °C, 1 %RH, 0.3 hPa, 50 ppm, one decade of lux), so a flat hour reads as flat; illuminance is placed by decade, the rest linearly. Neighbouring points are joined by a riser and the corner column at each end of a flat run is moved one row toward the level it heads for, so a sensor's own quantisation draws as a slope rather than a staircase. Which quantity and which window are the knob's two fields, held in `ui_state_t` and handed both to `ui_model_refresh()`, so it knows what to sample, and to `chart_draw()`; the windows themselves are the `CHART_RANGES` table in `chart.c` — 1m, 5m, 1h, 1d, each 60 columns off the tier whose slots divide into it. Below the chart the Zambretti block, and under it the sun bar: a checkered body for the whole day with the daylight stretch a shade brighter, a tick every six hours, a pointer over the current hour, sunrise and sunset under its ends, and between them the wait for the next crossing swapping every 5 s with the sun's elevation. All of it from `sun.c` by way of the model, no forecast involved; a polar day fills the bar and a polar night leaves it empty |
+| `gui/views/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; live so far are the status bar (weekday, local time of the weather location, Wi-Fi bars, sweeping while an association attempt is on the air and replaced by an inverted `AP` badge while the SoftAP is up, location name, age of the fetch) the outdoor block (a 16x16 icon for the WMO code — sun, moon after sunset, cloud, drizzle, rain, snow, thunderstorm, fog, or a mark for an unknown code; temperature; conditions), the rows under it (feels-like, sea-level pressure, humidity, wind with gusts, UV index, cloud cover), the 24-hour rain strip (one column an hour from the current one, grouped by a wider gap at midnight, 06:00, noon and 18:00 local; a wet hour a 3 px column, its brightness rising from dim2 to full with the precipitation probability, a dry one and an hour without a forecast a dim dot on the middle row), the five-day forecast (weekday letter, dim and a shade brighter at the weekend; min/max with a striped bar over the whole forecast's range; precipitation probability in tens, its brightness rising with its value; mean cloud cover as a one-pixel-wide column whose height (1, 3 or 5 px) and brightness (1..15) both rise with the clear sky, so a sunny day is a tall bright column) and the indoor rows (temperature, sea-level pressure, humidity, CO2, illuminance, dew point). A value outside its comfort band blinks, its label and plate holding their place — 1 Hz one zone out, 2 Hz two or more; the bands themselves are `alert_rules.c` and the severity comes ready-made in the model. Illuminance is the one value shown at less than its stored resolution: tenths below 1 lx, whole lux to 1000, thousands above. The battery is drawn empty — the board has no charge source. Below them a chart of one history quantity, 60 columns, with the ends of its scale and the window it covers labelled under it. The scale is the series' own min..max but never narrower than a per-quantity minimum set at the sensors' own noise (0.2 °C, 1 %RH, 0.3 hPa, 50 ppm, one decade of lux), so a flat hour reads as flat; illuminance is placed by decade, the rest linearly. Neighbouring points are joined by a riser and the corner column at each end of a flat run is moved one row toward the level it heads for, so a sensor's own quantisation draws as a slope rather than a staircase. Which quantity and which window are the knob's two fields, held in `ui_state_t` and handed both to `ui_model_refresh()`, so it knows what to sample, and to `chart_draw()`; the windows themselves are the `CHART_RANGES` table in `chart.c` — 1m, 5m, 1h, 1d, each 60 columns off the tier whose slots divide into it. Below the chart the Zambretti block, and under it the sun bar: a checkered body for the whole day with the daylight stretch a shade brighter, a tick every six hours, a pointer over the current hour, sunrise and sunset under its ends, and between them the wait for the next crossing swapping every 5 s with the sun's elevation. All of it from `sun.c` by way of the model, no forecast involved; a polar day fills the bar and a polar night leaves it empty |
 | `gui/views/screen_ota.c` | the update screen: title, progress bar with the percentage inside it — drawn twice and split at the edge of the fill, so a digit the fill runs into inverts mid-glyph — and the byte counts read from `ota.c`. Drawn by the GUI task instead of everything else while `ota_is_active()` |
 | `timesync.c` | SNTP client; `timesync_is_synced()` and `timesync_format()` |
 | `sensors/climate.c` | the room-level view over the devices, plus the reduction to sea level, the dew-point spread (TMP117 temperature less the SCD40's dew point — cross-device, so neither driver owns it) and the site-altitude setting. Its header carries the reading resolutions |
@@ -493,7 +507,7 @@ card belongs in that device's module, not in the caller — dew point in
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (gzipped) |
-| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `phase` `day`/`golden`/`civil`/`nautical`/`astro`/`night`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `radar` (`presence`, `near` — metres to the closest target — and `targets`, `x` / `y` in mm, up to three, plotted by the page; `null` while the LD2450 is silent), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system` (uptime, build, heap, NVS, plus `panel` — `on_s` / `dose_s`, the OLED's lit and brightness-weighted seconds), `settings` (generated from the settings table: `led_brightness`, `buzzer_volume`, `display_on`, `display_brightness`, `display_auto_brightness`, `radar_bt_off`, `altitude`) |
+| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `phase` `day`/`golden`/`civil`/`nautical`/`astro`/`night`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `radar` (`presence`, `near` — metres to the closest target — and `targets`, `x` / `y` in mm, up to three, plotted by the page; `null` while the LD2450 is silent), `pir` (the motion sensor's flag, the presence source actually wired), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system` (uptime, build, heap, NVS, plus `panel` — `on_s` / `dose_s`, the OLED's lit and brightness-weighted seconds), `settings` (generated from the settings table: `led_brightness`, `buzzer_volume`, `display_on`, `display_brightness`, `display_auto_brightness`, `radar_bt_off`, `altitude`) |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`); `{period, co2, temp, rh, press, lux, targets, near}`, each series gated on its own quantity so `null` is a gap in that series alone. `press` comes out reduced to sea level; `targets` is the slot's largest target count, `near` metres in quarter-metre steps and `null` for a slot with nobody in the fan |
 | `/api/history/reset` | POST | wipe all tiers, RAM rings and flash snapshots |
 | `/api/scan` | GET | Wi-Fi scan, `[{ssid, bssid, ch, rssi, auth}]`, one entry per BSSID |
