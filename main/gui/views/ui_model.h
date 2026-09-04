@@ -74,6 +74,10 @@ typedef struct {
         bool       next_ok;
     } sun;
 
+    /* The PIR's bare line, for the debug strip: not the presence the panel is
+     * switched by, which carries pir.c's hold on top. */
+    bool pir_raw;
+
     /* Monotonic since boot, for whatever moves on its own. Kept in the model so
      * a frame animates off one stamp rather than each widget reading a clock. */
     uint32_t anim_ms;

@@ -421,8 +421,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"bmp581\":{\"ok\":%s,\"press\":%.3f,\"press_pa\":%.1f,\"temp\":%.2f},"
         "\"veml7700\":{\"ok\":%s,"
         "\"lux\":%.1f,\"white_ratio\":%.2f,"
-        "\"gain\":\"%s\",\"it\":%u}},"
-        "\"radar\":%s,\"pir\":%s,"
+        "\"gain\":\"%s\",\"it\":%u},"
+        "\"pir\":{\"raw\":%s,\"presence\":%s}},"
+        "\"radar\":%s,"
         "\"weather\":{\"loc\":%s,\"current\":%s},"
         "\"system\":{"
         "\"uptime\":%lld,\"time\":\"%s\",\"time_synced\":%s,"
@@ -446,7 +447,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         veml_ok ? "true" : "false",
         veml.lux, veml.white_ratio,
         veml.gain, veml.it_ms,
-        radar_json, pir_present() ? "true" : "false",
+        pir_raw() ? "true" : "false", pir_present() ? "true" : "false",
+        radar_json,
         wx_loc, wx_cur,
         run.uptime_s,
         time_str,

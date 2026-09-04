@@ -5,6 +5,7 @@
 
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "pir.h"
 #include "sun.h"
 #include "timesync.h"
 #include "weather_store.h"
@@ -54,6 +55,8 @@ void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
     out->out_fetching = weather_api_is_fetching();
 
     refresh_alerts(out);
+
+    out->pir_raw = pir_raw();
 
     weather_location_t loc;
     if (weather_store_get(loc_sel, &loc)) {

@@ -13,3 +13,7 @@ void pir_init(void);
 
 /* Current state. False before pir_init(), which reads as an empty room. */
 bool pir_present(void);
+
+/* The pin as it reads right now, without the hold above it: diagnostics only,
+ * to tell a dead sensor from a quiet room. */
+bool pir_raw(void);

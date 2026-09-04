@@ -1026,10 +1026,10 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     rule(c, &cur);
 
     // Debug info, pinned to the bottom corner: the burn-in offset the frame is
-    // currently drawn at, then the
-    // brightness, prefixed by the mode ('A' auto, '-' manual); it is a knob field
-    // and needs a readout to be edited by. One run on one plate, so focusing the
-    // brightness lights the whole strip.
+    // currently drawn at, then the brightness, prefixed by the mode ('A' auto,
+    // '-' manual); it is a knob field and needs a readout to be edited by, and
+    // last the PIR's bare line ('P' high, '-' low). One run on one plate, so
+    // focusing the brightness lights the whole strip.
     // 3x5im has no descender, so the baseline is its last row, and it clears the
     // burn-in shift's reserve above the edge.
     bool bright_focus = s->focus == UI_FOCUS_BRIGHT;
@@ -1042,8 +1042,9 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     // The mode marks the brightness, which is the level the panel is actually
     // driven at whichever mode picked it.
     gfx_textf_bg(c, UI_RX, GFX_H - 1 - GFX_SHIFT_MAX, &dbg,
-                 bright_focus ? GFX_HL : GFX_OFF, "+%d %s%u",
-                 gfx_shift(c), s->set.auto_bright ? "A " : "- ", s->bright_now);
+                 bright_focus ? GFX_HL : GFX_OFF, "+%d %s%u %c",
+                 gfx_shift(c), s->set.auto_bright ? "A " : "- ", s->bright_now,
+                 m->pir_raw ? 'P' : '-');
 
     // Last, so the animal walks over the debug line rather than under it.
     zoo(c, m->anim_ms, m->boot_seed);

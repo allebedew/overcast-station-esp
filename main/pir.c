@@ -63,6 +63,11 @@ bool pir_present(void)
     return s_present;
 }
 
+bool pir_raw(void)
+{
+    return gpio_get_level(PIR_GPIO) != 0;
+}
+
 void pir_init(void)
 {
     const gpio_config_t cfg = {

@@ -2291,9 +2291,10 @@
                 /* The plan view under it is the radar's, but the badge is the
                  * PIR's — a separate sensor on its own pin, and the only
                  * presence source wired at the moment. */
+                const pir = sn.pir || {};
                 const pirBadge = $("rBadge");
-                pirBadge.className = "badge " + (s.pir ? "good" : "off");
-                pirBadge.textContent = t(s.pir ? "radarPresent" : "radarEmpty");
+                pirBadge.className = "badge " + (pir.presence ? "good" : "off");
+                pirBadge.textContent = t(pir.presence ? "radarPresent" : "radarEmpty");
 
                 /* Cards whose badge replaces the window trend arrow: the CO₂
                  * level and the pressure tendency. The callback returns

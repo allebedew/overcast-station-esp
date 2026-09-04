@@ -168,7 +168,9 @@ history.
   line under the tag `pir` with how long the previous state lasted, and a
   `BUZZER_ARRIVE` / `BUZZER_LEAVE` chirp. It is what lights the panel and what
   the web page's radar card shows a badge for; the history rings and the
-  Telegram arrival/departure notices still read the radar and so are quiet.
+  Telegram arrival/departure notices still read the radar and so are quiet. The
+  bare line, without the hold, is the last character of the panel's debug strip
+  (`P` high, `-` low).
 - **Rotary encoder (DFRobot SEN0235, EC11)** — A on GPIO23, B on GPIO22, button
   on GPIO21; four wires, no supply. The module's own 47 kΩ pull-ups (R1–R3) are
   **desoldered** — without VCC they would drag the three lines through a
@@ -473,7 +475,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `sensors/scd40.c` | Sensirion command protocol with CRC-8, phased start, pressure compensation, FRC, dew point |
 | `sensors/tmp117.c` | address auto-detection, device-ID check, config, temperature register |
 | `sensors/bmp581.c` | address auto-detection, chip-ID check, soft reset out of deep standby, DSP/IIR + OSR/ODR setup, 6-byte burst read |
-| `pir.c` | the PIR line: a polling task, the published flag, and the log line and chirp on every change |
+| `pir.c` | the PIR line: a polling task, the published flag, the bare pin for diagnostics, and the log line and chirp on every change |
 | `radar/ld2450.c` | LD2450 on its own UART: reader task, frame resync and decode, the published snapshot with presence and the nearest target |
 | `sensors/veml7700.c` | command registers, auto-ranging table with its settle deadline, lux conversion with the >1000 lx correction, white/ALS ratio |
 | `sysinfo.c` | the station's own health: a boot-time snapshot of what cannot change plus live counters, the SoC temperature sensor, reset reason. CPU load is measured in one 1 s window shared by all callers; per-task CPU share logging every 30 s is available behind `CPU_LOG_ENABLED` (off by default) |
@@ -507,7 +509,7 @@ card belongs in that device's module, not in the caller — dew point in
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (gzipped) |
-| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `phase` `day`/`golden`/`civil`/`nautical`/`astro`/`night`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `radar` (`presence`, `near` — metres to the closest target — and `targets`, `x` / `y` in mm, up to three, plotted by the page; `null` while the LD2450 is silent), `pir` (the motion sensor's flag, the presence source actually wired), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system` (uptime, build, heap, NVS, plus `panel` — `on_s` / `dose_s`, the OLED's lit and brightness-weighted seconds), `settings` (generated from the settings table: `led_brightness`, `buzzer_volume`, `display_on`, `display_brightness`, `display_auto_brightness`, `radar_bt_off`, `altitude`) |
+| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`, and `pir` — `raw`, the bare line, and `presence`, the held flag), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `phase` `day`/`golden`/`civil`/`nautical`/`astro`/`night`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `radar` (`presence`, `near` — metres to the closest target — and `targets`, `x` / `y` in mm, up to three, plotted by the page; `null` while the LD2450 is silent), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system` (uptime, build, heap, NVS, plus `panel` — `on_s` / `dose_s`, the OLED's lit and brightness-weighted seconds), `settings` (generated from the settings table: `led_brightness`, `buzzer_volume`, `display_on`, `display_brightness`, `display_auto_brightness`, `radar_bt_off`, `altitude`) |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`); `{period, co2, temp, rh, press, lux, targets, near}`, each series gated on its own quantity so `null` is a gap in that series alone. `press` comes out reduced to sea level; `targets` is the slot's largest target count, `near` metres in quarter-metre steps and `null` for a slot with nobody in the fan |
 | `/api/history/reset` | POST | wipe all tiers, RAM rings and flash snapshots |
 | `/api/scan` | GET | Wi-Fi scan, `[{ssid, bssid, ch, rssi, auth}]`, one entry per BSSID |
