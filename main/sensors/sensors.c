@@ -87,7 +87,6 @@ static esp_err_t as3935_read_any(sensor_reading_t *r) { return as3935_read(&r->a
 
 static void scd40_started(void);
 static void bmp581_published(const sensor_reading_t *r);
-static void as3935_published(const sensor_reading_t *r);
 
 /* Written by the poll task, read by httpd, the display, the LED and alerts. */
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -107,8 +106,7 @@ static sensor_t s_sensors[SENSOR_COUNT] = {
     [SENSOR_VEML7700] = { .name = "VEML7700", .period_ms = VEML7700_PERIOD_MS,
                           .start = veml7700_start, .read = veml7700_read_any },
     [SENSOR_AS3935] = { .name = "AS3935", .period_ms = AS3935_PERIOD_MS,
-                        .start = as3935_start, .read = as3935_read_any,
-                        .on_reading = as3935_published },
+                        .start = as3935_start, .read = as3935_read_any },
 };
 
 static bool sensor_get(sensor_t *s, sensor_reading_t *out)
@@ -170,22 +168,6 @@ static void bmp581_published(const sensor_reading_t *r)
 {
     (void)r; /* scd40_sync_pressure() reads the published snapshot */
     scd40_sync_pressure();
-}
-
-/* One crack per detection, straight off the strike counter — the driver
- * publishes state, not events, so the increment is what an event looks like
- * from here. The count at the first reading only arms the rule: after a
- * sensor restart it is 0 anyway, and nothing should sound for history. */
-static void as3935_published(const sensor_reading_t *r)
-{
-    static bool armed;
-    static uint32_t strikes;
-
-    if (armed && r->as3935.strikes > strikes) {
-        buzzer_play(BUZZER_STORM);
-    }
-    strikes = r->as3935.strikes;
-    armed = true;
 }
 
 /* ---------------- polling ---------------- */

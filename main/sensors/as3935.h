@@ -22,7 +22,6 @@ typedef struct {
     uint8_t distance_km;    /* of that strike, with the two flags above */
     uint32_t energy;        /* dimensionless, 21 bits, of that strike */
     uint16_t strikes_24h;   /* detections in the last 24 h, by whole hours */
-    uint32_t strikes;       /* since start; the increment is what an event is */
     uint8_t noise_floor;    /* NF_LEV, 0-7, raised and lowered by the driver */
     uint8_t watchdog;       /* WDTH, and */
     uint8_t spike_reject;   /* SREJ: both follow the disturber rate */

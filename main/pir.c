@@ -17,7 +17,7 @@
  * long enough to bridge a step across the room, nowhere near enough for
  * somebody sitting still in front of the panel. So the raw line is held here
  * too, and this is what decides when the room counts as empty. */
-#define HOLD_MS    60000
+#define HOLD_MS    (5 * 60 * 1000)
 
 static const char *TAG = "pir";
 

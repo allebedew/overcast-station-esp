@@ -140,8 +140,10 @@ history.
     wins — a warning if the best is still outside the datasheet's ±3.5 %. The
     sweep runs one capacitance per poll and leaves the bus free between them
     (≈0.7 s in total, nothing else stalls). Gain is **indoor** (`AFE_GB` 18),
-    `MIN_NUM_LIGH` 1 (accumulation hides an isolated distant storm) and
-    `MASK_DIST` 0. Three registers adapt, all of them back down again:
+    `MIN_NUM_LIGH` 1 and `MASK_DIST` 0. The lower outdoor gain and a five-strike
+    minimum were both tried against the interference in this box and both made
+    it worse — at 14 the panel's pulses stopped saturating and arrived as
+    lightning rather than as disturbers, which also blinds the loop below. Three registers adapt, all of them back down again:
     `NF_LEV` a step up on every noise-too-high report and back after 10 quiet
     minutes; `WDTH` (2…6) and, once it has topped out, `SREJ` (2…6) a step per
     minute while the measured disturber rate stays above 30/min, back a step
@@ -150,8 +152,9 @@ history.
     expires, so an hour without a strike clears the part's statistics, and a
     day without one drops the last strike itself — nothing carries yesterday's
     storm. Logs a line per strike (distance, energy), the tuning result at
-    start, every noise-floor move and a disturber count per minute; a detection
-    also plays `BUZZER_STORM`. In `/api/status` under `sensors.as3935`: `last`
+    start and one line per minute with the disturber count and what it moved. A
+    detection makes no sound: with the sensor this far from working indoors, a
+    chirp would be a false alarm. In `/api/status` under `sensors.as3935`: `last`
     (seconds ago, distance, energy — `null` when there has been none in 24 h),
     `strikes_24h` counted in whole hours, `reject` (`nf`/`wdth`/`srej` and the
     disturbers per minute driving them) and `tune` (`cap` and the measured

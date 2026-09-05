@@ -41,10 +41,11 @@
 #define AS3935_INT_DISTURBER 0x04
 #define AS3935_INT_LIGHTNING 0x08
 
-/* Indoor gain. Outdoor is 14, and getting this wrong is fatal either way:
- * indoor gain outdoors saturates on everything, outdoor gain indoors hears
- * nothing. It becomes a setting once the sensor's final home is known. */
-#define AS3935_AFE_GB_INDOOR 18
+/* Indoor gain. The lower outdoor one (14) was tried against the interference
+ * in this box and made it worse: the panel's pulses stopped saturating, passed
+ * the shape check and arrived as lightning instead of as disturbers — which
+ * also blinds the loop below, since it tightens on the disturber rate. */
+#define AS3935_AFE_GB 18
 
 /* Noise floor: where it starts, and how far the adaptation may push it. */
 #define AS3935_NF_LEV_DEFAULT 2
@@ -64,10 +65,13 @@
 #define AS3935_DISTURBERS_LOW  5
 #define AS3935_REJECT_DECAY_MS (10 * 60 * 1000)
 
-/* Reserved bit 7 reads 1; CL_STAT 1, MIN_NUM_LIGH 0 (= one strike, no
- * accumulation — accumulation hides an isolated distant storm). SREJ occupies
- * the low nibble. */
-#define AS3935_STAT_BASE 0xC0
+/* One strike is enough to report. Five were tried and did not stem the false
+ * detections — the part's 15 min counter fills in seconds and then reports
+ * every event anyway — while an isolated distant storm stayed hidden. */
+#define AS3935_MIN_NUM_LIGH 0x00
+
+/* Reserved bit 7 reads 1, CL_STAT 1; SREJ occupies the low nibble. */
+#define AS3935_STAT_BASE (0xC0 | AS3935_MIN_NUM_LIGH)
 #define AS3935_STAT_CL_STAT 0x40
 
 /* Datasheet: 2 ms for the direct commands, for the TRCO settling pulse, and
@@ -454,7 +458,7 @@ esp_err_t as3935_start(void)
     esp_err_t err = calibrate_rco();
     if (err == ESP_OK) {
         s_step = "afe";
-        err = i2c_dev_write_u8(s_dev, AS3935_REG_AFE, AS3935_AFE_GB_INDOOR << 1);
+        err = i2c_dev_write_u8(s_dev, AS3935_REG_AFE, AS3935_AFE_GB << 1);
     }
     if (err == ESP_OK) {
         s_step = "noise_floor";
@@ -502,9 +506,9 @@ esp_err_t as3935_start(void)
 
     s_step = "";
     s_last_noise_us = s_last_busy_us = s_hour_us = esp_timer_get_time();
-    ESP_LOGI(TAG, "AS3935 at 0x%02X on IRQ GPIO%d, indoor gain %d, NF_LEV %u, "
+    ESP_LOGI(TAG, "AS3935 at 0x%02X on IRQ GPIO%d, gain %d, NF_LEV %u, "
                   "WDTH/SREJ %u/%u, TUN_CAP %u (%u Hz)",
-             AS3935_ADDR, AS3935_IRQ_GPIO, AS3935_AFE_GB_INDOOR, s_nf_lev,
+             AS3935_ADDR, AS3935_IRQ_GPIO, AS3935_AFE_GB, s_nf_lev,
              s_wdth, s_srej, s_tun_cap, s_lco_hz);
     return ESP_OK;
 }
@@ -758,7 +762,6 @@ esp_err_t as3935_read(as3935_data_t *out)
     out->distance_km = s_distance;
     out->energy = s_energy;
     out->strikes_24h = strikes_24h();
-    out->strikes = s_strikes;
     out->noise_floor = s_nf_lev;
     out->watchdog = s_wdth;
     out->spike_reject = s_srej;
