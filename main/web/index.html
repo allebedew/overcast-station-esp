@@ -1438,6 +1438,17 @@
                     displayAutoBrightness: "Авто-яркость дисплея",
                     radarBtOff: "Bluetooth радара отключён",
                     settingSaved: "Настройка сохранена",
+                    lightTitle: "Гроза",
+                    lightPer24: "за 24 ч",
+                    lightLast: "посл.",
+                    lightDist: "дист.",
+                    lightEnergy: "энергия",
+                    lightOverhead: "над головой",
+                    lightFar: ">40 км",
+                    lightPerMin: "/мин",
+                    lightCap: "cap",
+                    uKm: "км",
+                    uHz: "Гц",
                     sensWhiteRatio: "white/lux",
                     sensGain: "усиление",
                     sensIt: "интегр.",
@@ -1661,6 +1672,17 @@
                     displayAutoBrightness: "Display auto brightness",
                     radarBtOff: "Radar Bluetooth switched off",
                     settingSaved: "Setting saved",
+                    lightTitle: "Lightning",
+                    lightPer24: "in 24 h",
+                    lightLast: "last",
+                    lightDist: "dist.",
+                    lightEnergy: "energy",
+                    lightOverhead: "overhead",
+                    lightFar: ">40 km",
+                    lightPerMin: "/min",
+                    lightCap: "cap",
+                    uKm: "km",
+                    uHz: "Hz",
                     sensWhiteRatio: "white/lux",
                     sensGain: "gain",
                     sensIt: "integr.",
@@ -2284,6 +2306,8 @@
                     $(sr.k + "Val").textContent = num(cl[sr.src], sr.fmt);
                     setDot(sr.k + "Dot", !!(sn[sr.dev] || {}).ok);
                 });
+                renderLightning(sn.as3935 || {});
+
                 /* Both radar cards read one module, which drops out of the
                  * reply as a whole rather than carrying an `ok`. */
                 setDot("oDot", !!s.radar);
@@ -2688,6 +2712,24 @@
                         `<span><span data-i18n="radarMaxT"></span> <b id="oMax">${NA}</b></span>` +
                         "</div></div>" +
                         '<canvas id="oChart"></canvas></div>',
+                    /* No history behind it and so no chart: the strike count
+                     * heads the card, the last strike itself fills the column
+                     * beside it, and what the driver adapted sits in the
+                     * footer. */
+                    '<div class="card sensor"><h2>' +
+                        '<span class="sens-dot" id="gDot"></span>' +
+                        '<span data-i18n="lightTitle"></span>' +
+                        '<span class="badge off" id="gBadge" data-i18n="noData"></span></h2>' +
+                        '<div class="reading">' +
+                        `<span class="value" id="gVal">${NA}</span>` +
+                        '<span class="unit" data-i18n="lightPer24"></span>' +
+                        '<div class="minmax">' +
+                        `<span><span data-i18n="lightLast"></span> <b id="gAgo">${NA}</b></span>` +
+                        `<span><span data-i18n="lightDist"></span> <b id="gDist">${NA}</b></span>` +
+                        `<span><span data-i18n="lightEnergy"></span> <b id="gEnergy">${NA}</b></span>` +
+                        "</div></div>" +
+                        '<div class="cardfoot plain" id="gFoot">' +
+                        '<span class="cf-l"></span><span class="cf-r"></span></div></div>',
                     /* The plan view closes the grid — the one card that plots
                      * instead of charting. */
                     '<div class="card sensor"><h2>' +
@@ -2797,6 +2839,49 @@
                     ctx.arc(x, y, 4.5, 0, Math.PI * 2);
                     ctx.fill();
                 });
+            }
+
+            /* The disturber rate is the only thing on this card that moves
+             * minute to minute, so it is what the badge carries. The step is
+             * the rate at which the driver itself starts tightening. */
+            const NOISE_WARN = 30;
+
+            function renderLightning(d) {
+                setDot("gDot", !!d.ok);
+
+                const last = d.ok ? d.last : null;
+                $("gVal").textContent = d.ok ? num(d.strikes_24h, String) : NA;
+                $("gAgo").textContent = last ? fmtUptime(last.ago) : NA;
+                /* One number the way the part reports it: 0 is nearer than the
+                 * scale starts, null is past its end. */
+                $("gDist").textContent = !last
+                    ? NA
+                    : last.distance === null
+                      ? t("lightFar")
+                      : last.distance === 0
+                        ? t("lightOverhead")
+                        : last.distance + " " + t("uKm");
+                $("gEnergy").textContent = last ? num(last.energy, String) : NA;
+
+                const rate = d.ok && d.reject ? d.reject.per_min : null;
+                const badge = $("gBadge");
+                badge.className =
+                    "badge " +
+                    (typeof rate === "number" && rate >= NOISE_WARN ? "warn" : "off");
+                badge.textContent =
+                    typeof rate === "number" ? rate + t("lightPerMin") : t("noData");
+
+                const foot = $("gFoot");
+                const r = d.reject || {},
+                    tune = d.tune || {};
+                foot.querySelector(".cf-l").innerHTML = d.ok
+                    ? ["NF", "WDTH", "SREJ"]
+                          .map((k, i) => k + " " + [r.nf, r.wdth, r.srej][i])
+                          .join(" · ")
+                    : "";
+                foot.querySelector(".cf-r").textContent = d.ok
+                    ? t("lightCap") + " " + tune.cap + " · " + tune.lco + " " + t("uHz")
+                    : "";
             }
 
             function renderRadar(r) {

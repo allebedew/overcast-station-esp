@@ -258,6 +258,22 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     veml7700_data_t veml = { .gain = "" };
     bool veml_ok = sensors_veml7700_get(&veml);
 
+    /* The two out-of-band distances go out as one number the way the part
+     * reports them: 0 is closer than the scale starts, null is past its end. */
+    as3935_data_t as = {0};
+    bool as_ok = sensors_as3935_get(&as);
+    char as_last[80] = "null";
+    if (as_ok && as.last_strike_s >= 0) {
+        char dist[8] = "null";
+        if (as.distance_km != AS3935_DISTANCE_OUT_OF_RANGE) {
+            snprintf(dist, sizeof(dist), "%u",
+                     as.distance_km == AS3935_DISTANCE_OVERHEAD ? 0 : as.distance_km);
+        }
+        snprintf(as_last, sizeof(as_last),
+                 "{\"ago\":%d,\"distance\":%s,\"energy\":%lu}",
+                 (int)as.last_strike_s, dist, (unsigned long)as.energy);
+    }
+
     /* Not on the I2C bus, so it sits beside `sensors` rather than in it. The
      * targets go out as coordinates because the page plots them; the distance
      * to the nearest is the module's own arithmetic and goes out once. */
@@ -405,7 +421,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     }
     jbuf_printf(&s, "}");
 
-    static char json[3584];
+    static char json[3968];
     jbuf_t j;
     jbuf_init(&j, json, sizeof(json));
     jbuf_printf(&j,
@@ -422,6 +438,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"veml7700\":{\"ok\":%s,"
         "\"lux\":%.1f,\"white_ratio\":%.2f,"
         "\"gain\":\"%s\",\"it\":%u},"
+        "\"as3935\":{\"ok\":%s,\"last\":%s,\"strikes_24h\":%u,"
+        "\"reject\":{\"nf\":%u,\"wdth\":%u,\"srej\":%u,\"per_min\":%u},"
+        "\"tune\":{\"cap\":%u,\"lco\":%u}},"
         "\"pir\":{\"raw\":%s,\"presence\":%s}},"
         "\"radar\":%s,"
         "\"weather\":{\"loc\":%s,\"current\":%s},"
@@ -447,6 +466,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         veml_ok ? "true" : "false",
         veml.lux, veml.white_ratio,
         veml.gain, veml.it_ms,
+        as_ok ? "true" : "false", as_last, as.strikes_24h,
+        as.noise_floor, as.watchdog, as.spike_reject, as.disturbers_min,
+        as.tun_cap, as.lco_hz,
         pir_raw() ? "true" : "false", pir_present() ? "true" : "false",
         radar_json,
         wx_loc, wx_cur,

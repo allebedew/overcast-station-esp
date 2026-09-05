@@ -13,6 +13,7 @@ static const uint8_t TMP117_ADDRS[] = { 0x48, 0x49, 0x4A, 0x4B };
 
 #define TMP117_REG_TEMP      0x00
 #define TMP117_REG_CONFIG    0x01
+#define TMP117_REG_OFFSET    0x07
 #define TMP117_REG_DEVICE_ID 0x0F
 
 /* Device ID register: bits 11:0 are the part number, bits 15:12 the revision. */
@@ -47,6 +48,27 @@ static i2c_master_dev_handle_t s_dev;
 
 /* Where start() gave up, so the warnings below can name the step. */
 static const char *s_step = "";
+
+/* The offset register is added to every reading after linearization and is
+ * EEPROM-backed, so a value written into it once outlives resets and power
+ * cycles — and would look exactly like a miscalibrated part. Factory value is
+ * 0; diagnostics only, nothing here writes it. */
+static void log_offset(void)
+{
+    uint16_t raw;
+    esp_err_t err = i2c_dev_read_u16be(s_dev, TMP117_REG_OFFSET, &raw);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "offset register unreadable: %s", esp_err_to_name(err));
+        return;
+    }
+    float off_c = (int16_t)raw * TMP117_LSB_C;
+    if (raw == 0) {
+        ESP_LOGI(TAG, "temperature offset register: 0 (factory)");
+    } else {
+        ESP_LOGW(TAG, "temperature offset register: %+.4f C (raw 0x%04X) - "
+                      "every reading is shifted by it", off_c, raw);
+    }
+}
 
 esp_err_t tmp117_start(void)
 {
@@ -99,6 +121,7 @@ esp_err_t tmp117_start(void)
         s_step = "";
         ESP_LOGI(TAG, "TMP117 at 0x%02X, id 0x%03X rev %u", addr,
                  id & TMP117_ID_MASK, id >> 12);
+        log_offset();
         return ESP_OK;
     }
     return last;

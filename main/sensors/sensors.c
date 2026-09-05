@@ -29,11 +29,10 @@
 #define TMP117_PERIOD_MS   250
 #define BMP581_PERIOD_MS   250
 #define VEML7700_PERIOD_MS 130
-/* The AS3935 has no interrupt line wired, so its latched flag is what gets
- * polled; the period is what strike timestamps are worth, and two strikes
- * inside one of them collapse into one. Not faster: the datasheet wants 2 ms
- * between the event and the read, and a poll landing inside that window clears
- * an interrupt it never saw. */
+/* The AS3935 timestamps its own strikes in the IRQ handler, so this period is
+ * only how soon the latched interrupt is read out and the housekeeping runs;
+ * two strikes inside one of them still collapse into one, which is what keeps
+ * it short. Without a pending interrupt the poll touches no I2C at all. */
 #define AS3935_PERIOD_MS   50
 
 /* The SCD40 needs ambient pressure it cannot measure itself, so the BMP581's
