@@ -5,7 +5,7 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             "history.c"
                             "zambretti.c" "sun.c"
                             "storage.c" "weather_api.c" "weather_store.c"
-                            "led.c" "buzzer.c" "pir.c"
+                            "led.c" "buzzer.c" "pir.c" "wg.c"
                             # everything for the graphical SSD1322 panel: the
                             # drawing framework (canvas, text over u8g2 fonts,
                             # the fonts gui/tools/extract_fonts.py sliced out)
@@ -39,7 +39,8 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                                      esp_driver_tsens esp_driver_i2c
                                      esp_driver_uart esp_driver_pcnt esp_driver_gpio
                                      esp_driver_ledc esp_driver_spi
-                                     esp_app_format spi_flash json app_update)
+                                     esp_app_format spi_flash json app_update
+                                     trombik__esp_wireguard)
 
 # Web assets are embedded pre-compressed and served with Content-Encoding: gzip
 # (index.html: 107 KB -> 20 KB), which shrinks every OTA image and the page load

@@ -20,6 +20,7 @@
 #include "weather_api.h"
 #include "weather_store.h"
 #include "webserver.h"
+#include "wg.h"
 #include "wifi.h"
 
 void app_main(void)
@@ -63,6 +64,7 @@ void app_main(void)
     telegram_init();
     alerts_init();
     weather_api_init();
+    wg_init(); /* waits for the clock itself: the handshake is timestamped */
 
     /* Last: the handlers read from every module above. */
     webserver_start();

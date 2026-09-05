@@ -30,6 +30,7 @@
 #include "timesync.h"
 #include "weather_api.h"
 #include "weather_store.h"
+#include "wg.h"
 #include "wifi.h"
 #include "wifi_store.h"
 
@@ -237,6 +238,19 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         jbuf_printf(&j, "]}");
     }
 
+    /* The tunnel is a third interface beside the two Wi-Fi ones, and is
+     * absent from the build unless wg_secrets.h exists. */
+    static char wg_json[160];
+    {
+        wg_info_t wg;
+        wg_get_info(&wg);
+        snprintf(wg_json, sizeof(wg_json),
+                 "\"wg\":{\"configured\":%s,\"up\":%s,\"ip\":\"%s\","
+                 "\"endpoint\":\"%s\"}",
+                 wg.configured ? "true" : "false", wg.up ? "true" : "false",
+                 wg.ip, wg.endpoint);
+    }
+
     const sysinfo_static_t *sys = sysinfo_static();
     sysinfo_runtime_t run;
     sysinfo_get_runtime(&run);
@@ -421,11 +435,11 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     }
     jbuf_printf(&s, "}");
 
-    static char json[3968];
+    static char json[4096];
     jbuf_t j;
     jbuf_init(&j, json, sizeof(json));
     jbuf_printf(&j,
-        "{%s,%s,"
+        "{%s,%s,%s,"
         "\"climate\":{"
         "\"temp\":%s,\"rh\":%s,\"co2\":%s,"
         "\"press\":%s,\"press_msl\":%s,\"lux\":%s},"
@@ -455,7 +469,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"nvs_used\":%u,\"nvs_total\":%u,"
         "\"panel\":{\"on_s\":%lu,\"dose_s\":%lu}},"
         "\"settings\":%s}",
-        sta_json, ap_json,
+        sta_json, ap_json, wg_json,
         cl_temp, cl_rh, cl_co2, cl_press, cl_msl, cl_lux,
         zb_json, sun_json,
         air_ok ? "true" : "false", air.co2_ppm, air.temp_c, air.rh_pct,

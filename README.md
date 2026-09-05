@@ -17,6 +17,13 @@ history.
   AP ↔ STA; the short click is unused. Leaving AP mode keeps a surviving
   association and only switches the mode back — reconnection happens when
   the store changes (`/api/connect`).
+- **WireGuard** — the way in from outside the LAN: a tunnel to our own server,
+  brought up once Wi-Fi and the clock are there (the handshake is timestamped)
+  and rebuilt after 3 min without one, which re-resolves the endpoint. Only the
+  tunnel subnet is routed into it, so the forecast, Telegram and SNTP keep
+  using Wi-Fi directly; the web UI and OTA answer over both. Keys and endpoint
+  are `main/wg_secrets.h`, copied from `wg_secrets.h.example` and never in git
+  — without that file the tunnel is simply absent from the build.
 - **Web UI** — single page embedded in the firmware (gzipped at build time),
   `http://weather.local` (mDNS), polled every 1 s, bilingual RU/EN from an
   in-page dictionary. Five sensor cards (temperature, humidity, CO₂,
@@ -487,6 +494,7 @@ card belongs in that device's module, not in the caller — dew point in
 |---|---|
 | `wifi.c` | connection state machine; one snapshot from `wifi_get_info()` with separate STA and AP fields, plus the radio-free `wifi_sta_state()` the display polls |
 | `wifi_store.c` | saved credentials in NVS (`wifi_creds`), mutex-protected |
+| `wg.c` | the WireGuard tunnel over `trombik/esp_wireguard`: config from `wg_secrets.h`, a supervisor task that waits for Wi-Fi and SNTP, watches the handshake and rebuilds the interface when it stops coming |
 | `web/webserver.c` | esp_http_server + mDNS; routes in one table, handlers through a wrapper that logs and blinks the LED; replies via a bounded appender that truncates rather than overrunning |
 | `ota.c` | `POST /api/ota` + rollback confirmation; publishes `ota_is_active()` and the byte counts `ota_get_progress()` |
 | `led.c` | LED task: polls wifi/sensors/ota each tick, picks the pattern; persisted brightness |
@@ -533,7 +541,7 @@ card belongs in that device's module, not in the caller — dew point in
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (gzipped) |
-| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap`, `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`, and `pir` — `raw`, the bare line, and `presence`, the held flag), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `phase` `day`/`golden`/`civil`/`nautical`/`astro`/`night`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `radar` (`presence`, `near` — metres to the closest target — and `targets`, `x` / `y` in mm, up to three, plotted by the page; `null` while the LD2450 is silent), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system` (uptime, build, heap, NVS, plus `panel` — `on_s` / `dose_s`, the OLED's lit and brightness-weighted seconds), `settings` (generated from the settings table: `led_brightness`, `buzzer_volume`, `display_on`, `display_brightness`, `display_auto_brightness`, `radar_bt_off`, `altitude`) |
+| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap` / `wg` (`configured`, `up`, `ip`, `endpoint`), `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`, and `pir` — `raw`, the bare line, and `presence`, the held flag), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `phase` `day`/`golden`/`civil`/`nautical`/`astro`/`night`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `radar` (`presence`, `near` — metres to the closest target — and `targets`, `x` / `y` in mm, up to three, plotted by the page; `null` while the LD2450 is silent), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system` (uptime, build, heap, NVS, plus `panel` — `on_s` / `dose_s`, the OLED's lit and brightness-weighted seconds), `settings` (generated from the settings table: `led_brightness`, `buzzer_volume`, `display_on`, `display_brightness`, `display_auto_brightness`, `radar_bt_off`, `altitude`) |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`); `{period, co2, temp, rh, press, lux, targets, near}`, each series gated on its own quantity so `null` is a gap in that series alone. `press` comes out reduced to sea level; `targets` is the slot's largest target count, `near` metres in quarter-metre steps and `null` for a slot with nobody in the fan |
 | `/api/history/reset` | POST | wipe all tiers, RAM rings and flash snapshots |
 | `/api/scan` | GET | Wi-Fi scan, `[{ssid, bssid, ch, rssi, auth}]`, one entry per BSSID |
@@ -576,8 +584,12 @@ Deliberate config deviations live in `sdkconfig.defaults`: 16 MB flash, custom
 partition table, rollback, run-time stats for CPU load, `-Os`,
 `LWIP_MAX_SOCKETS=16` (httpd + mDNS + SNTP must not starve the outbound TLS
 clients) and a `1.1.1.1` DNS fallback for when the DHCP-supplied resolver
-leaves a query unanswered. `sdkconfig` is generated and not tracked — delete it
-after changing the defaults, or the old value wins.
+leaves a query unanswered, `LWIP_TCPIP_TASK_STACK_SIZE=5120` (WireGuard runs
+its handshake on that task) and `ESP_NETIF_BRIDGE_EN` — no bridge is created,
+it is just the only switch that turns on `LWIP_ESP_NETIF_DATA`, without which
+esp_netif reads the WireGuard interface's `state` as its own handle and
+crashes the moment the tunnel gets an address. `sdkconfig` is generated and
+not tracked — delete it after changing the defaults, or the old value wins.
 
 `partitions.csv`: nvs 24K, otadata 8K, phy 4K, ota_0/ota_1 4M each, storage
 (LittleFS) 6M pinned to the end of flash at 0xA00000 so future app-slot growth

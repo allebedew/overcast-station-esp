@@ -1555,6 +1555,9 @@
                     notConn: "Не подключено",
                     apOn: "Включена",
                     apOff: "Выключена",
+                    wgUp: "Подключён",
+                    wgDown: "Нет связи",
+                    wgServer: "Сервер",
                     wifiNet: "Сеть Wi-Fi",
                     signal: "Сигнал",
                     phy: "Стандарт",
@@ -1796,6 +1799,9 @@
                     notConn: "Not connected",
                     apOn: "On",
                     apOff: "Off",
+                    wgUp: "Connected",
+                    wgDown: "No link",
+                    wgServer: "Server",
                     wifiNet: "Wi-Fi network",
                     signal: "Signal",
                     phy: "Standard",
@@ -2352,6 +2358,7 @@
                  * collapses to its state row when it is down. */
                 const sta = s.sta || {};
                 const ap = s.ap || {};
+                const wg = s.wg || {};
                 const on = (cond, v) => (cond ? v : NA);
                 const rows = [
                     { h: t("wifiSta") },
@@ -2385,6 +2392,16 @@
                             `${t("client")} ${i + 1}`,
                             `${c.mac} · ${c.rssi} dBm`,
                         ]),
+                    );
+                }
+                /* the tunnel, like the AP, describes itself only when it is
+                 * there: a firmware built without keys has nothing to show */
+                if (wg.configured) {
+                    rows.push(
+                        { h: "WireGuard" },
+                        [t("state"), wg.up ? t("wgUp") : t("wgDown")],
+                        [t("ipAddr"), wg.ip],
+                        [t("wgServer"), wg.endpoint],
                     );
                 }
                 rows.push(

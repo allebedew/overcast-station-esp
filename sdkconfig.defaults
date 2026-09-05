@@ -32,3 +32,15 @@ CONFIG_LWIP_MAX_SOCKETS=16
 # give it a public one to fall back to; the DHCP servers are still tried first.
 CONFIG_LWIP_FALLBACK_DNS_SERVER_SUPPORT=y
 CONFIG_LWIP_FALLBACK_DNS_SERVER_ADDRESS="1.1.1.1"
+
+# WireGuard runs its crypto on the LWIP task; the default 3 KiB stack is short
+# for the handshake (X25519 in software).
+CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=5120
+
+# No bridge is ever created: this is the only switch that turns on
+# LWIP_ESP_NETIF_DATA, which makes esp_netif keep its handle in the netif's
+# client data. Without it esp_netif reads `netif->state` of *every* lwip netif
+# as its own handle, and the WireGuard interface -- added straight to lwip,
+# with its own device there -- crashes the IDF netif callback as soon as it
+# gets an address.
+CONFIG_ESP_NETIF_BRIDGE_EN=y

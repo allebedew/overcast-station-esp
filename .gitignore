@@ -7,3 +7,4 @@ sdkconfig.old
 main/gui/sim/sim
 main/gui/sim/sim.dSYM/
 main/gui/sim/out/
+main/wg_secrets.h
