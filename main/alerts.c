@@ -12,6 +12,7 @@
 #include "esp_timer.h"
 #include "pir.h"
 #include "sensors.h"
+#include "settings.h"
 #include "telegram.h"
 #include "timesync.h"
 #include "weather_api.h"
@@ -46,8 +47,22 @@ static const struct {
     [ALERT_Q_UVI]        = { "UV", "", "%.1f", "выше", "ниже", false },
     [ALERT_Q_TREND]      = { "Давление", " гПа/3ч", "%+.1f",
                              "растёт быстрее", "падает быстрее", true },
-    [ALERT_Q_GUST]       = { "Порывы ветра", " км/ч", "%.0f", "выше", "ниже", false },
+    [ALERT_Q_GUST]       = { "Порывы ветра", NULL, NULL, "выше", "ниже", false },
     [ALERT_Q_OUT_TEMP]   = { "На улице", " °C", "%.1f", "выше", "ниже", false },
+};
+
+/* Gusts are thresholded in km/h, the unit the forecast comes in, but quoted in
+ * whichever unit the station is set to -- so the message converts both the
+ * reading and the edge, and takes its unit and resolution from here rather than
+ * from TEXT above. */
+static const struct {
+    const char *unit;
+    const char *fmt;
+} WIND[WEATHER_WIND_UNIT_COUNT] = {
+    [WEATHER_WIND_KMH] = { " км/ч",   "%.0f" },
+    [WEATHER_WIND_MS]  = { " м/с",    "%.1f" },
+    [WEATHER_WIND_MPH] = { " миль/ч", "%.0f" },
+    [WEATHER_WIND_KN]  = { " уз",     "%.1f" },
 };
 
 /* A device silent for this long is out, not between reads: the hot-plug state
@@ -103,11 +118,27 @@ static void notify(alert_q_t q, int z, int prev, double v)
     }
 
     int sev = alert_severity(q, z);
+    const char *unit = TEXT[q].unit;
+    const char *fmt = TEXT[q].fmt;
+    char edge_s[16];
+    if (q == ALERT_Q_GUST) {
+        weather_wind_unit_t u = (weather_wind_unit_t)settings_get(SETTING_WIND_UNIT);
+        v = weather_api_wind_convert(v, u);
+        edge = weather_api_wind_convert(edge, u);
+        unit = WIND[u].unit;
+        fmt = WIND[u].fmt;
+        /* A converted edge is no longer round, so it is quoted in the same
+         * resolution as the reading rather than in full. */
+        snprintf(edge_s, sizeof(edge_s), fmt, edge);
+    } else {
+        snprintf(edge_s, sizeof(edge_s), "%g", edge);
+    }
+
     char val[16];
-    snprintf(val, sizeof(val), TEXT[q].fmt, v);
-    telegram_notify("%s %s %s %g%s: %s", EMOJI[sev < 0 ? -sev : sev],
-                    TEXT[q].name, up ? TEXT[q].up : TEXT[q].down, edge,
-                    TEXT[q].unit, val);
+    snprintf(val, sizeof(val), fmt, v);
+    telegram_notify("%s %s %s %s%s: %s", EMOJI[sev < 0 ? -sev : sev],
+                    TEXT[q].name, up ? TEXT[q].up : TEXT[q].down, edge_s,
+                    unit, val);
 }
 
 /* Sensors are watched through their own getters, which already answer false

@@ -405,7 +405,10 @@ static esp_err_t status_get_handler(httpd_req_t *req)
             continue;
         }
         int32_t v = settings_get(id);
-        if (d->as_bool) {
+        if (d->labels) {
+            jbuf_printf(&s, "%s\"%s\":\"%s\"", n++ ? "," : "", d->api,
+                        d->labels[v]);
+        } else if (d->as_bool) {
             jbuf_printf(&s, "%s\"%s\":%s", n++ ? "," : "", d->api,
                         v ? "true" : "false");
         } else {
@@ -818,6 +821,26 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
                      item->string ? item->string : "?");
             cJSON_Delete(root);
             return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, msg);
+        }
+        /* A labelled setting is carried as one of its words, so the value is
+         * looked up rather than parsed; the whole vocabulary goes into the
+         * error, which is all a client needs to fix the call. */
+        if (d->labels) {
+            const char *want = cJSON_IsString(item) ? item->valuestring : "";
+            int32_t v = d->min;
+            while (v <= d->max && strcmp(d->labels[v], want) != 0) {
+                v++;
+            }
+            if (v > d->max) {
+                int k = snprintf(msg, sizeof(msg), "%s wants one of:", d->api);
+                for (int32_t i = d->min; i <= d->max && k < (int)sizeof(msg) - 1; i++) {
+                    k += snprintf(msg + k, sizeof(msg) - k, " %s", d->labels[i]);
+                }
+                cJSON_Delete(root);
+                return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, msg);
+            }
+            settings_set(id, v);
+            continue;
         }
         if (d->as_bool ? !cJSON_IsBool(item) : !cJSON_IsNumber(item)) {
             snprintf(msg, sizeof(msg), "%s wants a %s", d->api,

@@ -8,6 +8,7 @@
 #include "climate.h"
 #include "gfx_target.h"
 #include "history.h"
+#include "weather_api.h"
 
 #define NVS_NAMESPACE "settings"
 
@@ -47,16 +48,20 @@ static const entry_t s_tab[SETTING_COUNT] = {
         { .key = "altitude_m", .api = "altitude", .name = "Site altitude",
           .def = 0, .min = CLIMATE_ALTITUDE_MIN, .max = CLIMATE_ALTITUDE_MAX },
         NVS_TYPE_I32 },
-    /* What the knob left the chart on. Off the HTTP API: it is where the panel
-     * stands, not something to drive a station by. */
+    [SETTING_WIND_UNIT] = {
+        { .key = "wind_unit", .api = "wind_unit", .name = "Wind units",
+          .def = WEATHER_WIND_KMH, .min = 0, .max = WEATHER_WIND_UNIT_COUNT - 1,
+          .labels = WEATHER_WIND_UNIT_NAMES }, NVS_TYPE_U8 },
+    /* Where the panel's chart stands. On the API because the web page shows the
+     * same selection and may move it; the knob adopts what arrives. */
     [SETTING_CHART_Q] = {
-        { .key = "chart_q", .api = NULL, .name = "Chart quantity",
-          .def = HISTORY_Q_TEMP, .min = 0, .max = HISTORY_Q_COUNT - 1 },
-        NVS_TYPE_U8 },
+        { .key = "chart_q", .api = "chart_quantity", .name = "Chart quantity",
+          .def = HISTORY_Q_TEMP, .min = 0, .max = HISTORY_Q_COUNT - 1,
+          .labels = CHART_Q_NAMES }, NVS_TYPE_U8 },
     [SETTING_CHART_RANGE] = {
-        { .key = "chart_range", .api = NULL, .name = "Chart range",
-          .def = CHART_RANGE_1M, .min = 0, .max = CHART_RANGE_COUNT - 1 },
-        NVS_TYPE_U8 },
+        { .key = "chart_range", .api = "chart_range", .name = "Chart range",
+          .def = CHART_RANGE_1M, .min = 0, .max = CHART_RANGE_COUNT - 1,
+          .labels = CHART_RANGE_LABELS }, NVS_TYPE_U8 },
 };
 
 /* Where a changed value has to land besides NVS — see settings_on_change(). */

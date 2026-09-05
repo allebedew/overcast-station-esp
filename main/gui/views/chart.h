@@ -21,10 +21,17 @@ typedef enum {
 typedef struct {
     history_tier_t tier;
     uint8_t        stride;
-    const char    *label;
 } chart_range_def_t;
 
 extern const chart_range_def_t CHART_RANGES[CHART_RANGE_COUNT];
+
+/* The chart selection's vocabulary, indexed by its enum: what the badge under
+ * the plot says, and the words the HTTP API carries chart_range and
+ * chart_quantity as. The quantity names are the keys /api/history gives the
+ * same series -- one word per quantity across the whole API. Here rather than
+ * in history.c because the simulator draws the chart without the rings. */
+extern const char *const CHART_RANGE_LABELS[CHART_RANGE_COUNT];
+extern const char *const CHART_Q_NAMES[HISTORY_Q_COUNT];
 
 /* Long enough for the widest window; the screen plots the newest of them. */
 #define CHART_SERIES_MAX 64
@@ -46,7 +53,3 @@ extern const chart_range_def_t CHART_RANGES[CHART_RANGE_COUNT];
  * rest. */
 void chart_draw(gfx_canvas_t *c, ui_cursor_t *cur, const float *v, int n,
                 history_quantity_t q, chart_range_t range, bool range_hl);
-
-/* The quantity's short name, for a caller that has to say which one is up.
- * Nothing on the panel spells it out yet. */
-const char *chart_quantity_name(history_quantity_t q);

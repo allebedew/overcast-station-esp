@@ -6,6 +6,7 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "pir.h"
+#include "settings.h"
 #include "sun.h"
 #include "timesync.h"
 #include "weather_store.h"
@@ -53,6 +54,7 @@ void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
     zambretti_get(&out->zb);
     out->out_ok       = weather_api_get(&out->out);
     out->out_cond     = weather_api_code_short(out->out.weather_code);
+    out->wind_unit    = (weather_wind_unit_t)settings_get(SETTING_WIND_UNIT);
     out->out_fetching = weather_api_is_fetching();
 
     refresh_alerts(out);
@@ -82,8 +84,9 @@ void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
 
     wg_info_t wg;
     wg_get_info(&wg);
-    out->wg_on = wg.configured;
-    out->wg_up = wg.up;
+    out->wg_on     = wg.configured;
+    out->wg_active = wg.active;
+    out->wg_up     = wg.up;
 
     out->anim_ms = (uint32_t)(esp_timer_get_time() / 1000);
 

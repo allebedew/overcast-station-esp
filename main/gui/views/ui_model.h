@@ -51,6 +51,7 @@ typedef struct {
     bool               out_ok;
     bool               out_fetching; /* a fetch is running; the age is animated instead */
     const char        *out_cond; /* its WMO code as words, never NULL */
+    weather_wind_unit_t wind_unit; /* what the wind row converts to */
     char               loc[33];  /* selected location's name; "" when none is set */
 
     /* The link, unpacked rather than embedded: wifi.h pulls in esp_err.h, and
@@ -59,10 +60,11 @@ typedef struct {
     int       rssi;   /* dBm; meaningless unless UI_LINK_UP */
     bool      ap;     /* own SoftAP is up; the station side has nothing to show */
 
-    /* The WireGuard tunnel, shown beside the link. Both false when the build
+    /* The WireGuard tunnel, shown beside the link. All false when the build
      * carries no keys, and then nothing is drawn. */
-    bool wg_on;   /* configured */
-    bool wg_up;   /* handshake holding */
+    bool wg_on;     /* configured */
+    bool wg_active; /* its preconditions hold, so it is trying */
+    bool wg_up;     /* handshake holding */
 
     /* The sun for the active location, from sun.c rather than the forecast:
      * today's crossings, where it stands right now, and how long until it next

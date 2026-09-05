@@ -150,8 +150,8 @@ void ui_state_format(const ui_state_t *s, char *buf, int n)
                                                        "range", "brightness" };
 
     snprintf(buf, (size_t)n, "chart %s %s, bright %u%s, location %u/%u, knob on %s",
-             chart_quantity_name(s->set.chart_q),
-             CHART_RANGES[s->set.chart_range].label, s->bright_now,
+             CHART_Q_NAMES[s->set.chart_q],
+             CHART_RANGE_LABELS[s->set.chart_range], s->bright_now,
              s->set.auto_bright ? " auto" : "", s->loc_sel, s->loc_count,
              FIELD[s->focus]);
 }

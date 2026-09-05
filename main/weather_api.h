@@ -75,6 +75,32 @@ int weather_api_utc_offset_s(void);
 /* Wind direction as a single cardinal letter, "N" / "E" / "S" / "W". */
 const char *weather_api_wind_dir_str(int deg);
 
+/* Unit the wind speed is shown in; the readings themselves stay in km/h, which
+ * is what the API reports. Stored as an index in NVS, so the order is a
+ * persisted contract: append only. */
+typedef enum {
+    WEATHER_WIND_KMH,
+    WEATHER_WIND_MS,
+    WEATHER_WIND_MPH,
+    WEATHER_WIND_KN,
+    WEATHER_WIND_UNIT_COUNT,
+} weather_wind_unit_t;
+
+/* Indexed by the enum: the vocabulary wind_unit is spelled in on the HTTP API. */
+extern const char *const WEATHER_WIND_UNIT_NAMES[WEATHER_WIND_UNIT_COUNT];
+
+/* Inline, not in weather_api.c: that file is firmware-only (HTTP, NVS) and the
+ * simulator draws the same wind row. */
+static inline float weather_api_wind_convert(float kmh, weather_wind_unit_t u)
+{
+    switch (u) {
+    case WEATHER_WIND_MS:  return kmh / 3.6f;
+    case WEATHER_WIND_MPH: return kmh / 1.609344f;
+    case WEATHER_WIND_KN:  return kmh / 1.852f;
+    default:               return kmh;
+    }
+}
+
 /* English description of a WMO weather code. Never NULL. */
 const char *weather_api_code_str(int weather_code);
 

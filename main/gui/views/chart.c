@@ -9,10 +9,22 @@
 /* Every window is 60 columns wide, one per plotted pixel, so the stride is the
  * tier's slot count over 60 -- not a free choice. */
 const chart_range_def_t CHART_RANGES[CHART_RANGE_COUNT] = {
-    [CHART_RANGE_1M] = { HISTORY_5M,  1, "1m" },
-    [CHART_RANGE_5M] = { HISTORY_5M,  5, "5m" },
-    [CHART_RANGE_1H] = { HISTORY_1H, 12, "1h" },
-    [CHART_RANGE_1D] = { HISTORY_1D, 24, "1d" },
+    [CHART_RANGE_1M] = { HISTORY_5M,  1 },
+    [CHART_RANGE_5M] = { HISTORY_5M,  5 },
+    [CHART_RANGE_1H] = { HISTORY_1H, 12 },
+    [CHART_RANGE_1D] = { HISTORY_1D, 24 },
+};
+
+const char *const CHART_RANGE_LABELS[CHART_RANGE_COUNT] = {
+    "1m", "5m", "1h", "1d",
+};
+
+const char *const CHART_Q_NAMES[HISTORY_Q_COUNT] = {
+    [HISTORY_Q_TEMP]  = "temp",
+    [HISTORY_Q_PRESS] = "press",
+    [HISTORY_Q_RH]    = "rh",
+    [HISTORY_Q_CO2]   = "co2",
+    [HISTORY_Q_LUX]   = "lux",
 };
 
 /* The plot area itself, and the vertical scale it maps the series onto.
@@ -177,22 +189,16 @@ static void chart_plot(gfx_canvas_t *c, ui_cursor_t *cur, const float *v, int n,
  * decades into three characters — and is the one quantity placed by decade
  * rather than linearly. */
 static const struct {
-    const char *name;       /* nothing on the panel says it yet; see the log */
     int8_t      dec;        /* decimals; -1: ui_lux_str() */
     bool        log;
     float       min_span;   /* decades where log; see chart_plot() */
 } CHART_STYLE[HISTORY_Q_COUNT] = {
-    [HISTORY_Q_TEMP]  = { "temp",  1,  false, 0.1f  },
-    [HISTORY_Q_PRESS] = { "press", 0,  false, 0.01f },
-    [HISTORY_Q_RH]    = { "rh",    1,  false, 1.0f  },
-    [HISTORY_Q_CO2]   = { "co2",   0,  false, 20.0f },
-    [HISTORY_Q_LUX]   = { "lux",   -1, true,  1.0f  },
+    [HISTORY_Q_TEMP]  = {  1, false, 0.1f  },
+    [HISTORY_Q_PRESS] = {  0, false, 0.01f },
+    [HISTORY_Q_RH]    = {  1, false, 1.0f  },
+    [HISTORY_Q_CO2]   = {  0, false, 20.0f },
+    [HISTORY_Q_LUX]   = { -1, true,  1.0f  },
 };
-
-const char *chart_quantity_name(history_quantity_t q)
-{
-    return CHART_STYLE[q].name;
-}
 
 /* `up` rounds away from the series: the bottom label is never above the lowest
  * reading and the top one never below the highest, so the pair always contains
@@ -226,7 +232,7 @@ void chart_draw(gfx_canvas_t *c, ui_cursor_t *cur, const float *v, int n,
     }
 
     gfx_text_bg(c, UI_RX/2, baseline, &UI_TINY_C, range_hl ? GFX_HL : GFX_NONE,
-                CHART_RANGES[range].label);
+                CHART_RANGE_LABELS[range]);
 
     if (isfinite(hi)) {
         chart_label(b, sizeof(b), q, hi, true);

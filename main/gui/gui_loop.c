@@ -179,11 +179,13 @@ static void sync_location(int64_t now)
 }
 
 /* A setting written from elsewhere (the web API talks to the settings module,
- * not to this one), applied where the panel has its single owner. */
-static void adopt_display_settings(void)
+ * not to this one), applied where the panel has its single owner. Returns
+ * whether anything moved, so the change reaches the log the knob's own do. */
+static bool adopt_display_settings(void)
 {
     ui_settings_t now;
     load_ui_settings(&now);
+    bool moved = false;
 
     /* The level itself is pushed to the panel by ui_state_light(), which runs
      * every frame. */
@@ -196,7 +198,16 @@ static void adopt_display_settings(void)
     if (now.on != s_persisted.on) {
         s_state.set.on = now.on;
     }
+    if (now.chart_q != s_persisted.chart_q) {
+        s_state.set.chart_q = now.chart_q;
+        moved = true;
+    }
+    if (now.chart_range != s_persisted.chart_range) {
+        s_state.set.chart_range = now.chart_range;
+        moved = true;
+    }
     s_persisted = now;
+    return moved;
 }
 
 /* Whatever the knob is currently on, on one line: the panel marks the selection
@@ -273,7 +284,7 @@ static void gui_task(void *arg)
         } else {
             int64_t now = esp_timer_get_time();
 
-            adopt_display_settings();
+            changed |= adopt_display_settings();
 
             encoder_input_t in;
             encoder_take(&in);
@@ -286,7 +297,8 @@ static void gui_task(void *arg)
 
             /* A click is a single event rather than a sweep, so it is stored as
              * it happens — which also keeps what the API reports exact. */
-            if (s_state.set.on != s_persisted.on) {
+            bool clicked = s_state.set.on != s_persisted.on;
+            if (clicked) {
                 settings_set(SETTING_DISPLAY_ON, s_state.set.on);
                 s_persisted.on = s_state.set.on;
             }
@@ -308,7 +320,11 @@ static void gui_task(void *arg)
                 was_lit = want_on;
             } else if (want_on != was_lit) {
                 was_lit = want_on;
-                buzzer_play(BUZZER_CLICK);
+                /* Silent when the click itself flipped it: the click already
+                 * sounded, and a second tune this frame would cut it off. */
+                if (!clicked) {
+                    buzzer_play(BUZZER_CLICK);
+                }
             }
 
             panel_hours_track(want_on, s_state.bright_now);

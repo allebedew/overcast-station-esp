@@ -103,9 +103,9 @@ static int ap_badge(gfx_canvas_t *c, int right, int baseline)
 }
 
 /* The WireGuard tunnel as one dot beside the link indicator: lit while the
- * handshake holds, blinking at the alerts' 1 Hz while it does not. Anchored like
- * bars(), and drawn in the SoftAP mode too -- the tunnel's own state does not
- * depend on which way the station is up. */
+ * handshake holds, blinking at the alerts' 1 Hz while it is being made. Anchored
+ * like bars(), and drawn in the SoftAP mode too -- the tunnel's own state does
+ * not depend on which way the station is up. */
 #define WG_DOT      3      /* px; a 3x3 square with its corners cut, so a diamond */
 #define WG_BLINK_MS 1000   /* half of it dark */
 
@@ -938,7 +938,10 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     } else {
         bars(c, UI_RX, baseline, sig_mask(m->link, m->rssi, m->anim_ms));
     }
-    if (m->wg_on) {
+    /* Nothing at all while the tunnel is not even trying: without Wi-Fi or a
+     * synced clock its handshake cannot happen, and a blink would read as an
+     * attempt. */
+    if (m->wg_on && (m->wg_up || m->wg_active)) {
         wg_dot(c, UI_RX - link_w - 3, baseline, m->wg_up, m->anim_ms);
     }
     // battery(c, UI_RX - SIG_W - 3, baseline, 0);
@@ -985,10 +988,13 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     baseline = ui_row(&cur, &UI_TEXT);
     reading(c, 0, baseline, &UI_TEXT, ok, "%.0f%%", "--%", m->out.humidity_pct,
             NULL, false, GFX_NONE, false);
-    // Speed with the gust in brackets, in the units the API reports.
+    // Speed with the gust in brackets, in the configured unit -- which is not
+    // spelled out on the row: the number shares it with the humidity.
     if (ok) {
         char w[16];
-        snprintf(w, sizeof(w), "%.0f (%.0f)", m->out.wind_kmh, m->out.gust_kmh);
+        snprintf(w, sizeof(w), "%.0f (%.0f)",
+                 weather_api_wind_convert(m->out.wind_kmh, m->wind_unit),
+                 weather_api_wind_convert(m->out.gust_kmh, m->wind_unit));
         gfx_text(c, UI_RX, baseline, &UI_TEXT_R, w);
         wind_arrow(c, UI_RX - gfx_text_w(&UI_TEXT_R, w) - WIND_ARROW_W - 1, baseline,
                    m->out.wind_dir_deg, UI_TEXT_R.level);

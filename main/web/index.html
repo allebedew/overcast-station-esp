@@ -76,7 +76,7 @@
                 margin-left: auto;
             }
             /* every control in the header row is the same height, so the
-             * period switch, the language switch and the gear read as one
+             * range switch, the language switch and the gear read as one
              * strip */
             header .seg,
             header .icon-btn {
@@ -93,10 +93,10 @@
                     width: 100%;
                     margin-left: 0;
                 }
-                .hdr-ctl .seg#periodSeg {
+                .hdr-ctl .seg#rangeSeg {
                     flex: 1;
                 }
-                .hdr-ctl .seg#periodSeg button {
+                .hdr-ctl .seg#rangeSeg button {
                     flex: 1;
                     padding: 4px 6px;
                 }
@@ -409,6 +409,31 @@
                 font-weight: 600;
                 color: var(--text);
             }
+            /* Which series the station's own panel is plotting -- one card at
+               a time, moved from here or from the knob. Sits at the right edge
+               of the header, past the trend or the badge. */
+            .on-panel {
+                flex: none;
+                display: flex;
+                margin-left: 6px;
+                padding: 2px 5px;
+                border: 1px solid var(--border);
+                border-radius: 99px;
+                background: none;
+                color: var(--text-faint);
+                cursor: pointer;
+            }
+            .on-panel:hover {
+                color: var(--text-dim);
+                border-color: var(--text-faint);
+            }
+            .on-panel.active {
+                background: var(--accent);
+                border-color: var(--accent);
+                color: var(--bg);
+                cursor: default;
+            }
+
             /* Liveness indicator in a card header, in front of the name. */
             .sens-dot {
                 flex: none;
@@ -495,7 +520,7 @@
                 margin-top: 1px;
             }
 
-            /* --- Segmented switches (period, language) --- */
+            /* --- Segmented switches (chart window, language) --- */
             .seg {
                 display: inline-flex;
                 align-items: center;
@@ -879,7 +904,8 @@
                 gap: 8px;
                 margin-top: 10px;
             }
-            .frc-row input {
+            .frc-row input,
+            .frc-row select {
                 flex: 1;
                 min-width: 0;
                 background: var(--panel-2);
@@ -889,7 +915,8 @@
                 font: inherit;
                 padding: 9px 12px;
             }
-            .frc-row input:focus {
+            .frc-row input:focus,
+            .frc-row select:focus {
                 outline: none;
                 border-color: var(--accent);
             }
@@ -1018,12 +1045,11 @@
                     <h1 data-i18n="appName">Метеостанция</h1>
                 </div>
                 <div class="hdr-ctl">
-                    <div class="seg" id="periodSeg">
-                        <button data-p="5m" class="active" data-i18n="p5m">
-                            5 мин
-                        </button>
-                        <button data-p="1h" data-i18n="p1h">1 час</button>
-                        <button data-p="1d" data-i18n="p1d">Сутки</button>
+                    <div class="seg" id="rangeSeg">
+                        <button data-r="1m" data-i18n="p1m">1м</button>
+                        <button data-r="5m" data-i18n="p5m">5м</button>
+                        <button data-r="1h" data-i18n="p1h">1ч</button>
+                        <button data-r="1d" data-i18n="p1d">24ч</button>
                     </div>
                     <div class="seg lang" id="langSeg">
                         <button data-l="ru">RU</button>
@@ -1173,6 +1199,22 @@
                                 max="9000"
                                 step="1"
                             />
+                        </div>
+                    </div>
+
+                    <div class="set-row">
+                        <div class="head">
+                            <span class="name" data-i18n="windUnit"
+                                >Единицы скорости ветра</span
+                            >
+                        </div>
+                        <div class="frc-row">
+                            <select id="windUnitSel">
+                                <option value="kmh" data-i18n="uKmh">км/ч</option>
+                                <option value="ms" data-i18n="uMps">м/с</option>
+                                <option value="mph" data-i18n="uMph">миль/ч</option>
+                                <option value="kn" data-i18n="uKn">уз</option>
+                            </select>
                         </div>
                     </div>
 
@@ -1329,7 +1371,9 @@
      POST /api/connect          - restart the STA connection cycle
      POST /api/settings         - any subset of the keys /api/status reports
                                   under "settings"; an unknown key or a wrong
-                                  type is a 400
+                                  type is a 400. wind_unit, chart_quantity and
+                                  chart_range are carried as words, and the
+                                  error lists the ones a key accepts
      POST /api/scd40/calibrate  - {ppm}
 
    Every reading on the page is a fixed slot: the markup for a card, a tile
@@ -1371,6 +1415,7 @@
                     appName: "Метеостанция",
                     online: "Онлайн",
                     noLink: "Нет связи",
+                    p1m: "1м",
                     p5m: "5м",
                     p1h: "1ч",
                     p1d: "24ч",
@@ -1392,6 +1437,9 @@
                     weatherPrecip: "Осадки",
                     weatherAlt: "выс.",
                     uKmh: "км/ч",
+                    uMps: "м/с",
+                    uMph: "миль/ч",
+                    uKn: "уз",
                     uMmh: "мм/ч",
                     uMeters: "м",
                     weatherAgo: "обновлено {n} назад",
@@ -1418,6 +1466,8 @@
                     sensPress: "Давление",
                     sensLux: "Освещённость",
                     altitude: "Высота над уровнем моря",
+                    windUnit: "Единицы скорости ветра",
+                    onPanel: "Показывать на дисплее станции",
                     altSaved: "Высота сохранена",
                     buzzerVolume: "Громкость зуммера",
                     displayOn: "Дисплей включён",
@@ -1607,6 +1657,7 @@
                     appName: "Weather Station",
                     online: "Online",
                     noLink: "No link",
+                    p1m: "1m",
                     p5m: "5m",
                     p1h: "1h",
                     p1d: "24h",
@@ -1628,6 +1679,9 @@
                     weatherPrecip: "Precipitation",
                     weatherAlt: "alt.",
                     uKmh: "km/h",
+                    uMps: "m/s",
+                    uMph: "mph",
+                    uKn: "kn",
                     uMmh: "mm/h",
                     uMeters: "m",
                     weatherAgo: "updated {n} ago",
@@ -1654,6 +1708,8 @@
                     sensPress: "Pressure",
                     sensLux: "Illuminance",
                     altitude: "Altitude above sea level",
+                    windUnit: "Wind speed units",
+                    onPanel: "Plot this on the station's display",
                     altSaved: "Altitude saved",
                     buzzerVolume: "Buzzer volume",
                     displayOn: "Display on",
@@ -1982,6 +2038,21 @@
                 return h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
             }
 
+            /* Wind speed units, indexed by the `wind_unit` setting — the order
+             * is the device's enum and is persisted, so it is fixed. Readings
+             * arrive in km/h whatever the setting says. */
+            const WIND_UNITS = [
+                { i18n: "uKmh", k: 1 },
+                { i18n: "uMps", k: 1 / 3.6 },
+                { i18n: "uMph", k: 1 / 1.609344 },
+                { i18n: "uKn", k: 1 / 1.852 },
+            ];
+            let windUnit = WIND_UNITS[0];
+
+            function wind(kmh) {
+                return kmh * windUnit.k;
+            }
+
             /* Meteorological degrees → one localized letter, so the tile keeps
              * the direction to a single glyph: 4 points, ±45° each. */
             function windDir(deg) {
@@ -2043,12 +2114,12 @@
                     k: "wind",
                     l: "weatherGust",
                     src: ["wind", "gust", "wind_dir"],
-                    ui: "uKmh",
+                    uf: () => t(windUnit.i18n),
                     /* the value is the speed alone, so it lines up with every
                      * other tile; the direction joins the gusts in the label */
-                    f: (w) => w.toFixed(1),
+                    f: (w) => wind(w).toFixed(1),
                     lf: (w, g, dir) =>
-                        `${windDir(dir)} · ${t("weatherGust")}: ${g.toFixed(1)}`,
+                        `${windDir(dir)} · ${t("weatherGust")}: ${wind(g).toFixed(1)}`,
                 },
                 { k: "clouds", l: "weatherClouds", u: "%", f: (v) => v.toFixed(0) },
                 {
@@ -2322,6 +2393,10 @@
                     el.children[1].innerHTML = info.right || "";
                 });
 
+                /* Ahead of the tiles: the unit is a setting, and the wind tile
+                 * formats itself with it. */
+                windUnit = WIND_UNITS[st.wind_unit] || WIND_UNITS[0];
+
                 renderWeather(s.weather || {});
                 renderSun(s.sun, (s.weather && s.weather.loc) || {});
 
@@ -2426,6 +2501,9 @@
                 syncSetting("dispOn", st.display_on);
                 syncSetting("dispAutoBri", st.display_auto_brightness);
                 syncSetting("altInput", st.altitude);
+                syncSetting("windUnitSel", st.wind_unit);
+                adopt("chart_range", st.chart_range, setRange);
+                adopt("chart_quantity", st.chart_quantity, setQuantity);
             }
 
             /* One setting into its control: a checkbox takes `checked`,
@@ -2448,31 +2526,42 @@
             }, 250);
 
             /* ---------- charts (canvas, no libraries) ---------- */
-            /* Each period maps to a server-side ring buffer (/api/history?p=):
-             * 5m = 1 s samples, 1h = 5 s points, 1d = 1 min points. The
-             * active tier is re-fetched at its own cadence. */
-            let period = "5m"; /* '5m' | '1h' | '1d' */
+            /* The window is the station's, not the page's: `chart_range` names
+             * the same four the knob cycles, and the panel plots 60 columns of
+             * each, so the two show the same stretch of time. Each is the tail
+             * of one of three server-side rings (/api/history?p=): 5m = 1 s
+             * samples, 1h = 5 s points, 1d = 1 min points. 1m and 5m share a
+             * ring, so switching between them costs no request. */
+            let range = null; /* '1m' | '5m' | '1h' | '1d'; null until the first status */
+            const RANGES = {
+                "1m": { tier: "5m", len: 60 },
+                "5m": { tier: "5m", len: 300 },
+                "1h": { tier: "1h", len: 720 },
+                "1d": { tier: "1d", len: 1440 },
+            };
             const TIERS = {
-                "5m": { len: 300, refresh: 2 },
-                "1h": { len: 720, refresh: 10 },
-                "1d": { len: 1440, refresh: 60 },
+                "5m": { refresh: 2 },
+                "1h": { refresh: 10 },
+                "1d": { refresh: 60 },
             };
             const hists = { "5m": null, "1h": null, "1d": null };
+            const curTier = () => (range ? RANGES[range].tier : null);
 
             async function loadHistory(p) {
                 try {
                     const r = await fetch("/api/history?p=" + p);
                     if (!r.ok) throw new Error(r.status);
                     hists[p] = await r.json();
-                    if (p === period) renderCharts();
+                    if (p === curTier()) renderCharts();
                 } catch (e) {}
             }
 
             let histTick = 0;
             setInterval(() => {
                 histTick++;
-                if (histTick % TIERS[period].refresh === 0)
-                    loadHistory(period);
+                const tier = curTier();
+                if (tier && histTick % TIERS[tier].refresh === 0)
+                    loadHistory(tier);
             }, 1000);
 
             /* Tail of arr left-padded with nulls to exactly n points. A tier
@@ -2635,10 +2724,10 @@
             /* Data arrays for the current window; null = gap. `times` holds the unix
              * timestamp of every slot (uniform grid of `period` seconds). */
             function windowSeries() {
-                const hd = hists[period];
+                const hd = range && hists[RANGES[range].tier];
                 if (!hd) return null;
                 const step = hd.period;
-                const n = TIERS[period].len;
+                const n = RANGES[range].len;
                 const now = Math.floor(Date.now() / 1000 / step) * step;
                 const out = {
                     times: Array.from(
@@ -2667,7 +2756,15 @@
                     return (
                         '<div class="card sensor"><h2>' +
                         `<span class="sens-dot" id="${sr.k}Dot"></span>` +
-                        `<span data-i18n="${sr.title}"></span>${head}</h2>` +
+                        `<span data-i18n="${sr.title}"></span>${head}` +
+                        `<button class="on-panel" id="${sr.k}Panel" ` +
+                        `data-q="${sr.hist}" data-i18n-title="onPanel">` +
+                        /* flat monitor (Feather Icons, MIT) */
+                        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" ' +
+                        'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+                        'stroke-linejoin="round" aria-hidden="true">' +
+                        '<rect x="2" y="3" width="20" height="14" rx="2"/>' +
+                        '<path d="M8 21h8M12 17v4"/></svg></button></h2>' +
                         '<div class="reading">' +
                         `<span class="value" id="${sr.k}Val">${NA}</span>` +
                         `<span class="unit">${sr.unit}</span>` +
@@ -2827,7 +2924,7 @@
             function fmtTipTime(ts) {
                 const d = new Date(ts * 1000);
                 const opts = { hour: "2-digit", minute: "2-digit" };
-                if (period !== "1d") opts.second = "2-digit";
+                if (range !== "1d") opts.second = "2-digit";
                 let s = d.toLocaleTimeString(locale(), opts);
                 if (d.toDateString() !== new Date().toDateString()) {
                     s =
@@ -3227,15 +3324,59 @@
                 draw(och);
             }
 
-            $("periodSeg").addEventListener("click", (e) => {
-                const btn = e.target.closest("button");
-                if (!btn) return;
-                period = btn.dataset.p;
+            /* ---------- the panel's selection, shared both ways ----------
+             * Both controls stand for a setting on the station, so a click is
+             * posted and only comes back through /api/status. The local value
+             * holds until that echo arrives -- otherwise the button would
+             * spring back for the second the poll takes -- and after the window
+             * runs out the station wins, whichever side moved it. */
+            const ECHO_MS = 3000;
+            const pending = {}; /* setting key -> {value, until} */
+            let quantity = null; /* the series the panel plots; null until the first status */
+
+            function setRange(v) {
+                if (!RANGES[v] || v === range) return;
+                range = v;
                 document
-                    .querySelectorAll("#periodSeg button")
-                    .forEach((b) => b.classList.toggle("active", b === btn));
+                    .querySelectorAll("#rangeSeg button")
+                    .forEach((b) => b.classList.toggle("active", b.dataset.r === v));
                 renderCharts(); /* cached data first, if any */
-                loadHistory(period);
+                loadHistory(RANGES[v].tier);
+            }
+
+            function setQuantity(v) {
+                quantity = v;
+                document
+                    .querySelectorAll(".on-panel")
+                    .forEach((b) => b.classList.toggle("active", b.dataset.q === v));
+            }
+
+            function pick(key, value, apply) {
+                pending[key] = { value, until: Date.now() + ECHO_MS };
+                apply(value);
+                saveSetting(key, value);
+            }
+
+            /* One selection out of a poll, unless a pick of ours is still
+             * waiting for its echo. */
+            function adopt(key, value, apply) {
+                if (value === undefined) return;
+                const p = pending[key];
+                if (p && p.value !== value && Date.now() <= p.until) return;
+                delete pending[key];
+                apply(value);
+            }
+
+            $("rangeSeg").addEventListener("click", (e) => {
+                const btn = e.target.closest("button");
+                if (btn && btn.dataset.r !== range)
+                    pick("chart_range", btn.dataset.r, setRange);
+            });
+
+            $("sensorCards").addEventListener("click", (e) => {
+                const btn = e.target.closest(".on-panel");
+                if (btn && btn.dataset.q !== quantity)
+                    pick("chart_quantity", btn.dataset.q, setQuantity);
             });
 
             /* ---------- wifi: scan + connect ---------- */
@@ -3615,12 +3756,14 @@
             }
 
             /* ---------- settings ---------- */
+            /* `msg` is optional: the chart controls are clicked often enough
+               that a toast per click would be noise. */
             async function saveSetting(key, value, msg) {
                 await fetch("/api/settings", {
                     method: "POST",
                     body: JSON.stringify({ [key]: value }),
                 });
-                toast(t(msg));
+                if (msg) toast(t(msg));
             }
 
             /* Sliders report while dragging and save once let go: on `input`
@@ -3654,6 +3797,10 @@
                 "dispAutoBri",
                 "display_auto_brightness",
                 "settingSaved",
+            );
+
+            $("windUnitSel").addEventListener("change", (e) =>
+                saveSetting("wind_unit", e.target.value, "settingSaved"),
             );
 
             /* Site altitude: the one input to the sea-level reduction. Saved on
@@ -3703,10 +3850,10 @@
                     if (!r.ok) throw new Error(await r.text());
                     toast(t("histResetDone"));
                     /* every tier is wiped on the device, so the cached ones
-                     * must go too — otherwise switching the period would show
+                     * must go too — otherwise switching the window would show
                      * history that no longer exists */
                     for (const p in hists) hists[p] = null;
-                    loadHistory(period);
+                    if (range) loadHistory(RANGES[range].tier);
                 } catch (e) {
                     toast(t("histResetError") + e.message);
                 } finally {
@@ -3727,7 +3874,8 @@
             applyLang();
             refresh();
             setInterval(refresh, 1000);
-            loadHistory(period);
+            /* No loadHistory() here: which window to fetch comes from the first
+               /api/status, and setRange() asks for it. */
             loadNets();
             loadLocations();
             /* a resize fires in bursts; one redraw per frame is enough */

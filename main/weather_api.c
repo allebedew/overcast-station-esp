@@ -562,6 +562,13 @@ const char *weather_api_code_str(int code)
     }
 }
 
+const char *const WEATHER_WIND_UNIT_NAMES[WEATHER_WIND_UNIT_COUNT] = {
+    [WEATHER_WIND_KMH] = "kmh",
+    [WEATHER_WIND_MS]  = "ms",
+    [WEATHER_WIND_MPH] = "mph",
+    [WEATHER_WIND_KN]  = "kn",
+};
+
 const char *weather_api_wind_dir_str(int deg)
 {
     static const char *const PTS[] = { "N", "E", "S", "W" };

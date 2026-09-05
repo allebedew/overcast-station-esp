@@ -17,6 +17,7 @@ typedef enum {
     SETTING_DISPLAY_BRIGHT,
     SETTING_DISPLAY_AUTO_BRIGHT,
     SETTING_ALTITUDE_M,
+    SETTING_WIND_UNIT,
     SETTING_CHART_Q,
     SETTING_CHART_RANGE,
     SETTING_COUNT,
@@ -32,6 +33,10 @@ typedef struct {
     int32_t min;
     int32_t max;
     bool as_bool;     /* carried over the API as true/false, not as a number */
+    /* Indexed min..max; when set, the API carries the value as one of these
+     * strings rather than as its index, which keeps the enum's order out of a
+     * public contract. Owned by the module the enum belongs to. */
+    const char *const *labels;
 } setting_desc_t;
 
 /* Loads every setting into the cache. Call once, after NVS is up and before
