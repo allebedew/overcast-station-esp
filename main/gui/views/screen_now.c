@@ -995,9 +995,13 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
         snprintf(w, sizeof(w), "%.0f (%.0f)",
                  weather_api_wind_convert(m->out.wind_kmh, m->wind_unit),
                  weather_api_wind_convert(m->out.gust_kmh, m->wind_unit));
-        gfx_text(c, UI_RX, baseline, &UI_TEXT_R, w);
-        wind_arrow(c, UI_RX - gfx_text_w(&UI_TEXT_R, w) - WIND_ARROW_W - 1, baseline,
-                   m->out.wind_dir_deg, UI_TEXT_R.level);
+        // The gust is the rule's reading, but it shows only inside the brackets,
+        // so speed and arrow blink with it rather than leaving it alone.
+        if (!blink(m->anim_ms, m->alert[ALERT_Q_GUST])) {
+            gfx_text(c, UI_RX, baseline, &UI_TEXT_R, w);
+            wind_arrow(c, UI_RX - gfx_text_w(&UI_TEXT_R, w) - WIND_ARROW_W - 1,
+                       baseline, m->out.wind_dir_deg, UI_TEXT_R.level);
+        }
     } else {
         gfx_text(c, UI_RX, baseline, &UI_TEXT_R, "---");
     }
