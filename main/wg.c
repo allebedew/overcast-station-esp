@@ -47,6 +47,7 @@ static wireguard_config_t s_config = {
 };
 
 static wireguard_ctx_t s_ctx;
+static volatile bool s_active;
 static volatile bool s_up;
 
 static void wg_task(void *arg)
@@ -60,6 +61,7 @@ static void wg_task(void *arg)
         /* The handshake carries a tai64n timestamp the peer checks against its
          * own clock, so the tunnel cannot come up before SNTP has. */
         if (!wifi_is_connected() || !timesync_is_synced()) {
+            s_active = false;
             if (started) {
                 esp_wireguard_disconnect(&s_ctx);
                 started = false;
@@ -75,6 +77,7 @@ static void wg_task(void *arg)
             started = true;
             last_up = xTaskGetTickCount();
         }
+        s_active = true;
 
         bool up = esp_wireguardif_peer_is_up(&s_ctx) == ESP_OK;
         if (up != s_up) {
@@ -108,6 +111,7 @@ void wg_get_info(wg_info_t *out)
 {
     memset(out, 0, sizeof(*out));
     out->configured = true;
+    out->active = s_active;
     out->up = s_up;
     strlcpy(out->ip, WG_LOCAL_IP, sizeof(out->ip));
     snprintf(out->endpoint, sizeof(out->endpoint), "%s:%d", WG_ENDPOINT,

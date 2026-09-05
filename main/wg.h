@@ -11,6 +11,7 @@
 
 typedef struct {
     bool configured;   /* wg_secrets.h was present at build time */
+    bool active;       /* Wi-Fi and the clock are up, so the tunnel is trying */
     bool up;           /* handshake completed, peer answering */
     char ip[16];       /* own address inside the tunnel */
     char endpoint[80]; /* "host:port" of the peer */
