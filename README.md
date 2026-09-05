@@ -43,8 +43,10 @@ history.
   activity as a line and occupancy as columns, under a badge carrying the live
   held state;
   an outside-weather card with a location chip row (a typed
-  city name is geocoded in-browser, so adding one needs internet on the
-  client); system, settings and Wi-Fi cards behind the header gear. Settings:
+  city name is geocoded in-browser, so that route needs internet on the
+  client; a search hit fills the name and coordinate fields, which can also be
+  filled by hand, so the name is the user's own; chips are dragged to reorder,
+  with a mouse — HTML5 drag and drop does not fire on a touch screen); system, settings and Wi-Fi cards behind the header gear. Settings:
   LED brightness, buzzer volume, display on, its auto-brightness and its
   brightness, site altitude, wind units, SCD40 FRC, history reset. Every setting
   follows the device on each poll except while the control has the focus, so
@@ -453,8 +455,9 @@ history.
 - **Weather locations** — up to 10 named `{name, lat, lon, utc_offset}` plus the
   active index in NVS. Empty on first boot: until one is added the card stays
   empty and no fetch is made. The first location added becomes the active one.
-  Switching, deleting, and that first add wake the fetch task via
-  `weather_api_refresh()`. The offset is filled from the first successful fetch
+  Switching, deleting the active one, and that first add wake the fetch task via
+  `weather_api_refresh()`; reordering and dropping another entry leave the shown
+  reading alone. The offset is filled from the first successful fetch
   and rewritten only when it changes, so the display clock is right after a
   reboot and through an outage, without a reading to read it from.
 - **SNTP** — UTC from `pool.ntp.org`, started on `IP_EVENT_STA_GOT_IP` and
@@ -531,6 +534,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `/api/scan` | GET | Wi-Fi scan, `[{ssid, bssid, ch, rssi, auth}]`, one entry per BSSID |
 | `/api/networks` | GET / POST / DELETE | saved networks; POST `{"ssid", "password", "bssid"}` (bssid optional — pins to that AP), DELETE `{"ssid"}` |
 | `/api/locations` | GET / POST / DELETE | saved locations; POST `{"name", "lat", "lon"}`, DELETE `{"index"}` |
+| `/api/locations/move` | POST | reorder locations; `{"from", "to"}` |
 | `/api/locations/active` | PUT | switch location; `{"index"}` (triggers an immediate refetch) |
 | `/api/connect` | POST | leave AP mode / restart the STA connection cycle |
 | `/api/settings` | POST | any subset of the keys `/api/status` reports under `settings`, driven by the same table: `led_brightness` 1–255, `buzzer_volume` 1–50, `display_on` bool, `display_brightness` 0–15, `display_auto_brightness` bool, `altitude` −500…9000, `wind_unit` `kmh`/`ms`/`mph`/`kn`, `chart_quantity` `temp`/`press`/`rh`/`co2`/`lux`, `chart_range` `1m`/`5m`/`1h`/`1d`. Out of range is clamped; an unknown key, a wrong type or an unknown word is a 400 naming it |

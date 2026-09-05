@@ -36,6 +36,11 @@ void weather_store_on_change(weather_store_change_fn fn);
  * list is full, ESP_ERR_INVALID_ARG on a bad name or coordinates. */
 esp_err_t weather_store_add(const char *name, float lat, float lon);
 
+/* Moves the entry at `from` to index `to`, shifting the rest along. The active
+ * selection follows its own entry. ESP_ERR_INVALID_ARG if either index is
+ * outside the list. */
+esp_err_t weather_store_move(int from, int to);
+
 /* Removes idx, keeping the active selection on a valid entry. */
 esp_err_t weather_store_remove(int idx);
 

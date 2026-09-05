@@ -122,6 +122,40 @@ esp_err_t weather_store_add(const char *name, float lat, float lon)
     return ESP_OK;
 }
 
+esp_err_t weather_store_move(int from, int to)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (from < 0 || from >= s_count || to < 0 || to >= s_count) {
+        xSemaphoreGive(s_lock);
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (from != to) {
+        weather_location_t moved = s_locations[from];
+        if (from < to) {
+            memmove(&s_locations[from], &s_locations[from + 1],
+                    (to - from) * sizeof(weather_location_t));
+        } else {
+            memmove(&s_locations[to + 1], &s_locations[to],
+                    (from - to) * sizeof(weather_location_t));
+        }
+        s_locations[to] = moved;
+        /* The selection names a place, not a slot */
+        if (s_active == from) {
+            s_active = to;
+        } else if (from < s_active && s_active <= to) {
+            s_active--;
+        } else if (to <= s_active && s_active < from) {
+            s_active++;
+        }
+        save();
+    }
+    xSemaphoreGive(s_lock);
+
+    ESP_LOGI(TAG, "Location moved %d -> %d", from, to);
+    /* No notify(): the order changed, the shown place did not. */
+    return ESP_OK;
+}
+
 esp_err_t weather_store_remove(int idx)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -133,7 +167,8 @@ esp_err_t weather_store_remove(int idx)
             (s_count - idx - 1) * sizeof(weather_location_t));
     s_count--;
     /* keep the active selection valid after the shift */
-    if (s_active == idx) {
+    bool active_changed = s_active == idx;
+    if (active_changed) {
         s_active = s_count ? 0 : -1;
     } else if (s_active > idx) {
         s_active--;
@@ -142,7 +177,11 @@ esp_err_t weather_store_remove(int idx)
     xSemaphoreGive(s_lock);
 
     ESP_LOGI(TAG, "Location removed (%d left)", s_count);
-    notify(); /* the active location may have shifted under the index */
+    /* Removing another entry only renumbers the list; the shown place, and so
+     * the reading, is still the right one. */
+    if (active_changed) {
+        notify();
+    }
     return ESP_OK;
 }
 

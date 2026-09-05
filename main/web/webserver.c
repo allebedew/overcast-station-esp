@@ -771,6 +771,25 @@ static esp_err_t location_delete_handler(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
+static esp_err_t location_move_post_handler(httpd_req_t *req)
+{
+    cJSON *root = read_json_body(req);
+    if (!root) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+    }
+    const cJSON *from = cJSON_GetObjectItem(root, "from");
+    const cJSON *to = cJSON_GetObjectItem(root, "to");
+    esp_err_t err = (cJSON_IsNumber(from) && cJSON_IsNumber(to))
+        ? weather_store_move(from->valueint, to->valueint)
+        : ESP_ERR_INVALID_ARG;
+    cJSON_Delete(root);
+
+    if (err != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad index");
+    }
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
 static esp_err_t location_active_put_handler(httpd_req_t *req)
 {
     cJSON *root = read_json_body(req);
@@ -909,6 +928,7 @@ static const struct {
     { "/api/locations",        HTTP_GET,    locations_get_handler },
     { "/api/locations",        HTTP_POST,   location_add_post_handler },
     { "/api/locations",        HTTP_DELETE, location_delete_handler },
+    { "/api/locations/move",   HTTP_POST,   location_move_post_handler },
     { "/api/locations/active", HTTP_PUT,    location_active_put_handler },
     { "/api/connect",          HTTP_POST,   connect_post_handler },
     { "/api/settings",         HTTP_POST,   settings_post_handler },

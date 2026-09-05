@@ -493,6 +493,13 @@
                 color: var(--text-faint);
                 font-weight: 600;
             }
+            .loc-chip.dragging {
+                opacity: 0.4;
+            }
+            .loc-chip.over {
+                border-style: dashed;
+                border-color: var(--accent);
+            }
             /* --- Location search modal --- */
             .loc-results {
                 display: flex;
@@ -518,6 +525,22 @@
                 font-size: 11px;
                 color: var(--text-faint);
                 margin-top: 1px;
+            }
+            /* no subtitle under this modal's heading, unlike the Wi-Fi one */
+            #locModal h3 {
+                margin-bottom: 14px;
+            }
+            .loc-sep {
+                border-top: 1px solid var(--border);
+                margin: 0 0 14px;
+            }
+            .loc-coords {
+                display: flex;
+                gap: 8px;
+            }
+            .loc-coords input {
+                flex: 1;
+                min-width: 0;
             }
 
             /* --- Segmented switches (chart window, language) --- */
@@ -955,6 +978,7 @@
                 margin-bottom: 14px;
             }
             .modal input[type="password"],
+            .modal input[type="number"],
             .modal input[type="text"] {
                 width: 100%;
                 background: var(--panel-2);
@@ -1320,9 +1344,6 @@
         <div class="overlay" id="locModal">
             <div class="modal">
                 <h3 data-i18n="locAddTitle">Добавить локацию</h3>
-                <div class="m-sub" data-i18n="locAddHint">
-                    Поиск города через Open-Meteo
-                </div>
                 <input
                     type="text"
                     id="locSearch"
@@ -1335,9 +1356,42 @@
                     maxlength="60"
                 />
                 <div class="loc-results" id="locResults"></div>
+                <div class="loc-sep"></div>
+                <input
+                    type="text"
+                    id="locName"
+                    placeholder="Имя"
+                    data-i18n-ph="locNamePh"
+                    autocomplete="off"
+                    spellcheck="false"
+                    maxlength="32"
+                />
+                <div class="loc-coords">
+                    <input
+                        type="number"
+                        id="locLat"
+                        placeholder="Широта"
+                        data-i18n-ph="locLatPh"
+                        step="0.0001"
+                        min="-90"
+                        max="90"
+                    />
+                    <input
+                        type="number"
+                        id="locLon"
+                        placeholder="Долгота"
+                        data-i18n-ph="locLonPh"
+                        step="0.0001"
+                        min="-180"
+                        max="180"
+                    />
+                </div>
                 <div class="row">
                     <button class="btn" id="locCancel" data-i18n="cancel">
                         Отмена
+                    </button>
+                    <button class="btn primary" id="locAdd" data-i18n="add">
+                        Добавить
                     </button>
                 </div>
             </div>
@@ -1491,8 +1545,12 @@
                     uMs: "мс",
                     locAdd: "Добавить локацию",
                     locAddTitle: "Добавить локацию",
-                    locAddHint: "Поиск города через Open-Meteo",
                     locSearchPh: "Город…",
+                    locNamePh: "Имя",
+                    locLatPh: "Широта",
+                    locLonPh: "Долгота",
+                    locBadCoords: "Нужны имя и координаты (±90 / ±180)",
+                    add: "Добавить",
                     locSearching: "Поиск…",
                     locSearchErr: "Ошибка поиска (нужен интернет у клиента)",
                     locNoResults: "Ничего не найдено",
@@ -1733,8 +1791,12 @@
                     uMs: "ms",
                     locAdd: "Add location",
                     locAddTitle: "Add location",
-                    locAddHint: "Search a city via Open-Meteo",
                     locSearchPh: "City…",
+                    locNamePh: "Name",
+                    locLatPh: "Latitude",
+                    locLonPh: "Longitude",
+                    locBadCoords: "Need a name and coordinates (±90 / ±180)",
+                    add: "Add",
                     locSearching: "Searching…",
                     locSearchErr: "Search failed (the client needs internet)",
                     locNoResults: "Nothing found",
@@ -2038,16 +2100,17 @@
                 return h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
             }
 
-            /* Wind speed units, indexed by the `wind_unit` setting — the order
-             * is the device's enum and is persisted, so it is fixed. Readings
-             * arrive in km/h whatever the setting says. */
-            const WIND_UNITS = [
-                { i18n: "uKmh", k: 1 },
-                { i18n: "uMps", k: 1 / 3.6 },
-                { i18n: "uMph", k: 1 / 1.609344 },
-                { i18n: "uKn", k: 1 / 1.852 },
-            ];
-            let windUnit = WIND_UNITS[0];
+            /* Wind speed units, keyed by the name `wind_unit` carries on the
+             * API (WEATHER_WIND_UNIT_NAMES in the firmware, and the option
+             * values of the picker). Readings arrive in km/h whatever the
+             * setting says. */
+            const WIND_UNITS = {
+                kmh: { i18n: "uKmh", k: 1 },
+                ms: { i18n: "uMps", k: 1 / 3.6 },
+                mph: { i18n: "uMph", k: 1 / 1.609344 },
+                kn: { i18n: "uKn", k: 1 / 1.852 },
+            };
+            let windUnit = WIND_UNITS.kmh;
 
             function wind(kmh) {
                 return kmh * windUnit.k;
@@ -2395,7 +2458,7 @@
 
                 /* Ahead of the tiles: the unit is a setting, and the wind tile
                  * formats itself with it. */
-                windUnit = WIND_UNITS[st.wind_unit] || WIND_UNITS[0];
+                windUnit = WIND_UNITS[st.wind_unit] || WIND_UNITS.kmh;
 
                 renderWeather(s.weather || {});
                 renderSun(s.sun, (s.weather && s.weather.loc) || {});
@@ -3610,6 +3673,8 @@
                 locations.forEach((loc, i) => {
                     const chip = document.createElement("span");
                     chip.className = "loc-chip" + (i === activeLoc ? " active" : "");
+                    chip.draggable = locations.length > 1;
+                    chip.dataset.i = i;
                     chip.innerHTML =
                         `<span class="nm">${esc(loc.name)}</span>` +
                         (locations.length > 1
@@ -3631,6 +3696,63 @@
                     add.title = t("locAdd");
                     clickable(add, openLocModal);
                     bar.appendChild(add);
+                }
+            }
+
+            /* Reordering the chips: HTML5 drag and drop, so it is mouse-only —
+             * a touch screen keeps the order it was given. */
+            let dragFrom = -1;
+            $("locBar").addEventListener("dragstart", (e) => {
+                const chip = e.target.closest(".loc-chip[draggable=true]");
+                if (!chip) return;
+                dragFrom = +chip.dataset.i;
+                e.dataTransfer.effectAllowed = "move";
+                /* Firefox starts no drag without payload */
+                e.dataTransfer.setData("text/plain", String(dragFrom));
+                chip.classList.add("dragging");
+            });
+            $("locBar").addEventListener("dragover", (e) => {
+                if (dragFrom < 0) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                const chip = e.target.closest(".loc-chip[draggable=true]");
+                $("locBar")
+                    .querySelectorAll(".loc-chip.over")
+                    .forEach((c) => c.classList.remove("over"));
+                if (chip && +chip.dataset.i !== dragFrom) chip.classList.add("over");
+            });
+            $("locBar").addEventListener("drop", (e) => {
+                const chip = e.target.closest(".loc-chip[draggable=true]");
+                if (dragFrom < 0 || !chip) return;
+                e.preventDefault();
+                moveLoc(dragFrom, +chip.dataset.i);
+            });
+            $("locBar").addEventListener("dragend", () => {
+                dragFrom = -1;
+                $("locBar")
+                    .querySelectorAll(".loc-chip")
+                    .forEach((c) => c.classList.remove("dragging", "over"));
+            });
+
+            async function moveLoc(from, to) {
+                if (from === to) return;
+                /* Redraw from the local order at once: the round trip is long
+                 * enough for the chip to visibly snap back otherwise. */
+                const [moved] = locations.splice(from, 1);
+                locations.splice(to, 0, moved);
+                if (activeLoc === from) activeLoc = to;
+                else if (from < activeLoc && activeLoc <= to) activeLoc--;
+                else if (to <= activeLoc && activeLoc < from) activeLoc++;
+                renderLocBar();
+                try {
+                    const r = await fetch("/api/locations/move", {
+                        method: "POST",
+                        body: JSON.stringify({ from, to }),
+                    });
+                    if (!r.ok) throw new Error(await r.text());
+                } catch (e) {
+                    toast(t("locAddFail") + e.message);
+                    loadLocations();
                 }
             }
 
@@ -3670,10 +3792,14 @@
             }
 
             /* Geocoding (place name -> coordinates) runs in the browser, which
-             * has internet; the device only stores the resolved coordinates. */
+             * has internet; the device only stores the resolved coordinates.
+             * A search hit fills the form rather than saving straight away, so
+             * the same fields serve manual coordinates and a renamed city. */
             let locSearchTimer = null;
             function openLocModal() {
-                $("locSearch").value = "";
+                ["locSearch", "locName", "locLat", "locLon"].forEach(
+                    (id) => ($(id).value = ""),
+                );
                 $("locResults").innerHTML = "";
                 $("locModal").classList.add("show");
                 setTimeout(() => $("locSearch").focus(), 60);
@@ -3730,20 +3856,48 @@
                         `<div class="sub">${esc(place)} · ${g.latitude.toFixed(
                             2,
                         )}, ${g.longitude.toFixed(2)}</div>`;
-                    clickable(el, () => addLoc(g));
+                    clickable(el, () => fillLoc(g));
                     res.appendChild(el);
                 });
             }
 
-            async function addLoc(g) {
+            function fillLoc(g) {
+                $("locName").value = g.name.slice(0, 32);
+                $("locLat").value = g.latitude.toFixed(4);
+                $("locLon").value = g.longitude.toFixed(4);
+                $("locName").focus();
+            }
+
+            $("locAdd").addEventListener("click", addLoc);
+            $("locModal").addEventListener("keydown", (e) => {
+                if (e.key !== "Enter") return;
+                if (e.target.id === "locSearch") {
+                    clearTimeout(locSearchTimer);
+                    const q = e.target.value.trim();
+                    if (q.length >= 2) geocode(q);
+                    return;
+                }
+                addLoc();
+            });
+
+            async function addLoc() {
+                const name = $("locName").value.trim();
+                const lat = parseFloat($("locLat").value);
+                const lon = parseFloat($("locLon").value);
+                if (
+                    !name ||
+                    !isFinite(lat) ||
+                    !isFinite(lon) ||
+                    Math.abs(lat) > 90 ||
+                    Math.abs(lon) > 180
+                ) {
+                    toast(t("locBadCoords"));
+                    return;
+                }
                 try {
                     const r = await fetch("/api/locations", {
                         method: "POST",
-                        body: JSON.stringify({
-                            name: g.name,
-                            lat: g.latitude,
-                            lon: g.longitude,
-                        }),
+                        body: JSON.stringify({ name, lat, lon }),
                     });
                     if (!r.ok) throw new Error(await r.text());
                 } catch (e) {
@@ -3751,7 +3905,7 @@
                     return;
                 }
                 $("locModal").classList.remove("show");
-                toast(t("locAdded").replace("{name}", g.name));
+                toast(t("locAdded").replace("{name}", name));
                 loadLocations();
             }
 
