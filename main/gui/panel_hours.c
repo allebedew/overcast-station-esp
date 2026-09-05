@@ -18,7 +18,7 @@ static const char *TAG = "panel_hours";
 #define FLUSH_S 900
 
 /* A shorter floor for the write that follows the panel going dark: without it
- * someone stepping in and out of the radar's view would write per crossing. */
+ * someone stepping in and out of the sensor's view would write per crossing. */
 #define MIN_FLUSH_S 60
 
 /* A frame is 100 ms; anything longer than this is the gui task having been away

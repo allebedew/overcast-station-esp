@@ -86,7 +86,7 @@ static void bars(gfx_canvas_t *c, int right, int baseline, unsigned mask)
  * either side of the glyphs, which gfx_text_bg does not add. */
 #define AP_PAD 1
 
-static void ap_badge(gfx_canvas_t *c, int right, int baseline)
+static int ap_badge(gfx_canvas_t *c, int right, int baseline)
 {
     gfx_text_style_t st = UI_TEXT_R;
     st.level = GFX_OFF;
@@ -99,6 +99,27 @@ static void ap_badge(gfx_canvas_t *c, int right, int baseline)
                               (int16_t)w, (int16_t)(fm.ascent + 1) },
              GFX_NONE, GFX_FULL, GFX_SOLID);
     gfx_text(c, right - AP_PAD, baseline, &st, "AP");
+    return w;
+}
+
+/* The WireGuard tunnel as one dot beside the link indicator: lit while the
+ * handshake holds, blinking at the alerts' 1 Hz while it does not. Anchored like
+ * bars(), and drawn in the SoftAP mode too -- the tunnel's own state does not
+ * depend on which way the station is up. */
+#define WG_DOT      3      /* px; a 3x3 square with its corners cut, so a diamond */
+#define WG_BLINK_MS 1000   /* half of it dark */
+
+static void wg_dot(gfx_canvas_t *c, int right, int baseline, bool up, uint32_t anim_ms)
+{
+    if (!up && anim_ms % WG_BLINK_MS >= WG_BLINK_MS / 2) { return; }
+
+    gfx_font_metrics_t fm;
+    gfx_font_metrics(UI_TEXT.font, &fm);
+    int x = right - WG_DOT;
+    int y = baseline - fm.cap / 2 - WG_DOT / 2 - 1;
+
+    gfx_hline(c, x, y + 1, WG_DOT, GFX_FULL, GFX_SOLID, 0);
+    gfx_vline(c, x + 1, y, WG_DOT, GFX_FULL, GFX_SOLID, 0);
 }
 
 /* Three dim dots with one lit, walking to the end and back -- the same gesture
@@ -450,6 +471,39 @@ static void wx_now(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
     }
 
     ui_gap(cur, fm.ascent + UI_GAP + cm.line_height);
+}
+
+/* Wind direction as a 5x5 arrow, in the row of the wind speed. The API reports
+ * the direction the wind comes *from*, the arrow points where it blows to, so
+ * the two are half a turn apart: 0 deg (a northerly) points down. Rows top to
+ * bottom, bit 0 the leftmost column; the block sits on the font's last inked
+ * row, one above the baseline, not on the baseline. */
+#define WIND_ARROW_W 5
+#define WIND_ARROW_H 5
+
+static void wind_arrow(gfx_canvas_t *c, int x, int baseline, int deg, gfx_level_t level)
+{
+    static const uint8_t ARROWS[8][WIND_ARROW_H] = {
+        { 0x04, 0x0E, 0x15, 0x04, 0x04 },   /* N  */
+        { 0x1C, 0x18, 0x14, 0x02, 0x01 },   /* NE */
+        { 0x04, 0x08, 0x1F, 0x08, 0x04 },   /* E  */
+        { 0x01, 0x02, 0x14, 0x18, 0x1C },   /* SE */
+        { 0x04, 0x04, 0x15, 0x0E, 0x04 },   /* S  */
+        { 0x10, 0x08, 0x05, 0x03, 0x07 },   /* SW */
+        { 0x04, 0x02, 0x1F, 0x02, 0x04 },   /* W  */
+        { 0x07, 0x03, 0x05, 0x08, 0x10 },   /* NW */
+    };
+
+    int d = ((deg % 360) + 360 + 180) % 360;
+    const uint8_t *a = ARROWS[((2 * d + 45) / 90) % 8];
+
+    for (int row = 0; row < WIND_ARROW_H; row++) {
+        for (int col = 0; col < WIND_ARROW_W; col++) {
+            if (a[row] & (1u << col)) {
+                gfx_px(c, x + col, baseline - WIND_ARROW_H + row, level);
+            }
+        }
+    }
 }
 
 /* Rain over the next 24 hours: one column an hour, the leftmost the hour running
@@ -878,10 +932,14 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
         }
         gfx_text(c, x + hw + cw, baseline, &UI_TEXT, mm);
     }
+    int link_w = SIG_W;
     if (m->ap) {
-        ap_badge(c, UI_RX, baseline);
+        link_w = ap_badge(c, UI_RX, baseline);
     } else {
         bars(c, UI_RX, baseline, sig_mask(m->link, m->rssi, m->anim_ms));
+    }
+    if (m->wg_on) {
+        wg_dot(c, UI_RX - link_w - 3, baseline, m->wg_up, m->anim_ms);
     }
     // battery(c, UI_RX - SIG_W - 3, baseline, 0);
 
@@ -927,11 +985,13 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     baseline = ui_row(&cur, &UI_TEXT);
     reading(c, 0, baseline, &UI_TEXT, ok, "%.0f%%", "--%", m->out.humidity_pct,
             NULL, false, GFX_NONE, false);
-    // Speed and gusts as one range, in the units the API reports.
+    // Speed with the gust in brackets, in the units the API reports.
     if (ok) {
-        gfx_textf(c, UI_RX, baseline, &UI_TEXT_R, "%s%.0f-%.0f",
-                  weather_api_wind_dir_str(m->out.wind_dir_deg),
-                  m->out.wind_kmh, m->out.gust_kmh);
+        char w[16];
+        snprintf(w, sizeof(w), "%.0f (%.0f)", m->out.wind_kmh, m->out.gust_kmh);
+        gfx_text(c, UI_RX, baseline, &UI_TEXT_R, w);
+        wind_arrow(c, UI_RX - gfx_text_w(&UI_TEXT_R, w) - WIND_ARROW_W - 1, baseline,
+                   m->out.wind_dir_deg, UI_TEXT_R.level);
     } else {
         gfx_text(c, UI_RX, baseline, &UI_TEXT_R, "---");
     }

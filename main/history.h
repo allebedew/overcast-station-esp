@@ -25,7 +25,7 @@ typedef enum {
 #define HISTORY_HAS_RH    0x04
 #define HISTORY_HAS_PRESS 0x08
 #define HISTORY_HAS_LUX   0x10
-#define HISTORY_HAS_RADAR 0x20
+#define HISTORY_HAS_PIR   0x20
 
 /* 16 bytes, and the rings hold 2460 of them. Fixed-point at the firmware-wide
  * resolutions from climate.h; float only for illuminance, which spans six
@@ -38,21 +38,17 @@ typedef struct {
     uint16_t co2_ppm;
     int16_t temp_cx100;  /* 0.01 °C */
     uint16_t rh_dpct;    /* 0.1 % */
-    uint8_t radar;       /* see below */
+    uint8_t pir;         /* see below */
     uint8_t have; /* 0 = gap: nothing was recorded in that slot */
 } history_point_t;
 
-/* The radar's slot rides in the one byte the layout had spare, which is what
- * keeps the point at 16 bytes: the largest number of targets the slot saw
- * (2 bits) and the mean distance to the nearest of them (5 bits, a quarter of
- * a metre per step, 0 for a slot with an empty fan).
- * Max for the count and mean for the distance, each against its own failure:
- * a person who stops moving drops out of the frame and would dent a mean
- * count, while one ghost frame would pull a minimum distance to the sensor. */
-#define HISTORY_RADAR_STEP_M    0.25f
-#define HISTORY_RADAR_TARGETS(r) ((r) & 0x03)
-#define HISTORY_RADAR_STEPS(r)   (((r) >> 2) & 0x1F)
-#define HISTORY_RADAR_NEAR_M(r)  (HISTORY_RADAR_STEPS(r) * HISTORY_RADAR_STEP_M)
+/* The PIR rides in the one byte the layout had spare, which is what keeps the
+ * point at 16 bytes: the share of the slot the raw line spent high (0...100 in
+ * seven bits, so a 1 s slot is 0 or 100) and the held presence flag on top.
+ * Two quantities because they answer different questions -- how much movement
+ * there was, and whether the room counted as occupied. */
+#define HISTORY_PIR_MOTION(p)   ((p) & 0x7F)
+#define HISTORY_PIR_PRESENT(p)  (((p) & 0x80) != 0)
 
 /* Ordered as the panel's indoor rows are, since the knob cycles the chart's
  * quantity along this enum and the two would otherwise disagree. */

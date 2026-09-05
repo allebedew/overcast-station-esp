@@ -28,3 +28,16 @@ To bring the display back: the sources go to `main/display16x2/`, then
 `main.c`, the BOOT single-click handler in `button.c`, and `backlight_rgb` /
 `backlight_scale` in `web/webserver.c` and `web/index.html`. NVS still holds its
 `bl_rgb` and `screen_page` keys — they were never cleared.
+
+## radar
+
+The HLK-LD2450 mmWave tracker on UART1 (GPIO10/11), removed when the PIR motion
+sensor took over presence. `ld2450.c` is reader task, frame resync and decode,
+the published snapshot, and the one configuration sequence the module accepts —
+Bluetooth off, which is worth reading before wiring any of these modules up.
+
+The PIR now owns GPIO11 and the station's presence state, so bringing the radar
+back needs its pins freed first, then `radar/ld2450.c` in `main/CMakeLists.txt`
+(`SRCS` and `INCLUDE_DIRS`) with `esp_driver_uart` back in `PRIV_REQUIRES`,
+`ld2450_init()` in `main.c`, and a replacement for `SETTING_RADAR_BT_OFF`, which
+was dropped with it. NVS still holds its `radar_bt_off` key.

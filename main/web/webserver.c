@@ -22,7 +22,6 @@
 #include "history.h"
 #include "led.h"
 #include "ota.h"
-#include "ld2450.h"
 #include "pir.h"
 #include "sensors.h"
 #include "panel_hours.h"
@@ -288,26 +287,6 @@ static esp_err_t status_get_handler(httpd_req_t *req)
                  (int)as.last_strike_s, dist, (unsigned long)as.energy);
     }
 
-    /* Not on the I2C bus, so it sits beside `sensors` rather than in it. The
-     * targets go out as coordinates because the page plots them; the distance
-     * to the nearest is the module's own arithmetic and goes out once. */
-    ld2450_data_t radar;
-    char radar_json[192] = "null";
-    if (ld2450_get(&radar)) {
-        jbuf_t r;
-        jbuf_init(&r, radar_json, sizeof(radar_json));
-        char near[16];
-        json_num(near, sizeof(near), radar.count > 0, "%.2f", radar.nearest_m);
-        jbuf_printf(&r, "{\"presence\":%s,\"near\":%s,\"targets\":[",
-                    radar.presence ? "true" : "false", near);
-        for (int i = 0; i < radar.count; i++) {
-            const ld2450_target_t *t = &radar.targets[i];
-            jbuf_printf(&r, "%s{\"x\":%d,\"y\":%d}", i ? "," : "", t->x_mm,
-                        t->y_mm);
-        }
-        jbuf_printf(&r, "]}");
-    }
-
     weather_api_data_t weather;
     bool weather_ok = weather_api_get(&weather);
 
@@ -456,7 +435,6 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"reject\":{\"nf\":%u,\"wdth\":%u,\"srej\":%u,\"per_min\":%u},"
         "\"tune\":{\"cap\":%u,\"lco\":%u}},"
         "\"pir\":{\"raw\":%s,\"presence\":%s}},"
-        "\"radar\":%s,"
         "\"weather\":{\"loc\":%s,\"current\":%s},"
         "\"system\":{"
         "\"uptime\":%lld,\"time\":\"%s\",\"time_synced\":%s,"
@@ -484,7 +462,6 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         as.noise_floor, as.watchdog, as.spike_reject, as.disturbers_min,
         as.tun_cap, as.lco_hz,
         pir_raw() ? "true" : "false", pir_present() ? "true" : "false",
-        radar_json,
         wx_loc, wx_cur,
         run.uptime_s,
         time_str,
@@ -527,9 +504,9 @@ static esp_err_t history_get_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
 
     /* Each array is gated on its own bit: a sensor absent for part of the
-     * window leaves nulls only in its own series. The three radar series share
-     * one bit, so the field to read comes from `id` rather than from the bit. */
-    enum { S_CO2, S_TEMP, S_RH, S_PRESS, S_LUX, S_TARGETS, S_NEAR };
+     * window leaves nulls only in its own series. The two PIR series share one
+     * bit, so the field to read comes from `id` rather than from the bit. */
+    enum { S_CO2, S_TEMP, S_RH, S_PRESS, S_LUX, S_MOTION, S_PRESENCE };
     static const struct {
         const char *name;
         uint8_t bit;
@@ -540,8 +517,8 @@ static esp_err_t history_get_handler(httpd_req_t *req)
         { "rh",      HISTORY_HAS_RH,    S_RH },
         { "press",   HISTORY_HAS_PRESS, S_PRESS },
         { "lux",     HISTORY_HAS_LUX,   S_LUX },
-        { "targets", HISTORY_HAS_RADAR, S_TARGETS },
-        { "near",    HISTORY_HAS_RADAR, S_NEAR },
+        { "motion",   HISTORY_HAS_PIR,   S_MOTION },
+        { "presence", HISTORY_HAS_PIR,   S_PRESENCE },
     };
 
     jbuf_t j;
@@ -571,17 +548,12 @@ static esp_err_t history_get_handler(httpd_req_t *req)
                     snprintf(val, sizeof(val), "%.3f",
                              climate_to_sea_level(p.press_mhpa / 1000.0f));
                     break;
-                case S_TARGETS:
-                    snprintf(val, sizeof(val), "%u",
-                             HISTORY_RADAR_TARGETS(p.radar));
+                case S_MOTION:
+                    snprintf(val, sizeof(val), "%u", HISTORY_PIR_MOTION(p.pir));
                     break;
-                case S_NEAR:
-                    /* An empty fan is a gap in this series alone — the room was
-                     * recorded, there was simply no distance to record. */
-                    if (HISTORY_RADAR_STEPS(p.radar)) {
-                        snprintf(val, sizeof(val), "%.2f",
-                                 HISTORY_RADAR_NEAR_M(p.radar));
-                    }
+                case S_PRESENCE:
+                    snprintf(val, sizeof(val), "%d",
+                             HISTORY_PIR_PRESENT(p.pir) ? 1 : 0);
                     break;
                 default:
                     snprintf(val, sizeof(val), "%.1f", p.lux);

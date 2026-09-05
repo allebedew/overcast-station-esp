@@ -6,10 +6,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
-#include "buzzer.h"
-
-/* Wiring: module OUT -> GPIO11, 5 V, GND. The pin is the LD2450's old TX,
- * free while the radar is not brought up. */
+/* Wiring: module OUT -> GPIO11, 5 V, GND. */
 #define PIR_GPIO   11
 #define POLL_MS    100
 
@@ -54,7 +51,6 @@ static void pir_task(void *arg)
         ESP_LOGI(TAG, "%s after %llds", now ? "occupied" : "clear",
                  (long long)((edge_us - since_us) / 1000000));
         since_us = edge_us;
-        buzzer_play(now ? BUZZER_ARRIVE : BUZZER_LEAVE);
     }
 }
 

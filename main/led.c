@@ -16,8 +16,8 @@
 
 /* CO2 anchors (ppm) of the connected-state gradient: green, yellow, red. */
 #define CO2_GREEN  400
-#define CO2_YELLOW 800
-#define CO2_RED    1200
+#define CO2_YELLOW 1000
+#define CO2_RED    1500
 
 /* Grace period before a missing SCD40 reading counts as an error: a few polls
  * to walk the start sequence, then the 5 s measurement cycle, plus slack. */

@@ -4,9 +4,9 @@
 
 /* A passive infrared motion sensor on one GPIO: its output sits high while it
  * sees a warm body moving and falls back after a hold time set on the module
- * itself, which is seconds at the least. That hold is why nothing here needs
- * one of its own — unlike the radar, the sensor does not lose a person who
- * pauses, it just keeps the line high until the room has been still. */
+ * itself, which is seconds at the least. The module's own hold is far too
+ * short for somebody sitting still, so pir.c holds the state further; see
+ * HOLD_MS there. */
 
 /* Brings up the pin and starts the watcher task. */
 void pir_init(void);

@@ -10,7 +10,7 @@
 #include "climate.h"
 #include "esp_system.h"
 #include "esp_timer.h"
-#include "ld2450.h"
+#include "pir.h"
 #include "sensors.h"
 #include "telegram.h"
 #include "timesync.h"
@@ -59,12 +59,10 @@ static const struct {
 #define RAIN_ON_PCT  70
 #define RAIN_OFF_PCT 50
 
-/* The radar loses whoever sits still, so an absence counts only after it has
- * outlasted plausible motionless sitting. Arrival needs far less: its own
- * presence flag is already held for seconds, and this only rejects a lone
- * spurious frame. */
-#define ARRIVE_CONFIRM_MS 3000
-#define LEAVE_CONFIRM_MS  (5 * 60 * 1000)
+/* An arrival is worth a message only after a real absence — stepping out to the
+ * kitchen and back is not news. Departures are announced whatever their run,
+ * since the interesting part is that the room emptied. */
+#define ARRIVE_NOTIFY_MIN_ABSENCE_MS (60 * 60 * 1000)
 
 /* ------------------------------------------------------------------------ */
 
@@ -250,52 +248,39 @@ static void format_span(char *buf, size_t n, int64_t ms)
     }
 }
 
-/* Confirmed arrivals and departures. Both edges are dated by when the raw flag
- * actually flipped, not by when the confirmation window expired, so the
- * reported durations exclude the window. */
+/* Arrivals and departures off the PIR's held flag — the hold that decides when
+ * a room counts as empty lives in pir.c, so the edges are taken as they come. */
 static void check_presence(void)
 {
     static bool armed, occupied, since_boot = true;
-    static int64_t since_ms; /* start of the current confirmed state */
-    static int64_t edge_ms;  /* start of the contradicting run, 0 = none */
+    static int64_t since_ms; /* start of the current state */
 
-    ld2450_data_t r;
-    if (!ld2450_get(&r)) { /* radar silent: state unknown, not empty */
-        return;
-    }
-
+    bool present = pir_present();
     int64_t now = now_ms();
     if (!armed) {
         armed = true;
-        occupied = r.presence;
+        occupied = present;
         since_ms = now;
         return;
     }
-    if (r.presence == occupied) {
-        edge_ms = 0;
-        return;
-    }
-    if (!edge_ms) {
-        edge_ms = now;
-        return;
-    }
-    if (now - edge_ms < (occupied ? LEAVE_CONFIRM_MS : ARRIVE_CONFIRM_MS)) {
+    if (present == occupied) {
         return;
     }
 
     char span[24];
-    format_span(span, sizeof(span), edge_ms - since_ms);
+    format_span(span, sizeof(span), now - since_ms);
     if (occupied) {
         telegram_notify("🚪 Ушёл, был здесь %s", span);
     } else if (since_boot) {
+        /* How long the room had been empty before the station came up is not
+         * known, so the first arrival is announced without the threshold. */
         telegram_notify("👋 Пришёл");
-    } else {
+    } else if (now - since_ms >= ARRIVE_NOTIFY_MIN_ABSENCE_MS) {
         telegram_notify("👋 Пришёл, никого не было %s", span);
     }
 
-    occupied = !occupied;
-    since_ms = edge_ms;
-    edge_ms = 0;
+    occupied = present;
+    since_ms = now;
     since_boot = false;
 }
 

@@ -57,8 +57,6 @@ void app_main(void)
     /* Before anything that talks on it, and while the log is still quiet. */
     i2c_bus_init();
     sensors_init();
-    /* The radar is unplugged and the PIR sits on its old RX pin; ld2450.c
-     * stays in the build, and everything that reads it copes with silence. */
     pir_init();
 
     telegram_init();

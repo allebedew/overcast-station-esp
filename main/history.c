@@ -11,13 +11,13 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "climate.h"
-#include "ld2450.h"
+#include "pir.h"
 #include "timesync.h"
 
 #define SNAPSHOT_MAGIC   0x48495354 /* "HIST" */
 /* Bumped when history_point_t changes shape: an older file is then dropped
  * rather than reinterpreted. */
-#define SNAPSHOT_VERSION 3
+#define SNAPSHOT_VERSION 4
 
 static const char *TAG = "history";
 
@@ -41,14 +41,12 @@ typedef struct {
     int head; /* next write position */
     int count;
     /* Slot in progress, counted per quantity so one sensor dropping out does
-     * not turn the whole slot into a gap. `near` runs only while a target
-     * exists — averaging an empty room in as zero metres would bend the line
-     * toward the sensor every time the room empties — so the radar needs a
-     * sample count of its own to tell "nobody there" from "not recorded". */
+     * not turn the whole slot into a gap. The PIR is always readable and so
+     * needs no `ok` of its own: `pir_n` counts the slot's samples and
+     * `motion_n` those that saw the line high. */
     acc_t co2, temp, rh, press, lux;
-    acc_t near;
-    int radar_n;
-    uint8_t max_targets;
+    int pir_n, motion_n;
+    bool present;
 } tier_t;
 
 static history_point_t s_ring_5m[5 * 60];
@@ -231,7 +229,7 @@ static void acc_add(acc_t *a, bool ok, float value)
 }
 
 /* Feeds one sample into every averaging tier. */
-static void acc_sample(const climate_t *c, const ld2450_data_t *r, bool radar_ok)
+static void acc_sample(const climate_t *c, bool motion, bool present)
 {
     for (int i = HISTORY_1H; i < HISTORY_TIER_COUNT; i++) {
         tier_t *t = &s_tiers[i];
@@ -240,13 +238,11 @@ static void acc_sample(const climate_t *c, const ld2450_data_t *r, bool radar_ok
         acc_add(&t->rh, c->rh_ok, c->rh_pct);
         acc_add(&t->press, c->press_ok, c->press_hpa);
         acc_add(&t->lux, c->lux_ok, c->lux);
-        acc_add(&t->near, radar_ok && r->count > 0, r->nearest_m);
-        if (radar_ok) {
-            t->radar_n++;
-            if (r->count > t->max_targets) {
-                t->max_targets = r->count;
-            }
-        }
+        t->pir_n++;
+        t->motion_n += motion;
+        /* Held over the slot rather than sampled at its end: a slot the room
+         * was occupied for any part of counts as occupied. */
+        t->present |= present;
     }
 }
 
@@ -278,24 +274,10 @@ static history_point_t point_of(const climate_t *c)
     return p;
 }
 
-/* The radar's slot into its byte. The distance keeps a step of its own even
- * when it rounds to nothing, so that a stored zero means an empty fan and only
- * that. */
-static void point_set_radar(history_point_t *p, uint8_t targets, bool near_ok,
-                            float near_m)
+static void point_set_pir(history_point_t *p, int motion_pct, bool present)
 {
-    long steps = near_ok ? lroundf(near_m / HISTORY_RADAR_STEP_M) : 0;
-    if (near_ok && steps < 1) {
-        steps = 1;
-    }
-    if (steps > 31) {
-        steps = 31;
-    }
-    if (targets > 3) {
-        targets = 3;
-    }
-    p->radar = (uint8_t)(targets | (steps << 2));
-    p->have |= HISTORY_HAS_RADAR;
+    p->pir = (uint8_t)(motion_pct | (present ? 0x80 : 0));
+    p->have |= HISTORY_HAS_PIR;
 }
 
 /* The tier's accumulated samples as one ring point. With no samples at all it
@@ -325,9 +307,9 @@ static void flush_tier(tier_t *t)
         mean.lux = t->lux.sum / t->lux.n;
     }
     history_point_t p = point_of(&mean);
-    if (t->radar_n) {
-        point_set_radar(&p, t->max_targets, t->near.n > 0,
-                        t->near.n ? t->near.sum / t->near.n : 0.0f);
+    if (t->pir_n) {
+        point_set_pir(&p, (100 * t->motion_n + t->pir_n / 2) / t->pir_n,
+                      t->present);
     }
 
     t->co2 = (acc_t){0};
@@ -335,9 +317,9 @@ static void flush_tier(tier_t *t)
     t->rh = (acc_t){0};
     t->press = (acc_t){0};
     t->lux = (acc_t){0};
-    t->near = (acc_t){0};
-    t->radar_n = 0;
-    t->max_targets = 0;
+    t->pir_n = 0;
+    t->motion_n = 0;
+    t->present = false;
 
     taskENTER_CRITICAL(&s_lock);
     ring_push(t, &p);
@@ -353,18 +335,15 @@ static void tick_cb(void *arg)
      * the 1 s tier, which draws better than four gaps out of five. */
     climate_t c;
     climate_get(&c);
-    ld2450_data_t r = {0};
-    bool radar_ok = ld2450_get(&r);
-    acc_sample(&c, &r, radar_ok);
+    bool motion = pir_raw();
+    bool present = pir_present();
+    acc_sample(&c, motion, present);
 
     history_point_t p = point_of(&c);
-    if (radar_ok) {
-        /* A single sample has no slot to take a maximum over, so the 1 s tier
-         * carries the raw count and flickers with it: a still person leaves the
-         * frame for seconds at a time. The averaging tiers are where the
-         * maximum makes that whole again. */
-        point_set_radar(&p, r.count, r.count > 0, r.nearest_m);
-    }
+    /* A single sample has nothing to average, so the 1 s tier carries the bare
+     * line and flickers with it; the averaging tiers turn that into a share of
+     * the slot. */
+    point_set_pir(&p, motion ? 100 : 0, present);
     taskENTER_CRITICAL(&s_lock);
     ring_push(&s_tiers[HISTORY_5M], &p);
     taskEXIT_CRITICAL(&s_lock);

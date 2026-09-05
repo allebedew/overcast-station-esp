@@ -10,8 +10,8 @@ static const struct {
     int    comfort;
     double hyst;
 } RULES[ALERT_Q_COUNT] = {
-    [ALERT_Q_CO2]         = { { 800, 1200, 2000 },  3, 0, 25 },
-    [ALERT_Q_TEMP]        = { { 22, 30 },           2, 1, 0.3 },
+    [ALERT_Q_CO2]         = { { 1000, 1500, 2500 }, 3, 0, 25 },
+    [ALERT_Q_TEMP]        = { { 22, 28 },           2, 1, 0.3 },
     [ALERT_Q_RH]          = { { 20, 80 },           2, 1, 2 },
     [ALERT_Q_DEW_SPREAD]  = { { 1, 3 },             2, 2, 0.3 },
     [ALERT_Q_UVI]         = { { 8 },                1, 0, 0.3 },

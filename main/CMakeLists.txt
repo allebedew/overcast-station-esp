@@ -29,15 +29,13 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             "sensors/i2c_dev.c" "sensors/scd40.c"
                             "sensors/tmp117.c" "sensors/bmp581.c"
                             "sensors/veml7700.c" "sensors/as3935.c"
-                            # the mmWave tracker, on its own UART
-                            "radar/ld2450.c"
                        INCLUDE_DIRS "." "sensors" "gui" "gui/gfx" "gui/views"
-                                    "web" "radar"
+                                    "web"
                        PRIV_REQUIRES u8g2
                                      esp_wifi esp_netif esp_event nvs_flash
                                      esp_http_server esp_http_client mbedtls
                                      esp_driver_tsens esp_driver_i2c
-                                     esp_driver_uart esp_driver_pcnt esp_driver_gpio
+                                     esp_driver_pcnt esp_driver_gpio
                                      esp_driver_ledc esp_driver_spi
                                      esp_app_format spi_flash json app_update
                                      trombik__esp_wireguard)

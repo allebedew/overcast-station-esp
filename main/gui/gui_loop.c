@@ -297,9 +297,19 @@ static void gui_task(void *arg)
             climate_get(&cl);
             ui_state_light(&s_state, cl.lux_ok, cl.lux);
 
-            /* Lit only for someone who is there to read it. The PIR announces
-             * the change itself, so nothing is played here. */
+            /* Lit only for someone who is there to read it, with one tick per
+             * transition. The first pass only records the state: a station
+             * booting into an occupied room would otherwise tick over its own
+             * startup chirp. */
             bool want_on = s_state.set.on && pir_present();
+            static bool lit_known, was_lit;
+            if (!lit_known) {
+                lit_known = true;
+                was_lit = want_on;
+            } else if (want_on != was_lit) {
+                was_lit = want_on;
+                buzzer_play(BUZZER_CLICK);
+            }
 
             panel_hours_track(want_on, s_state.bright_now);
 

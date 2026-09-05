@@ -9,6 +9,7 @@
 #include "sun.h"
 #include "timesync.h"
 #include "weather_store.h"
+#include "wg.h"
 #include "wifi.h"
 
 /* Zones are stepped from their own previous value, so this keeps the only state
@@ -78,6 +79,11 @@ void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
                                                       : UI_LINK_DOWN;
     out->rssi = wifi.rssi;
     out->ap   = wifi.ap_active;
+
+    wg_info_t wg;
+    wg_get_info(&wg);
+    out->wg_on = wg.configured;
+    out->wg_up = wg.up;
 
     out->anim_ms = (uint32_t)(esp_timer_get_time() / 1000);
 

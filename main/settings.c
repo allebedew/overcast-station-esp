@@ -47,13 +47,6 @@ static const entry_t s_tab[SETTING_COUNT] = {
         { .key = "altitude_m", .api = "altitude", .name = "Site altitude",
           .def = 0, .min = CLIMATE_ALTITUDE_MIN, .max = CLIMATE_ALTITUDE_MAX },
         NVS_TYPE_I32 },
-    /* The state the LD2450 is meant to hold, carried into it by the radar task
-     * whenever this changes. It is also the only account of that state there
-     * is: the module keeps Bluetooth in its own flash and cannot be asked. */
-    [SETTING_RADAR_BT_OFF] = {
-        { .key = "radar_bt_off", .api = "radar_bt_off",
-          .name = "Radar Bluetooth off", .def = 1, .min = 0, .max = 1,
-          .as_bool = true }, NVS_TYPE_U8 },
     /* What the knob left the chart on. Off the HTTP API: it is where the panel
      * stands, not something to drive a station by. */
     [SETTING_CHART_Q] = {

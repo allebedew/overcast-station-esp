@@ -59,6 +59,11 @@ typedef struct {
     int       rssi;   /* dBm; meaningless unless UI_LINK_UP */
     bool      ap;     /* own SoftAP is up; the station side has nothing to show */
 
+    /* The WireGuard tunnel, shown beside the link. Both false when the build
+     * carries no keys, and then nothing is drawn. */
+    bool wg_on;   /* configured */
+    bool wg_up;   /* handshake holding */
+
     /* The sun for the active location, from sun.c rather than the forecast:
      * today's crossings, where it stands right now, and how long until it next
      * crosses. Each part carries its own flag — all three are false without a

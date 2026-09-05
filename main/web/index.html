@@ -25,7 +25,7 @@
                 --co2-bad: #ff6b6b;
                 --press: #a78bfa;
                 --lux: #ffc94d;
-                --radar: #38d9c0;
+                --presence: #38d9c0;
                 --ok: #3fb950;
                 --radius: 12px;
                 --font:
@@ -258,11 +258,6 @@
                 display: block;
                 touch-action: pan-y;
                 cursor: crosshair;
-            }
-            /* The radar plot has no hover readout — the pointer must not
-               promise one. */
-            #rPlot {
-                cursor: default;
             }
             .badge {
                 font-size: 10.5px;
@@ -1165,14 +1160,6 @@
 
                     <div class="set-row">
                         <div class="head">
-                            <span class="name" data-i18n="radarBtOff"
-                                >Bluetooth радара отключён</span
-                            ><input type="checkbox" id="radarBtOff" />
-                        </div>
-                    </div>
-
-                    <div class="set-row">
-                        <div class="head">
                             <span class="name" data-i18n="altitude"
                                 >Высота над уровнем моря</span
                             ><span class="val" data-i18n="uMeters">м</span>
@@ -1421,13 +1408,13 @@
                     sensOff: "Нет ответа",
                     co2: "CO₂",
                     sensDew: "Точка росы",
-                    radarTitle: "Радар",
-                    radarPresent: "Присутствие",
-                    radarEmpty: "Пусто",
-                    radarTargets: "цели",
-                    radarMaxT: "макс. целей",
                     presenceTitle: "Присутствие",
-                    uM: "м",
+                    presenceBusy: "Занято",
+                    presenceEmpty: "Пусто",
+                    presenceMotion: "движение",
+                    presenceOccupied: "занято",
+                    yes: "да",
+                    no: "нет",
                     sensPress: "Давление",
                     sensLux: "Освещённость",
                     altitude: "Высота над уровнем моря",
@@ -1436,7 +1423,6 @@
                     displayOn: "Дисплей включён",
                     displayBrightness: "Яркость дисплея",
                     displayAutoBrightness: "Авто-яркость дисплея",
-                    radarBtOff: "Bluetooth радара отключён",
                     settingSaved: "Настройка сохранена",
                     lightTitle: "Гроза",
                     lightPer24: "за 24 ч",
@@ -1658,13 +1644,13 @@
                     sensOff: "No response",
                     co2: "CO₂",
                     sensDew: "Dew point",
-                    radarTitle: "Radar",
-                    radarPresent: "Presence",
-                    radarEmpty: "Clear",
-                    radarTargets: "targets",
-                    radarMaxT: "max targets",
                     presenceTitle: "Presence",
-                    uM: "m",
+                    presenceBusy: "Occupied",
+                    presenceEmpty: "Clear",
+                    presenceMotion: "motion",
+                    presenceOccupied: "occupied",
+                    yes: "yes",
+                    no: "no",
                     sensPress: "Pressure",
                     sensLux: "Illuminance",
                     altitude: "Altitude above sea level",
@@ -1673,7 +1659,6 @@
                     displayOn: "Display on",
                     displayBrightness: "Display brightness",
                     displayAutoBrightness: "Display auto brightness",
-                    radarBtOff: "Radar Bluetooth switched off",
                     settingSaved: "Setting saved",
                     lightTitle: "Lightning",
                     lightPer24: "in 24 h",
@@ -2215,13 +2200,13 @@
             const fmtLux = (v) => v.toFixed(1);
 
             function co2Level(ppm) {
-                if (ppm < 800)
+                if (ppm < 1000)
                     return {
                         cls: "good",
                         text: t("co2Good"),
                         color: css("--co2"),
                     };
-                if (ppm < 1200)
+                if (ppm < 1500)
                     return {
                         cls: "warn",
                         text: t("co2Warn"),
@@ -2314,17 +2299,7 @@
                 });
                 renderLightning(sn.as3935 || {});
 
-                /* Both radar cards read one module, which drops out of the
-                 * reply as a whole rather than carrying an `ok`. */
-                setDot("oDot", !!s.radar);
-                setDot("rDot", !!s.radar);
-                /* The plan view under it is the radar's, but the badge is the
-                 * PIR's — a separate sensor on its own pin, and the only
-                 * presence source wired at the moment. */
-                const pir = sn.pir || {};
-                const pirBadge = $("rBadge");
-                pirBadge.className = "badge " + (pir.presence ? "good" : "off");
-                pirBadge.textContent = t(pir.presence ? "radarPresent" : "radarEmpty");
+                renderPresence(sn.pir);
 
                 /* Cards whose badge replaces the window trend arrow: the CO₂
                  * level and the pressure tendency. The callback returns
@@ -2349,7 +2324,6 @@
 
                 renderWeather(s.weather || {});
                 renderSun(s.sun, (s.weather && s.weather.loc) || {});
-                renderRadar(s.radar);
 
                 /* system card: Wi-Fi station and access point shown as
                  * separate sections (in APSTA both can be up at once). The
@@ -2451,7 +2425,6 @@
                 syncSetting("dispBriRange", st.display_brightness, "dispBriVal");
                 syncSetting("dispOn", st.display_on);
                 syncSetting("dispAutoBri", st.display_auto_brightness);
-                syncSetting("radarBtOff", st.radar_bt_off);
                 syncSetting("altInput", st.altitude);
             }
 
@@ -2675,9 +2648,9 @@
                 };
                 SERIES.forEach((sr) => (out[sr.k] = padTo(hd[sr.hist], n)));
                 /* Charted together on the presence card, but neither is a
-                 * series: no live reading, no trend, no card of its own. */
-                out.o = padTo(hd.targets, n);
-                out.oNear = padTo(hd.near, n);
+                 * series: no trend, no card of its own. */
+                out.o = padTo(hd.presence, n);
+                out.oMotion = padTo(hd.motion, n);
                 return out;
             }
 
@@ -2714,19 +2687,19 @@
                  * reading on `climate`, no trend — so both are written out
                  * rather than generated. */
                 cards.push(
-                    /* Charted like the climate above it and so first: distance
-                     * to the nearest target as the line, target count as
-                     * columns under it. The live distance heads the card, and
-                     * the held state its badge — the card is named for it. */
+                    /* Charted like the climate above it and so first: motion
+                     * activity as the line, occupancy as columns under it. The
+                     * share of the window spent occupied heads the card, and
+                     * the live held state is its badge. */
                     '<div class="card sensor"><h2>' +
                         '<span class="sens-dot" id="oDot"></span>' +
                         '<span data-i18n="presenceTitle"></span>' +
                         '<span class="badge off" id="oBadge" data-i18n="noData"></span></h2>' +
                         '<div class="reading">' +
                         `<span class="value" id="oVal">${NA}</span>` +
-                        '<span class="unit" data-i18n="uM"></span>' +
+                        '<span class="unit">%</span>' +
                         '<div class="minmax">' +
-                        `<span><span data-i18n="radarMaxT"></span> <b id="oMax">${NA}</b></span>` +
+                        `<span><span data-i18n="presenceMotion"></span> <b id="oMotion">${NA}</b></span>` +
                         "</div></div>" +
                         '<canvas id="oChart"></canvas></div>',
                     /* No history behind it and so no chart: the strike count
@@ -2747,116 +2720,10 @@
                         "</div></div>" +
                         '<div class="cardfoot plain" id="gFoot">' +
                         '<span class="cf-l"></span><span class="cf-r"></span></div></div>',
-                    /* The plan view closes the grid — the one card that plots
-                     * instead of charting. */
-                    '<div class="card sensor"><h2>' +
-                        '<span class="sens-dot" id="rDot"></span>' +
-                        '<span data-i18n="radarTitle"></span>' +
-                        '<span class="badge off" id="rBadge" data-i18n="noData"></span></h2>' +
-                        '<div class="reading">' +
-                        `<span class="value" id="rCount">${NA}</span>` +
-                        '<span class="unit" data-i18n="radarTargets"></span>' +
-                        '<div class="minmax">' +
-                        `<span>x <b id="rX">${NA}</b></span>` +
-                        `<span>y <b id="rY">${NA}</b></span>` +
-                        "</div></div>" +
-                        '<canvas id="rPlot"></canvas></div>',
                 );
                 $("sensorCards").innerHTML = cards.join("");
             }
             buildSensorCards(); /* before charts: they look the canvases up */
-
-            /* ---------- radar plan view ----------
-             * The module sits at the bottom centre of the canvas looking up it:
-             * range rings, the fan it can see, a dot per tracked target. Drawn
-             * from the last reply held here, so a resize or a language switch
-             * repaints without waiting for the next poll. */
-            const RADAR_RANGE_M = 6; /* the module's rated reach */
-            const RADAR_RING_M = 2;
-            const RADAR_FOV_DEG = 60;
-            let radarLast = null;
-
-            function drawRadar() {
-                const canvas = $("rPlot");
-                const w = canvas.clientWidth,
-                    h = canvas.clientHeight;
-                if (!w) return;
-                const dpr = window.devicePixelRatio || 1;
-                const bw = Math.round(w * dpr),
-                    bh = Math.round(h * dpr);
-                if (canvas.width !== bw || canvas.height !== bh) {
-                    canvas.width = bw;
-                    canvas.height = bh;
-                }
-                const ctx = canvas.getContext("2d");
-                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-                ctx.clearRect(0, 0, w, h);
-                ctx.font = "10px " + css("--font");
-
-                const fov = (RADAR_FOV_DEG * Math.PI) / 180;
-                const cx = w / 2,
-                    cy = h - 3;
-                /* As large as both axes allow: the fan is `range * sin(fov)`
-                 * wide either side of the origin and `range` tall, and the pad
-                 * leaves room for the range labels. */
-                const pad = 12;
-                const scale = Math.min(
-                    (w / 2 - pad) / (RADAR_RANGE_M * Math.sin(fov)),
-                    (h - pad) / RADAR_RANGE_M,
-                );
-
-                ctx.strokeStyle = css("--border");
-                ctx.lineWidth = 1;
-                ctx.fillStyle = css("--text-faint");
-                ctx.textAlign = "center";
-                ctx.textBaseline = "bottom";
-                for (let m = RADAR_RING_M; m <= RADAR_RANGE_M; m += RADAR_RING_M) {
-                    ctx.beginPath();
-                    /* straight up is -90°, and the fan opens either side of it */
-                    ctx.arc(cx, cy, m * scale, -Math.PI / 2 - fov, -Math.PI / 2 + fov);
-                    ctx.stroke();
-                    ctx.fillText(m + " " + t("uM"), cx, cy - m * scale - 2);
-                }
-                for (const side of [-1, 1]) {
-                    ctx.beginPath();
-                    ctx.moveTo(cx, cy);
-                    ctx.lineTo(
-                        cx + side * RADAR_RANGE_M * Math.sin(fov) * scale,
-                        cy - RADAR_RANGE_M * Math.cos(fov) * scale,
-                    );
-                    ctx.stroke();
-                }
-
-                const targets = (radarLast && radarLast.targets) || [];
-                if (!targets.length) {
-                    /* An empty fan is a reading and the badge already says so;
-                     * only a dead module gets a word across the plot. */
-                    if (!radarLast) {
-                        ctx.fillStyle = css("--text-faint");
-                        ctx.textBaseline = "middle";
-                        ctx.fillText(t("chartNoData"), cx, h / 2);
-                    }
-                    return;
-                }
-
-                ctx.fillStyle = css("--radar");
-                targets.forEach((tg) => {
-                    /* Held to the outer ring rather than dropped off the canvas:
-                     * the module reports past its rated range now and then. */
-                    const d = Math.hypot(tg.x, tg.y) / 1000 || 1;
-                    const k = Math.min(1, RADAR_RANGE_M / d);
-                    const x = cx + ((tg.x / 1000) * k) * scale,
-                        y = cy - ((tg.y / 1000) * k) * scale;
-                    ctx.globalAlpha = 0.18;
-                    ctx.beginPath();
-                    ctx.arc(x, y, 11, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.globalAlpha = 1;
-                    ctx.beginPath();
-                    ctx.arc(x, y, 4.5, 0, Math.PI * 2);
-                    ctx.fill();
-                });
-            }
 
             /* The disturber rate is the only thing on this card that moves
              * minute to minute, so it is what the badge carries. The step is
@@ -2901,31 +2768,20 @@
                     : "";
             }
 
-            function renderRadar(r) {
-                radarLast = r || null;
-                $("rCount").textContent = r ? String(r.targets.length) : NA;
-                /* Coordinates of the nearest target, in metres like the rings.
-                 * `near` is the module's own distance and need not belong to
-                 * the target closest in the plane, so pick that one here. */
-                const near = ((r && r.targets) || []).reduce(
-                    (a, b) =>
-                        !a || Math.hypot(b.x, b.y) < Math.hypot(a.x, a.y) ? b : a,
-                    null,
-                );
-                $("rX").textContent = num(near && near.x / 1000, (v) => v.toFixed(2));
-                $("rY").textContent = num(near && near.y / 1000, (v) => v.toFixed(2));
-                /* The presence card charts the history, but its badge and its
-                 * reading are live — the reading null while nobody is moving in
-                 * the fan, the badge held for a few seconds past that. */
+            /* The card's value comes from the charted window (renderCharts);
+             * live here are the held state as the badge and the bare line
+             * beside it, which is what tells a dead sensor from a quiet room.
+             * The sensor is a GPIO and cannot report itself absent, so the dot
+             * is lit whenever the reply carried the object at all. */
+            function renderPresence(pir) {
+                setDot("oDot", !!pir);
                 const b = $("oBadge");
-                b.className = "badge " + (r && r.presence ? "good" : "off");
-                b.textContent = !r
+                const busy = !!(pir && pir.presence);
+                b.className = "badge " + (busy ? "good" : "off");
+                b.textContent = !pir
                     ? t("noData")
-                    : r.presence
-                      ? t("radarPresent")
-                      : t("radarEmpty");
-                $("oVal").textContent = num(r && r.near, (v) => v.toFixed(2));
-                drawRadar();
+                    : t(busy ? "presenceBusy" : "presenceEmpty");
+                $("oMotion").textContent = !pir ? NA : t(pir.raw ? "yes" : "no");
             }
 
             /* One record per chart, keyed like SERIES; data/times/stroke are
@@ -2940,15 +2796,13 @@
                 };
             });
             /* Presence is charted like a series without being one, and it is
-             * two quantities: the line is the distance to the nearest target,
-             * the columns under it the number of targets. `unit` follows the
-             * language, so renderCharts() sets it. */
+             * two quantities: the line is the share of the slot that saw
+             * motion, the columns under it the held occupancy. */
             charts.o = {
                 canvas: $("oChart"),
-                unit: "",
-                fmt: (v) => v.toFixed(2),
-                barMax: 3, /* the module tracks no more than three */
-                empty: "radarEmpty", /* an unoccupied window is a recording */
+                unit: "%",
+                fmt: (v) => v.toFixed(0),
+                barMax: 1,
             };
             const M = {
                 l: 36,
@@ -3012,8 +2866,8 @@
                 const ph = h - M.t - M.b;
 
                 /* Columns rising from the baseline, `barMax` filling the plot.
-                 * A count is 0..3 and makes a poor line; as a strip under the
-                 * distance it reads as one picture. */
+                 * Occupancy is a flag and makes a poor line; as a strip under
+                 * the motion trace it reads as one picture. */
                 function bars(x) {
                     if (!ch.bars) return;
                     const bw = Math.max(1, ((ch.pw || 0) / ch.bars.length) * 0.8);
@@ -3263,7 +3117,7 @@
                 tip.innerHTML =
                     `<b>${v == null ? t(ch.empty || "chartNoData") : ch.fmt(v) + " " + ch.unit}</b>` +
                     (ch.bars
-                        ? `<span>${ch.bars[i] ?? 0} ${t("radarTargets")}</span>`
+                        ? `<span>${t(ch.bars[i] ? "presenceOccupied" : "presenceEmpty")}</span>`
                         : "") +
                     `<span>${fmtTipTime(ch.times[i])}</span>`;
                 tip.style.display = "block";
@@ -3355,23 +3209,21 @@
                             : css(sr.color);
                     draw(ch);
                 });
-                /* The radar canvas sits in the same grid and needs the same
-                 * repaint on a resize or a language switch. */
-                drawRadar();
-
-                /* The presence card's reading is live (renderRadar); the window
-                 * gives it only the busiest moment in the period. */
-                const hd = hists[period] || {};
-                const seen = (hd.targets || []).filter((v) => v != null);
-                $("oMax").textContent = seen.length
-                    ? String(Math.max(...seen))
+                /* The card's headline value is the window's, not a reading:
+                 * how much of it the room counted as occupied. */
+                const occ = s.o.filter((v) => v != null);
+                $("oVal").textContent = occ.length
+                    ? String(
+                          Math.round(
+                              (100 * occ.reduce((a, v) => a + v, 0)) / occ.length,
+                          ),
+                      )
                     : NA;
                 const och = charts.o;
-                och.data = s.oNear;
+                och.data = s.oMotion;
                 och.bars = s.o;
                 och.times = s.times;
-                och.unit = t("uM");
-                och.stroke = css("--radar");
+                och.stroke = css("--presence");
                 draw(och);
             }
 
@@ -3803,7 +3655,6 @@
                 "display_auto_brightness",
                 "settingSaved",
             );
-            wireCheckbox("radarBtOff", "radar_bt_off", "settingSaved");
 
             /* Site altitude: the one input to the sea-level reduction. Saved on
                change (blur or Enter), so the field is not written back while it

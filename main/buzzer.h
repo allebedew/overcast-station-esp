@@ -35,7 +35,9 @@ typedef enum {
     BUZZER_CO2_DOWN3,
 
     BUZZER_STORM,  /* lightning: three cracks and a rumble */
-    BUZZER_ARRIVE, /* somebody in front of the station, and gone again */
+    /* Arrival and departure. Nothing plays these any more -- the panel ticks
+     * its own transitions -- and they are kept for the panel's sound page. */
+    BUZZER_ARRIVE,
     BUZZER_LEAVE,
 
     BUZZER_BOOT, /* rising three-note chirp at startup */
