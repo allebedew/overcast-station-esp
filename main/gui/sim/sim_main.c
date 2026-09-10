@@ -555,9 +555,11 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data, bool fetching,
 
     m.now       = 1754200000;   // 2025-08-03 07:06 UTC
 
-    m.batt_ok = true;
-    m.batt_v  = 3.912f;
-    m.batt_a  = -0.045f;
+    m.batt = (battery_t){
+        .ok = true, .state = BATTERY_DISCHARGING,
+        .voltage_v = 3.912f, .current_ma = -45.0f, .power_mw = 176.0f,
+        .mah = 1234.5f, .pct = 61.7f, .pct_v = 65, .eta_s = 98760,
+    };
     m.utc_off_s = 3 * 3600;
 
     m.climate = (climate_t){

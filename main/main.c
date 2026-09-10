@@ -1,6 +1,7 @@
 #include "esp_err.h"
 #include "nvs_flash.h"
 #include "alerts.h"
+#include "battery.h"
 #include "button.h"
 #include "buzzer.h"
 #include "climate.h"
@@ -46,6 +47,7 @@ void app_main(void)
     climate_init(); /* before history: it samples climate every second */
     history_init();
     weather_store_init(); /* before the gui: its model reads the active location */
+    battery_init();       /* before the gui and the sensors: the count they read and feed */
 
     /* Early, so the panel is alive through the slow init below; the values it
      * reads fill in as those modules come up. */

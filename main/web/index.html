@@ -142,6 +142,12 @@
                 margin-top: 12px;
                 align-items: start;
             }
+            /* One grid cell holding several cards, one under another. */
+            .stack {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
             @media (max-width: 900px) {
                 .grid-sensors {
                     grid-template-columns: repeat(2, 1fr);
@@ -152,7 +158,7 @@
                 .grid-bottom {
                     grid-template-columns: 1fr 1fr;
                 }
-                .grid-bottom .card:first-child {
+                .grid-bottom > :first-child {
                     grid-column: 1 / -1;
                 }
             }
@@ -943,6 +949,10 @@
                 outline: none;
                 border-color: var(--accent);
             }
+            /* the attribute alone loses to any display rule, .frc-row's flex included */
+            [hidden] {
+                display: none !important;
+            }
 
             /* --- Modal --- */
             .overlay {
@@ -1125,19 +1135,72 @@
 
             <!-- BOTTOM ROW -->
             <div class="grid-bottom">
-                <!-- SYSTEM -->
-                <div class="card">
-                    <h2>
-                        <span data-i18n="system">Система</span>
-                    </h2>
-                    <table class="kv">
-                        <tbody id="sysRows">
-                            <tr>
-                                <td data-i18n="loading">Загрузка…</td>
-                                <td></td>
-                            </tr>
-                        </tbody>
-                    </table>
+                <div class="stack">
+                    <!-- BATTERY -->
+                    <div class="card">
+                        <h2>
+                            <span class="sens-dot off" id="batDot"></span>
+                            <span data-i18n="battery">Батарея</span>
+                        </h2>
+                        <table class="kv">
+                            <tbody id="batRows">
+                                <tr>
+                                    <td data-i18n="loading">Загрузка…</td>
+                                    <td></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <!-- the value is picked first, so the reset is two
+                             deliberate clicks without a confirm() -->
+                        <div class="set-row">
+                            <button
+                                class="btn block"
+                                id="batResetBtn"
+                                data-i18n="batReset"
+                            >
+                                Задать заряд…
+                            </button>
+                            <div class="frc-row" id="batResetRow" hidden>
+                                <input
+                                    id="batMah"
+                                    type="number"
+                                    value="2000"
+                                    min="0"
+                                    max="2000"
+                                    step="1"
+                                />
+                                <button
+                                    class="btn primary"
+                                    id="batSetBtn"
+                                    data-i18n="batSet"
+                                >
+                                    Сбросить
+                                </button>
+                                <button
+                                    class="btn"
+                                    id="batCancelBtn"
+                                    data-i18n="cancel"
+                                >
+                                    Отмена
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SYSTEM -->
+                    <div class="card">
+                        <h2>
+                            <span data-i18n="system">Система</span>
+                        </h2>
+                        <table class="kv">
+                            <tbody id="sysRows">
+                                <tr>
+                                    <td data-i18n="loading">Загрузка…</td>
+                                    <td></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
 
                 <!-- SETTINGS -->
@@ -1697,6 +1760,29 @@
                     histResetDone: "История обнулена",
                     histResetError: "Не удалось обнулить историю: ",
                     panelsToggle: "Показать/скрыть систему, Wi-Fi и настройки",
+                    battery: "Батарея",
+                    bat_charging: "Заряжается",
+                    bat_discharging: "Разряжается",
+                    bat_full: "Заряжена",
+                    bat_idle: "Простой",
+                    bat_unknown: "Нет данных",
+                    batVoltage: "Напряжение",
+                    batCurrent: "Ток",
+                    batPower: "Мощность",
+                    batCount: "Заряд (счётчик)",
+                    batByVoltage: "Заряд по напряжению",
+                    batToFull: "До полной",
+                    batToEmpty: "До разряда",
+                    batEta: "Осталось",
+                    uV: "В",
+                    uA: "А",
+                    uW: "Вт",
+                    uMah: "мА·ч",
+                    batReset: "Задать заряд…",
+                    batSet: "Сбросить",
+                    batMahRange: "Заряд — от 0 до {max} мА·ч",
+                    batSetDone: "Заряд установлен: ",
+                    batSetError: "Не удалось задать заряд: ",
                 },
                 en: {
                     appName: "Weather Station",
@@ -1937,6 +2023,29 @@
                     histResetDone: "History reset",
                     histResetError: "Failed to reset history: ",
                     panelsToggle: "Show/hide system, Wi-Fi and settings",
+                    battery: "Battery",
+                    bat_charging: "Charging",
+                    bat_discharging: "Discharging",
+                    bat_full: "Full",
+                    bat_idle: "Idle",
+                    bat_unknown: "No data",
+                    batVoltage: "Voltage",
+                    batCurrent: "Current",
+                    batPower: "Power",
+                    batCount: "Charge (count)",
+                    batByVoltage: "Charge by voltage",
+                    batToFull: "To full",
+                    batToEmpty: "To empty",
+                    batEta: "Time left",
+                    uV: "V",
+                    uA: "A",
+                    uW: "W",
+                    uMah: "mAh",
+                    batReset: "Set charge…",
+                    batSet: "Reset",
+                    batMahRange: "Charge must be 0 to {max} mAh",
+                    batSetDone: "Charge set: ",
+                    batSetError: "Failed to set charge: ",
                 },
             };
             let lang =
@@ -2436,6 +2545,7 @@
 
                 renderWeather(s.weather || {});
                 renderSun(s.sun, (s.weather && s.weather.loc) || {});
+                renderBattery(s.battery || {});
 
                 /* system card: Wi-Fi station and access point shown as
                  * separate sections (in APSTA both can be up at once). The
@@ -2541,6 +2651,34 @@
                 syncSetting("windUnitSel", st.wind_unit);
                 adopt("chart_range", st.chart_range, setRange);
                 adopt("chart_quantity", st.chart_quantity, setQuantity);
+            }
+
+            /* BATTERY_CAPACITY_MAH; /api/battery/reset refuses anything above */
+            const BAT_CAPACITY_MAH = 2000;
+
+            function renderBattery(b) {
+                setDot("batDot", !!b.ok);
+                const eta =
+                    b.state === "charging"
+                        ? "batToFull"
+                        : b.state === "discharging"
+                          ? "batToEmpty"
+                          : "batEta";
+                $("batRows").innerHTML = kvRows([
+                    [t("state"), t("bat_" + (b.state || "unknown"))],
+                    [t("batVoltage"), num(b.voltage, (v) => `${v.toFixed(3)} ${t("uV")}`)],
+                    [
+                        t("batCurrent"),
+                        num(b.current, (v) => `${v > 0 ? "+" : ""}${(v / 1000).toFixed(3)} ${t("uA")}`),
+                    ],
+                    [t("batPower"), num(b.power, (v) => `${(v / 1000).toFixed(3)} ${t("uW")}`)],
+                    [
+                        t("batCount"),
+                        `${num(b.mah, (v) => v.toFixed(3))} ${t("uMah")} · ${num(b.pct, (v) => v.toFixed(2))} %`,
+                    ],
+                    [t("batByVoltage"), num(b.pct_v, (v) => v + " %")],
+                    [t(eta), num(b.eta_s, fmtSpan)],
+                ]);
             }
 
             /* One setting into its control: a checkbox takes `checked`,
@@ -3920,6 +4058,37 @@
                     if (range) loadHistory(RANGES[range].tier);
                 } catch (e) {
                     toast(t("histResetError") + e.message);
+                } finally {
+                    btn.disabled = false;
+                }
+            });
+
+            function batResetOpen(open) {
+                $("batResetBtn").hidden = open;
+                $("batResetRow").hidden = !open;
+                if (open) $("batMah").focus();
+            }
+            $("batResetBtn").addEventListener("click", () => batResetOpen(true));
+            $("batCancelBtn").addEventListener("click", () => batResetOpen(false));
+            $("batSetBtn").addEventListener("click", async () => {
+                const mah = +$("batMah").value;
+                if (!(mah >= 0 && mah <= BAT_CAPACITY_MAH)) {
+                    toast(t("batMahRange").replace("{max}", BAT_CAPACITY_MAH));
+                    return;
+                }
+                const btn = $("batSetBtn");
+                btn.disabled = true;
+                try {
+                    const r = await fetch("/api/battery/reset", {
+                        method: "POST",
+                        body: JSON.stringify({ mah }),
+                    });
+                    if (!r.ok) throw new Error(await r.text());
+                    toast(t("batSetDone") + mah + " " + t("uMah"));
+                    batResetOpen(false);
+                    refresh();
+                } catch (e) {
+                    toast(t("batSetError") + e.message);
                 } finally {
                     btn.disabled = false;
                 }

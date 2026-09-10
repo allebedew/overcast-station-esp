@@ -2,8 +2,8 @@
 
 ESP32-C6 firmware (ESP-IDF 5.5, 16 MB flash). Networking, web UI and OTA are
 done; the four environment sensors feed `/api/status`, the web page, the panel
-and the history, the battery monitor so far `/api/status` and the panel's debug
-strip.
+and the history, the battery gauge `/api/status`, the web page and the panel's
+debug strip.
 
 ## Implemented
 
@@ -42,7 +42,9 @@ strip.
   city name is geocoded in-browser, so that route needs internet on the
   client; a search hit fills the name and coordinate fields, which can also be
   filled by hand, so the name is the user's own; chips are dragged to reorder,
-  with a mouse — HTML5 drag and drop does not fire on a touch screen); system, settings and Wi-Fi cards behind the header gear. Settings:
+  with a mouse — HTML5 drag and drop does not fire on a touch screen); battery
+  (every `battery` field; a button opens a mAh field that sets the count through
+  `/api/battery/reset`), system, settings and Wi-Fi cards behind the header gear. Settings:
   LED brightness, buzzer volume, display on, its auto-brightness and its
   brightness, site altitude, wind units, SCD40 FRC, history reset. Every setting
   follows the device on each poll except while the control has the focus, so
@@ -126,11 +128,11 @@ strip.
     The API reports `lux`, the white/lux ratio as a light-source signature, and
     both raw counts.
   - **INA260** (`0x40`, both IDs verified) — battery voltage, current and
-    power; wiring under *Battery power* below. **~10 Hz**: 128 averages of a
-    588 µs current + 140 µs voltage conversion, a result every ~93 ms with the
-    current sampled 81 % of the time; polled at 80 ms, so the ready flag catches
-    every result. So far only in the API and, as volts and amps, on the line
-    above the panel's debug strip.
+    power; wiring and what is derived under *Battery power* below. **~15 Hz**:
+    16 averages of a 4.156 ms current + 140 µs voltage conversion, a result
+    every ~69 ms with the current integrated 96.7 % of the time; polled at
+    60 ms, so the ready flag catches every result. Offset ±1.25 mA typ, ±5 mA
+    max (datasheet), not compensated.
   - **AS3935** (lightning) — **removed**: out of the build and moved to
     `archive/lightning/`, which says what bringing it back would take. GPIO0,
     its IRQ line, is free.
@@ -142,12 +144,37 @@ strip.
   power-path load output (4.5 V max). The INA260 sits in the battery lead —
   IN+ to the board's BAT, IN− to the cell's + — so a positive current is
   charge, and on battery it sees the whole station, panel included.
-  STAT1/STAT2 (the board's charge and fault LEDs), CE and the buck's EN are not
-  wired to the MCU. EN low cuts the 3.3 V only: the load output stays live and
-  the panel's boost, its BC_CTRL floating, keeps running off the cell.
+  The board does not break out the BQ25185's STAT1/STAT2; CE and the buck's EN
+  are not wired to the MCU. EN low cuts the 3.3 V only: the load output stays
+  live and the panel's boost, its BC_CTRL floating, keeps running off the cell.
   Measured on the cell at 3.9 V: 43 mA with the panel dark, 78 mA lit at
   brightness 0, 107 mA at 15 — from 2000 mAh about 16–17 h at full brightness,
   ~40 h dark.
+  - **Gauge** (`sensors/battery.c`), from each INA260 result, so the mode is
+    one result (~69 ms) behind the cell:
+
+    | Mode | Condition |
+    |---|---|
+    | `charging` | I > +10 mA |
+    | `discharging` | I < −10 mA |
+    | `full` | \|I\| ≤ 10 mA, V ≥ 4.05 V — terminated, BATFET off (recharge starts at 4.1 V) |
+    | `idle` | \|I\| ≤ 10 mA, V < 4.05 V — input on, charger not charging |
+    | `unknown` | no INA260 |
+
+  - **Count** — mAh integrated over every result, free to go negative; held at
+    2000 while two or more `full` results run in a row (so days on USB do not
+    integrate the offset), or set by hand through `/api/battery/reset`. Kept in
+    NVS (`battery/charge`, i64 mA·µs) every 50 mAh of change, on reaching full,
+    on a reset and at a clean restart; 0 if never saved.
+  - **Time left** — to full on charge, to empty on discharge, linear at the
+    count's own rate over the last 30 s (sampled every second, restarted on a
+    mode change, a gap or a reset, `null` until it spans 10 s): optimistic
+    through the CV taper.
+  - **Voltage estimate** — % off a typical LiPo resting curve, independent of
+    the count; a few % low under load, high on charge.
+  - Shown in `/api/status` `battery`, on the web page's battery card and on
+    the two lines above the panel's debug strip (`-1234mAh D 65%`, then volts
+    and amps).
 - **mmWave radar (HLK-LD2450)** — **removed**: unplugged, out of the build and
   moved to `archive/radar/`, which says what bringing it back would take. The
   PIR below owns its GPIO11 and the station's presence state.
@@ -475,13 +502,14 @@ card belongs in that device's module, not in the caller — dew point in
 | `buzzer.c` | passive piezo on one LEDC channel: the tune table and a task that plays it, waiting out each note on its request queue so a new tune preempts mid-note |
 | `button.c` | BOOT button: click → next page, 1.5 s hold → AP toggle |
 | `encoder.c` | EC11 knob: PCNT quadrature behind a 10 ms poll, the button on `iot_button`; publishes raw detents and press events through `encoder_take()`, no interaction scheme of its own. Its header is esp-free so the GUI simulator can drive screens with it |
-| `sensors/sensors.c` | one task polling every sensor at its own period through a shared hot-plug state machine; owns the snapshots and the cross-sensor wiring (BMP581 pressure → SCD40 compensation) |
+| `sensors/sensors.c` | one task polling every sensor at its own period through a shared hot-plug state machine; owns the snapshots and the cross-sensor wiring (BMP581 pressure → SCD40 compensation, INA260 → battery gauge) |
 | `sensors/i2c_bus.c` | the I2C master bus and the recursive lock arbitrating it |
 | `sensors/i2c_dev.c` | shared register access: attach, probe, raw transfers, u8/u16 reads and writes |
 | `sensors/scd40.c` | Sensirion command protocol with CRC-8, phased start, pressure compensation, FRC, dew point |
 | `sensors/tmp117.c` | device-ID check, config, temperature register |
 | `sensors/bmp581.c` | chip-ID check, soft reset out of deep standby, DSP/IIR + OSR/ODR setup, 6-byte burst read |
 | `sensors/ina260.c` | manufacturer/die ID check, averaging config, conversion-ready gated read |
+| `sensors/battery.c` | the gauge over the INA260: fed every result by the poll task, it classifies the mode, integrates the count, holds it at full, keeps it in NVS, and estimates % from the voltage and the time left. esp-free header, so the simulator can build a model |
 | `pir.c` | the PIR line: a polling task, the published flag, the bare pin for diagnostics, and a log line on every change |
 | `sensors/veml7700.c` | command registers, auto-ranging table with its settle deadline, lux conversion with the >1000 lx correction, white/ALS ratio |
 | `sysinfo.c` | the station's own health: a boot-time snapshot of what cannot change plus live counters, the SoC temperature sensor, reset reason. CPU load is measured in one 1 s window shared by all callers; per-task CPU share logging every 30 s is available behind `CPU_LOG_ENABLED` (off by default) |
@@ -495,7 +523,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `gui/views/ui_state.c` | what the UI remembers about itself and the whole encoder scheme: the click switches the panel off, a turn back walks the knob's fields, a turn forward cycles the value of the one in focus. The weather location is the first of those fields, the chart's quantity and window the next two and the panel brightness the last (its ring being the 16 levels then auto, which follows the light sensor), with an empty focus ahead of them that the state boots on, which is why the selection lives here and not under the screen. They are `ui_settings_t`, exactly what is kept in NVS: the GUI task reads the struct in at boot and writes it back once a turn has settled. The location is held as an index into the store, whose count the GUI task feeds in, so the state machine stays free of esp headers |
 | `gui/gui_loop.c` | the panel as the rest of the firmware sees it: owns the single 8 KB canvas, brings up the transport, draws a frame, and applies what the knob moved — the panel settings and the active location — once the turn has settled. The only firmware-only file in `gui/` |
 | `gui/panel_hours.c` | the panel's own wear meter: lit seconds and brightness-weighted seconds, fed one frame at a time by the GUI task, packed into a single `u64` in the NVS namespace `panel` so a power cut cannot split them |
-| `gui/views/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; live so far are the status bar (weekday, local time of the weather location, Wi-Fi bars, sweeping while an association attempt is on the air and replaced by an inverted `AP` badge while the SoftAP is up, a dot left of them for the WireGuard tunnel — lit while the handshake holds, blinking at 1 Hz while it is being made, absent while the tunnel is not trying at all (no Wi-Fi or no synced clock) and in a build without keys, location name, age of the fetch) the outdoor block (a 16x16 icon for the WMO code — sun, moon after sunset, cloud, drizzle, rain, snow, thunderstorm, fog, or a mark for an unknown code; temperature; conditions), the rows under it (feels-like, sea-level pressure, humidity, wind with gusts, UV index, cloud cover), the 24-hour rain strip (one column an hour from the current one, grouped by a wider gap at midnight, 06:00, noon and 18:00 local; a wet hour a 3 px column, its brightness rising from dim2 to full with the precipitation probability, a dry one and an hour without a forecast a dim dot on the middle row), the five-day forecast (weekday letter, dim and a shade brighter at the weekend; min/max with a striped bar over the whole forecast's range; precipitation probability in tens, its brightness rising with its value; mean cloud cover as a one-pixel-wide column whose height (1, 3 or 5 px) and brightness (1..15) both rise with the clear sky, so a sunny day is a tall bright column) and the indoor rows (temperature, sea-level pressure, humidity, CO2, illuminance, dew point). A value outside its comfort band blinks, its label and plate holding their place — 1 Hz one zone out, 2 Hz two or more; the bands themselves are `alert_rules.c` and the severity comes ready-made in the model. Illuminance is the one value shown at less than its stored resolution: tenths below 1 lx, whole lux to 1000, thousands above. The battery is drawn empty — the INA260 reading is not wired to it yet. Below them a chart of one history quantity, 60 columns, with the ends of its scale and the window it covers labelled under it. The scale is the series' own min..max but never narrower than a per-quantity minimum set at the sensors' own noise (0.2 °C, 1 %RH, 0.3 hPa, 50 ppm, one decade of lux), so a flat hour reads as flat; illuminance is placed by decade, the rest linearly. Neighbouring points are joined by a riser and the corner column at each end of a flat run is moved one row toward the level it heads for, so a sensor's own quantisation draws as a slope rather than a staircase. Which quantity and which window are the knob's two fields, held in `ui_state_t` and handed both to `ui_model_refresh()`, so it knows what to sample, and to `chart_draw()`; the windows themselves are the `CHART_RANGES` table in `chart.c` — live (1 min), 1h, 24h, each 60 columns off the tier whose slots divide into it. Below the chart the Zambretti block, and under it the sun bar: a checkered body for the whole day with the daylight stretch a shade brighter, a tick every six hours, a pointer over the current hour, sunrise and sunset under its ends, and between them the wait for the next crossing swapping every 5 s with the sun's elevation. All of it from `sun.c` by way of the model, no forecast involved; a polar day fills the bar and a polar night leaves it empty |
+| `gui/views/screen_now.c` | the main screen — one function of the model, redrawn whole. Being built up element by element; live so far are the status bar (weekday, local time of the weather location, Wi-Fi bars, sweeping while an association attempt is on the air and replaced by an inverted `AP` badge while the SoftAP is up, three dots down the right edge beside them for the WireGuard tunnel — lit while the handshake holds, blinking at 1 Hz while it is being made, absent while the tunnel is not trying at all (no Wi-Fi or no synced clock) and in a build without keys, location name, age of the fetch) the outdoor block (a 16x16 icon for the WMO code — sun, moon after sunset, cloud, drizzle, rain, snow, thunderstorm, fog, or a mark for an unknown code; temperature; conditions), the rows under it (feels-like, sea-level pressure, humidity, wind with gusts, UV index, cloud cover), the 24-hour rain strip (one column an hour from the current one, grouped by a wider gap at midnight, 06:00, noon and 18:00 local; a wet hour a 3 px column, its brightness rising from dim2 to full with the precipitation probability, a dry one and an hour without a forecast a dim dot on the middle row), the five-day forecast (weekday letter, dim and a shade brighter at the weekend; min/max with a striped bar over the whole forecast's range; precipitation probability in tens, its brightness rising with its value; mean cloud cover as a one-pixel-wide column whose height (1, 3 or 5 px) and brightness (1..15) both rise with the clear sky, so a sunny day is a tall bright column) and the indoor rows (temperature, sea-level pressure, humidity, CO2, illuminance, dew point). A value outside its comfort band blinks, its label and plate holding their place — 1 Hz one zone out, 2 Hz two or more; the bands themselves are `alert_rules.c` and the severity comes ready-made in the model. Illuminance is the one value shown at less than its stored resolution: tenths below 1 lx, whole lux to 1000, thousands above. The status bar's battery, left of the Wi-Fi bars, is filled to the gauge's count; empty without the INA260. The rest of the gauge is on two lines above the debug strip. Below them a chart of one history quantity, 60 columns, with the ends of its scale and the window it covers labelled under it. The scale is the series' own min..max but never narrower than a per-quantity minimum set at the sensors' own noise (0.2 °C, 1 %RH, 0.3 hPa, 50 ppm, one decade of lux), so a flat hour reads as flat; illuminance is placed by decade, the rest linearly. Neighbouring points are joined by a riser and the corner column at each end of a flat run is moved one row toward the level it heads for, so a sensor's own quantisation draws as a slope rather than a staircase. Which quantity and which window are the knob's two fields, held in `ui_state_t` and handed both to `ui_model_refresh()`, so it knows what to sample, and to `chart_draw()`; the windows themselves are the `CHART_RANGES` table in `chart.c` — live (1 min), 1h, 24h, each 60 columns off the tier whose slots divide into it. Below the chart the Zambretti block, and under it the sun bar: a checkered body for the whole day with the daylight stretch a shade brighter, a tick every six hours, a pointer over the current hour, sunrise and sunset under its ends, and between them the wait for the next crossing swapping every 5 s with the sun's elevation. All of it from `sun.c` by way of the model, no forecast involved; a polar day fills the bar and a polar night leaves it empty |
 | `gui/views/screen_ota.c` | the update screen: title, progress bar with the percentage inside it — drawn twice and split at the edge of the fill, so a digit the fill runs into inverts mid-glyph — and the byte counts read from `ota.c`. Drawn by the GUI task instead of everything else while `ota_is_active()` |
 | `timesync.c` | SNTP client; `timesync_is_synced()` and `timesync_format()` |
 | `sensors/climate.c` | the room-level view over the devices, plus the reduction to sea level, the dew-point spread (TMP117 temperature less the SCD40's dew point — cross-device, so neither driver owns it) and the site-altitude setting. Its header carries the reading resolutions |
@@ -515,7 +543,7 @@ card belongs in that device's module, not in the caller — dew point in
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (gzipped) |
-| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap` / `wg` (`configured`, `up`, `ip`, `endpoint`), `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`; INA260 `voltage` V, `current` mA (+ = charge), `power` mW; and `pir` — `raw`, the bare line, and `presence`, the held flag), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `phase` `day`/`golden`/`civil`/`nautical`/`astro`/`night`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system` (uptime, build, heap, NVS, plus `panel` — `on_s` / `dose_s`, the OLED's lit and brightness-weighted seconds), `settings` (generated from the settings table: `led_brightness`, `buzzer_volume`, `display_on`, `display_brightness`, `display_auto_brightness`, `altitude`) |
+| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap` / `wg` (`configured`, `up`, `ip`, `endpoint`), `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`; and `pir` — `raw`, the bare line, and `presence`, the held flag), `battery` (`ok`, `state` `charging`/`discharging`/`full`/`idle`/`unknown`, `voltage` V, `current` mA (+ = charge), `power` mW, `pct_v` — `null` without the INA260 — and `mah`, `pct`, the count, always a number; `eta_s`, seconds to full on charge or to empty on discharge, else `null`), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `phase` `day`/`golden`/`civil`/`nautical`/`astro`/`night`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system` (uptime, build, heap, NVS, plus `panel` — `on_s` / `dose_s`, the OLED's lit and brightness-weighted seconds), `settings` (generated from the settings table: `led_brightness`, `buzzer_volume`, `display_on`, `display_brightness`, `display_auto_brightness`, `altitude`) |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`); `{period, co2, temp, rh, press, lux, motion, presence}`, each series gated on its own quantity so `null` is a gap in that series alone. `press` comes out reduced to sea level; `motion` is the share of the slot the PIR line spent high, 0…100, and `presence` the held occupancy flag as 0/1 |
 | `/api/history/reset` | POST | wipe all tiers, RAM rings and flash snapshots |
 | `/api/scan` | GET | Wi-Fi scan, `[{ssid, bssid, ch, rssi, auth}]`, one entry per BSSID |
@@ -526,6 +554,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `/api/connect` | POST | leave AP mode / restart the STA connection cycle |
 | `/api/settings` | POST | any subset of the keys `/api/status` reports under `settings`, driven by the same table: `led_brightness` 1–255, `buzzer_volume` 1–50, `display_on` bool, `display_brightness` 0–15, `display_auto_brightness` bool, `altitude` −500…9000, `wind_unit` `kmh`/`ms`/`mph`/`kn`, `chart_quantity` `temp`/`press`/`rh`/`co2`/`lux`, `chart_range` `live`/`1h`/`24h`. Out of range is clamped; an unknown key, a wrong type or an unknown word is a 400 naming it |
 | `/api/scd40/calibrate` | POST | forced recalibration; `{"ppm": 400–2000}`, returns the applied correction |
+| `/api/battery/reset` | POST | sets the battery count: empty body → 2000 mAh, `{"mah": 0–2000}` → that |
 | `/api/ota` | POST | firmware update; raw binary body, `X-OTA-Key` header; reboots on success |
 
 ## Build & flash

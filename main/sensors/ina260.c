@@ -21,17 +21,17 @@
 /* Config fields: reserved bits 14:12 (reset value 110), AVG 11:9, VBUSCT 8:6,
  * ISHCT 5:3, MODE 2:0.
  *
- * 128 averages of a 588 us current + 140 us voltage pair: a result every
- * ~93 ms (datasheet max ~102), with the current sampled 81 % of the time —
- * the battery voltage barely moves, the current follows the radio's bursts. */
+ * 16 averages of a 4.156 ms current + 140 us voltage pair: a result every
+ * ~69 ms (datasheet max ~76), with the current integrated 96.7 % of the time,
+ * which is what the coulomb count needs; the voltage barely moves. */
 #define INA260_RESERVED       (0x6 << 12)
-#define INA260_AVG_128        (0x4 << 9)
+#define INA260_AVG_16         (0x2 << 9)
 #define INA260_VBUSCT_140US   (0x0 << 6)
-#define INA260_ISHCT_588US    (0x3 << 3)
+#define INA260_ISHCT_4156US   (0x6 << 3)
 #define INA260_MODE_CONT_BOTH 0x7
 #define INA260_CONFIG                                                  \
-    (INA260_RESERVED | INA260_AVG_128 | INA260_VBUSCT_140US |          \
-     INA260_ISHCT_588US | INA260_MODE_CONT_BOTH)
+    (INA260_RESERVED | INA260_AVG_16 | INA260_VBUSCT_140US |           \
+     INA260_ISHCT_4156US | INA260_MODE_CONT_BOTH)
 
 /* Conversion ready; reading the mask register clears it. */
 #define INA260_MASK_CVRF 0x0008

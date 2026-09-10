@@ -15,6 +15,7 @@
 #include "lwip/sockets.h"
 #include "cJSON.h"
 #include "mdns.h"
+#include "battery.h"
 #include "climate.h"
 #include "settings.h"
 #include "zambretti.h"
@@ -271,8 +272,14 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     veml7700_data_t veml = { .gain = "" };
     bool veml_ok = sensors_veml7700_get(&veml);
 
-    ina260_data_t ina = {0};
-    bool ina_ok = sensors_ina260_get(&ina);
+    battery_t bat;
+    battery_get(&bat);
+    char bat_v[16], bat_i[16], bat_p[16], bat_pv[8], bat_eta[16];
+    json_num(bat_v, sizeof(bat_v), bat.ok, "%.3f", bat.voltage_v);
+    json_num(bat_i, sizeof(bat_i), bat.ok, "%.2f", bat.current_ma);
+    json_num(bat_p, sizeof(bat_p), bat.ok, "%.0f", bat.power_mw);
+    json_num(bat_pv, sizeof(bat_pv), bat.ok, "%.0f", bat.pct_v);
+    json_num(bat_eta, sizeof(bat_eta), bat.eta_s >= 0, "%.0f", bat.eta_s);
 
     weather_api_data_t weather;
     bool weather_ok = weather_api_get(&weather);
@@ -421,9 +428,10 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"veml7700\":{\"ok\":%s,"
         "\"lux\":%.1f,\"white_ratio\":%.2f,"
         "\"gain\":\"%s\",\"it\":%u},"
-        "\"ina260\":{\"ok\":%s,\"voltage\":%.3f,\"current\":%.2f,"
-        "\"power\":%.0f},"
         "\"pir\":{\"raw\":%s,\"presence\":%s}},"
+        "\"battery\":{\"ok\":%s,\"state\":\"%s\",\"voltage\":%s,"
+        "\"current\":%s,\"power\":%s,\"mah\":%.3f,\"pct\":%.2f,\"pct_v\":%s,"
+        "\"eta_s\":%s},"
         "\"weather\":{\"loc\":%s,\"current\":%s},"
         "\"system\":{"
         "\"uptime\":%lld,\"time\":\"%s\",\"time_synced\":%s,"
@@ -447,8 +455,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         veml_ok ? "true" : "false",
         veml.lux, veml.white_ratio,
         veml.gain, veml.it_ms,
-        ina_ok ? "true" : "false", ina.voltage_v, ina.current_ma, ina.power_mw,
         pir_raw() ? "true" : "false", pir_present() ? "true" : "false",
+        bat.ok ? "true" : "false", battery_state_str(bat.state),
+        bat_v, bat_i, bat_p, bat.mah, bat.pct, bat_pv, bat_eta,
         wx_loc, wx_cur,
         run.uptime_s,
         time_str,
@@ -886,6 +895,30 @@ static esp_err_t scd40_calibrate_post_handler(httpd_req_t *req)
     return httpd_resp_sendstr(req, resp);
 }
 
+/* Empty body: the cell is full. {"mah": N} sets any level in 0..capacity. */
+static esp_err_t battery_reset_post_handler(httpd_req_t *req)
+{
+    float mah = BATTERY_CAPACITY_MAH;
+    if (req->content_len > 0) {
+        cJSON *root = read_json_body(req);
+        if (!root) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad json");
+        }
+        const cJSON *v = cJSON_GetObjectItem(root, "mah");
+        bool ok = cJSON_IsNumber(v) && v->valuedouble >= 0 &&
+                  v->valuedouble <= BATTERY_CAPACITY_MAH;
+        mah = ok ? (float)v->valuedouble : 0;
+        cJSON_Delete(root);
+        if (!ok) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad mah");
+        }
+    }
+    battery_set_mah(mah);
+    char resp[48];
+    snprintf(resp, sizeof(resp), "{\"ok\":true,\"mah\":%.1f}", mah);
+    return httpd_resp_sendstr(req, resp);
+}
+
 static esp_err_t connect_post_handler(httpd_req_t *req)
 {
     /* Reply goes out before the mode switch, or the client never gets it. */
@@ -917,6 +950,7 @@ static const struct {
     { "/api/connect",          HTTP_POST,   connect_post_handler },
     { "/api/settings",         HTTP_POST,   settings_post_handler },
     { "/api/scd40/calibrate",  HTTP_POST,   scd40_calibrate_post_handler },
+    { "/api/battery/reset",    HTTP_POST,   battery_reset_post_handler },
     { "/api/ota",              HTTP_POST,   ota_post_handler },
 };
 

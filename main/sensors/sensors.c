@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+#include "battery.h"
 #include "buzzer.h"
 #include "climate.h"
 #include "i2c_bus.h"
@@ -25,13 +26,13 @@
 /* Each sensor is read at the rate it produces new results. The VEML7700 gates
  * itself on the integration time below this cap; the SCD40's 5 s cycle is fixed
  * in the part, and 1 Hz is how its phase is found again after a restart. The
- * INA260 is polled ahead of its ~93 ms result, so its ready flag catches every
+ * INA260 is polled ahead of its ~69 ms result, so its ready flag catches every
  * one within a tick and none is overwritten unread. */
 #define SCD40_PERIOD_MS    1000
 #define TMP117_PERIOD_MS   250
 #define BMP581_PERIOD_MS   250
 #define VEML7700_PERIOD_MS 130
-#define INA260_PERIOD_MS   80
+#define INA260_PERIOD_MS   60
 
 /* The SCD40 needs ambient pressure it cannot measure itself, so the BMP581's
  * reading is forwarded; the fallback is the ISA pressure at the configured site
@@ -85,6 +86,7 @@ static esp_err_t ina260_read_any(sensor_reading_t *r) { return ina260_read(&r->i
 
 static void scd40_started(void);
 static void bmp581_published(const sensor_reading_t *r);
+static void ina260_published(const sensor_reading_t *r);
 
 /* Written by the poll task, read by httpd, the display, the LED and alerts. */
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -106,7 +108,8 @@ static sensor_t s_sensors[SENSOR_COUNT] = {
     [SENSOR_VEML7700] = { .name = "VEML7700", .period_ms = VEML7700_PERIOD_MS,
                           .start = veml7700_start, .read = veml7700_read_any },
     [SENSOR_INA260] = { .name = "INA260", .period_ms = INA260_PERIOD_MS,
-                        .start = ina260_start, .read = ina260_read_any },
+                        .start = ina260_start, .read = ina260_read_any,
+                        .on_reading = ina260_published },
 };
 
 static bool sensor_get(sensor_t *s, sensor_reading_t *out)
@@ -168,6 +171,11 @@ static void bmp581_published(const sensor_reading_t *r)
 {
     (void)r; /* scd40_sync_pressure() reads the published snapshot */
     scd40_sync_pressure();
+}
+
+static void ina260_published(const sensor_reading_t *r)
+{
+    battery_feed(r->ina260.voltage_v, r->ina260.current_ma);
 }
 
 /* ---------------- polling ---------------- */

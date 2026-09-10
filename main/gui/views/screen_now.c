@@ -86,7 +86,7 @@ static void bars(gfx_canvas_t *c, int right, int baseline, unsigned mask)
  * either side of the glyphs, which gfx_text_bg does not add. */
 #define AP_PAD 1
 
-static int ap_badge(gfx_canvas_t *c, int right, int baseline)
+static void ap_badge(gfx_canvas_t *c, int right, int baseline)
 {
     gfx_text_style_t st = UI_TEXT_R;
     st.level = GFX_OFF;
@@ -99,27 +99,22 @@ static int ap_badge(gfx_canvas_t *c, int right, int baseline)
                               (int16_t)w, (int16_t)(fm.ascent + 1) },
              GFX_NONE, GFX_FULL, GFX_SOLID);
     gfx_text(c, right - AP_PAD, baseline, &st, "AP");
-    return w;
 }
 
-/* The WireGuard tunnel as one dot beside the link indicator: lit while the
- * handshake holds, blinking at the alerts' 1 Hz while it is being made. Anchored
- * like bars(), and drawn in the SoftAP mode too -- the tunnel's own state does
- * not depend on which way the station is up. */
-#define WG_DOT      3      /* px; a 3x3 square with its corners cut, so a diamond */
+/* The WireGuard tunnel as three dots down the screen's last column, as tall as
+ * the bars: lit while the handshake holds, blinking at the alerts' 1 Hz while it
+ * is being made. Drawn in the SoftAP mode too -- the tunnel's own state does not
+ * depend on which way the station is up. */
+#define WG_W        2      /* px the link indicator is moved in: the dots and a gap */
 #define WG_BLINK_MS 1000   /* half of it dark */
 
-static void wg_dot(gfx_canvas_t *c, int right, int baseline, bool up, uint32_t anim_ms)
+static void wg_dots(gfx_canvas_t *c, int baseline, bool up, uint32_t anim_ms)
 {
     if (!up && anim_ms % WG_BLINK_MS >= WG_BLINK_MS / 2) { return; }
 
-    gfx_font_metrics_t fm;
-    gfx_font_metrics(UI_TEXT.font, &fm);
-    int x = right - WG_DOT;
-    int y = baseline - fm.cap / 2 - WG_DOT / 2 - 1;
-
-    gfx_hline(c, x, y + 1, WG_DOT, GFX_FULL, GFX_SOLID, 0);
-    gfx_vline(c, x + 1, y, WG_DOT, GFX_FULL, GFX_SOLID, 0);
+    for (int y = baseline - SIG_H; y < baseline; y += 2) {
+        gfx_px(c, UI_RX - 1, y, GFX_FULL);
+    }
 }
 
 /* Three dim dots with one lit, walking to the end and back -- the same gesture
@@ -187,9 +182,8 @@ static int scroll_off(uint32_t anim_ms, int over)
 
 /* Battery: a dim shell filled to `pct` at full brightness. Same anchor as
  * bars(), so the two line up on one row. */
-/*
 #define BATT_W 7
-#define BATT_H 4
+#define BATT_H 5
 
 static void battery(gfx_canvas_t *c, int right, int baseline, int pct)
 {
@@ -202,7 +196,7 @@ static void battery(gfx_canvas_t *c, int right, int baseline, int pct)
 
     // The charge is the outline itself lit over the first `fill` columns; the
     // inside stays empty, so at this size the level reads off the length of a
-    // wall rather than an area two pixels tall. Rounding down keeps the nub --
+    // wall rather than an area three pixels tall. Rounding down keeps the nub --
     // the last column -- for a true 100%, and any charge at all is worth one.
     int fill = pct == 100 ? BATT_W : pct * BATT_W / 100;
     if (fill == 0 && pct > 0) {
@@ -226,7 +220,6 @@ static void battery(gfx_canvas_t *c, int right, int baseline, int pct)
         gfx_vline(c, x, y, BATT_H, GFX_FULL, GFX_SOLID, 0);
     }
 }
-*/
 
 /* Local time of the weather location: the clock runs in UTC and the offset is
  * applied by hand, so gmtime_r() over the shifted stamp gives local fields.
@@ -933,19 +926,21 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
         }
         gfx_text(c, x + hw + cw, baseline, &UI_TEXT, mm);
     }
-    int link_w = SIG_W;
+    // Placed against the bars; the wider AP badge is drawn after it and wins
+    // any column they share.
+    battery(c, UI_RX - WG_W - SIG_W - 3, baseline,
+            m->batt.ok ? (int)(m->batt.pct + 0.5f) : 0);
     if (m->ap) {
-        link_w = ap_badge(c, UI_RX, baseline);
+        ap_badge(c, UI_RX - WG_W, baseline);
     } else {
-        bars(c, UI_RX, baseline, sig_mask(m->link, m->rssi, m->anim_ms));
+        bars(c, UI_RX - WG_W, baseline, sig_mask(m->link, m->rssi, m->anim_ms));
     }
     /* Nothing at all while the tunnel is not even trying: without Wi-Fi or a
      * synced clock its handshake cannot happen, and a blink would read as an
      * attempt. */
     if (m->wg_on && (m->wg_up || m->wg_active)) {
-        wg_dot(c, UI_RX - link_w - 3, baseline, m->wg_up, m->anim_ms);
+        wg_dots(c, baseline, m->wg_up, m->anim_ms);
     }
-    // battery(c, UI_RX - SIG_W - 3, baseline, 0);
 
     char age[8];
     age_str(age, sizeof(age), m->out.age_s);
@@ -1117,14 +1112,25 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
                  gfx_shift(c), s->set.auto_bright ? "A " : "- ", s->bright_now,
                  m->pir_raw ? 'P' : '-');
 
-    // The battery on the line above: 3x5im is 5 rows, one of gap.
+    // The battery on the two lines above: 3x5im is 5 rows, one of gap. The upper
+    // one is the count, the mode letter and the voltage-only estimate.
+    static const char BATT_MODE[] = {
+        [BATTERY_UNKNOWN] = '-',     [BATTERY_DISCHARGING] = 'D',
+        [BATTERY_CHARGING] = 'C',    [BATTERY_FULL] = 'F',
+        [BATTERY_IDLE] = 'I',
+    };
+    const battery_t *b = &m->batt;
     gfx_text_style_t batt = UI_TINY_R;
     batt.level = GFX_DIM;
     const int batt_base = GFX_H - 1 - GFX_SHIFT_MAX - 6;
-    if (m->batt_ok) {
-        gfx_textf(c, UI_RX, batt_base, &batt, "%.3fV %.3fA", m->batt_v, m->batt_a);
+    if (b->ok) {
+        gfx_textf(c, UI_RX, batt_base, &batt, "%.3fV %.3fA",
+                  b->voltage_v, b->current_ma / 1000.0f);
+        gfx_textf(c, UI_RX, batt_base - 6, &batt, "%dmAh %c %d%%",
+                  (int)b->mah, BATT_MODE[b->state], b->pct_v);
     } else {
         gfx_text(c, UI_RX, batt_base, &batt, "-.---V -.---A");
+        gfx_textf(c, UI_RX, batt_base - 6, &batt, "%dmAh - --%%", (int)b->mah);
     }
 
     // Last, so the animal walks over the debug line rather than under it.

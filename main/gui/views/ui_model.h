@@ -5,6 +5,7 @@
 #include <time.h>
 
 #include "alert_rules.h"
+#include "battery.h"
 #include "chart.h"   /* the window the series is sampled over */
 #include "climate.h"
 #include "history.h"
@@ -85,10 +86,8 @@ typedef struct {
      * switched by, which carries pir.c's hold on top. */
     bool pir_raw;
 
-    /* The INA260 in the battery lead, for the debug strip; + is charge. */
-    bool  batt_ok;
-    float batt_v;
-    float batt_a;
+    /* For the debug strip. */
+    battery_t batt;
 
     /* Monotonic since boot, for whatever moves on its own. Kept in the model so
      * a frame animates off one stamp rather than each widget reading a clock. */
