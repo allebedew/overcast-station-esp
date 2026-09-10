@@ -18,18 +18,17 @@
 
 static const char *TAG = "pir";
 
-static volatile bool s_present;
+/* Boot counts as a movement: the panel comes up lit, before pir_init() too, and
+ * goes dark after HOLD_MS if nothing moves. The pin itself is no guide here —
+ * someone sitting still reads low, and the module is unsettled while it warms. */
+static volatile bool s_present = true;
+static volatile bool s_moved;
 
 static void pir_task(void *arg)
 {
-    /* Whatever the pin reads at startup is the state we start from, so a room
-     * that is already occupied does not announce itself as an arrival. */
-    s_present = gpio_get_level(PIR_GPIO) != 0;
     int64_t since_us = esp_timer_get_time(); /* start of the published state */
-    /* Last time the line was high — backdated past the hold when it is not, so
-     * booting into an empty room does not announce an arrival. */
-    int64_t motion_us = s_present ? since_us : since_us - HOLD_MS * 1000LL;
-    ESP_LOGI(TAG, "starting %s", s_present ? "occupied" : "clear");
+    int64_t motion_us = since_us;            /* last time the line was high */
+    ESP_LOGI(TAG, "starting occupied (assumed)");
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(POLL_MS));
@@ -37,6 +36,7 @@ static void pir_task(void *arg)
         int64_t t = esp_timer_get_time();
         if (gpio_get_level(PIR_GPIO)) {
             motion_us = t;
+            s_moved = true;
         }
 
         bool now = (t - motion_us) / 1000 <= HOLD_MS;
@@ -57,6 +57,11 @@ static void pir_task(void *arg)
 bool pir_present(void)
 {
     return s_present;
+}
+
+bool pir_moved(void)
+{
+    return s_moved;
 }
 
 bool pir_raw(void)

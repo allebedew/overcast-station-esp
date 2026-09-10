@@ -11,8 +11,12 @@
 /* Brings up the pin and starts the watcher task. */
 void pir_init(void);
 
-/* Current state. False before pir_init(), which reads as an empty room. */
+/* Current state. True from boot until HOLD_MS passes without movement. */
 bool pir_present(void);
+
+/* Whether the line has gone high since boot — tells the assumed presence at
+ * startup from one the sensor actually saw. */
+bool pir_moved(void);
 
 /* The pin as it reads right now, without the hold above it: diagnostics only,
  * to tell a dead sensor from a quiet room. */

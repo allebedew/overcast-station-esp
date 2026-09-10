@@ -155,7 +155,9 @@ strip.
   pin pulled down, so an unplugged sensor reads as an empty room. The module
   holds the line high for about 3 s after the last movement, which bridges a
   step across the room but not somebody sitting still, so `HOLD_MS` (5 min)
-  holds it further and is what decides when the room counts as empty. Both
+  holds it further and is what decides when the room counts as empty. Boot
+  counts as a movement: the room starts out occupied and the panel lit, and
+  clears after `HOLD_MS` if nothing moves. Both
   edges are dated by the movement, not by the hold expiring. Every change is a
   line under the tag `pir` with how long the previous state lasted; the module
   itself is silent. It lights the panel, fills the
@@ -399,7 +401,8 @@ strip.
   held presence flag, reported with how long the previous state lasted. The
   hold that decides when the room is empty is the sensor's own (`HOLD_MS`), so
   the edges are taken as they come; an arrival is announced only after an hour
-  of absence, since a trip to the kitchen is not news. Token and chat id are
+  of absence, since a trip to the kitchen is not news. Boot is never an
+  arrival, and the first departure is dropped if nothing has moved since boot. Token and chat id are
   compile-time constants in `telegram.c`; left empty, the module disables
   itself. The gust message quotes both the reading and the threshold in the
   configured wind unit (tenths for m/s and knots), the rest in the unit the

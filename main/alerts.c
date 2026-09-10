@@ -278,10 +278,11 @@ static void format_span(char *buf, size_t n, int64_t ms)
 }
 
 /* Arrivals and departures off the PIR's held flag — the hold that decides when
- * a room counts as empty lives in pir.c, so the edges are taken as they come. */
+ * a room counts as empty lives in pir.c, so the edges are taken as they come.
+ * The flag starts out set, so boot is never an arrival. */
 static void check_presence(void)
 {
-    static bool armed, occupied, since_boot = true;
+    static bool armed, occupied;
     static int64_t since_ms; /* start of the current state */
 
     bool present = pir_present();
@@ -299,18 +300,16 @@ static void check_presence(void)
     char span[24];
     format_span(span, sizeof(span), now - since_ms);
     if (occupied) {
-        telegram_notify("🚪 Ушёл, был здесь %s", span);
-    } else if (since_boot) {
-        /* How long the room had been empty before the station came up is not
-         * known, so the first arrival is announced without the threshold. */
-        telegram_notify("👋 Пришёл");
+        /* Nothing moved since boot: the presence was only assumed. */
+        if (pir_moved()) {
+            telegram_notify("🚪 Ушёл, был здесь %s", span);
+        }
     } else if (now - since_ms >= ARRIVE_NOTIFY_MIN_ABSENCE_MS) {
         telegram_notify("👋 Пришёл, никого не было %s", span);
     }
 
     occupied = present;
     since_ms = now;
-    since_boot = false;
 }
 
 /* Queued before Wi-Fi is up -- telegram.c holds it until the link is there.
