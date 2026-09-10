@@ -29,6 +29,21 @@ To bring the display back: the sources go to `main/display16x2/`, then
 `backlight_scale` in `web/webserver.c` and `web/index.html`. NVS still holds its
 `bl_rgb` and `screen_page` keys — they were never cleared.
 
+## lightning
+
+The AMS AS3935 lightning sensor on I2C (`0x03`) with its IRQ on GPIO0.
+`as3935.c` is worth keeping for three things: the antenna tuning
+(`DISP_LCO` counted by PCNT over a 40 ms gate per `TUN_CAP`), the start order
+(preset, sweep, RCO calibration, settings), and the loop that raises
+`NF_LEV`/`WDTH`/`SREJ` against the measured disturber rate and relaxes them again.
+
+To bring it back: `lightning/as3935.c` goes into `main/sensors/` and
+`main/CMakeLists.txt`, followed by the `SENSOR_AS3935` entry and
+`sensors_as3935_get()` in `sensors/sensors.c`/`.h`, the address label in
+`i2c_bus.c`, the liveness entry in `alerts.c`, `sensors.as3935` in
+`/api/status`, and the card with its `light*` strings in `web/index.html`.
+The `STORM` tune is still in `buzzer.c`.
+
 ## radar
 
 The HLK-LD2450 mmWave tracker on UART1 (GPIO10/11), removed when the PIR motion

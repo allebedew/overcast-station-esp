@@ -33,15 +33,10 @@ history.
   for the device behind the quantity and a button in the header marking the one
   the station's own panel plots — clicking it moves the panel, and the knob
   moves the button, both through `/api/settings`; the window switch is shared
-  the same way. Then the lightning and presence cards
-  closing the same grid: the lightning card
-  reads the strike count of the last 24 h with the last strike itself beside it
-  (how long ago, distance, energy), the registers the driver adapted in its
-  footer and the disturber rate as its badge, yellow from the 30/min the driver
-  itself tightens at; the presence card reads the share of the window the room
-  was occupied with the bare PIR line beside it, over a chart of motion
-  activity as a line and occupancy as columns, under a badge carrying the live
-  held state;
+  the same way. Then the presence card closing the same grid: it reads the
+  share of the window the room was occupied with the bare PIR line beside it,
+  over a chart of motion activity as a line and occupancy as columns, under a
+  badge carrying the live held state;
   an outside-weather card with a location chip row (a typed
   city name is geocoded in-browser, so that route needs internet on the
   client; a search hit fills the name and coordinate fields, which can also be
@@ -127,44 +122,9 @@ history.
     ALS and white channels are read, with the Vishay correction above 1000 lx.
     The API reports `lux`, the white/lux ratio as a light-source signature, and
     both raw counts.
-  - **AS3935** (`0x03`, jumpered; 0x01/0x02 in reserve) — lightning. The IRQ
-    pin is on **GPIO0** (not a strapping pin, and the 32 kHz crystal it doubles
-    as is unused): the handler only timestamps the edge, the register read that
-    clears it happens on the next 50 ms poll, which is late enough to honour
-    the datasheet's 2 ms and means a poll can no longer clear an interrupt it
-    never saw. The line is a level held high until that read, so an edge missed
-    while the handler was detached is still picked up. Two strikes inside one
-    period still collapse into one; without a pending interrupt the poll
-    touches no I2C at all. Start order matters: `PRESET_DEFAULT`, then the
-    antenna sweep, then the RCO calibration (the RCOs are trimmed against the
-    LCO), then the settings. The **antenna is tuned at every start**: `DISP_LCO`
-    puts the tank divided by 16 on the IRQ pin, PCNT counts it over a 40 ms
-    gate for each of the 16 `TUN_CAP` values, and the one closest to 31 250 Hz
-    wins — a warning if the best is still outside the datasheet's ±3.5 %. The
-    sweep runs one capacitance per poll and leaves the bus free between them
-    (≈0.7 s in total, nothing else stalls). Gain is **indoor** (`AFE_GB` 18),
-    `MIN_NUM_LIGH` 1 and `MASK_DIST` 0. The lower outdoor gain and a five-strike
-    minimum were both tried against the interference in this box and both made
-    it worse — at 14 the panel's pulses stopped saturating and arrived as
-    lightning rather than as disturbers, which also blinds the loop below. Three registers adapt, all of them back down again:
-    `NF_LEV` a step up on every noise-too-high report and back after 10 quiet
-    minutes; `WDTH` (2…6) and, once it has topped out, `SREJ` (2…6) a step per
-    minute while the measured disturber rate stays above 30/min, back a step
-    per 10 minutes below 5/min. Both cost real sensitivity, which is why they
-    follow a measured rate rather than a guess. The distance register never
-    expires, so an hour without a strike clears the part's statistics, and a
-    day without one drops the last strike itself — nothing carries yesterday's
-    storm. Logs a line per strike (distance, energy), the tuning result at
-    start and one line per minute with the disturber count and what it moved. A
-    detection makes no sound: with the sensor this far from working indoors, a
-    chirp would be a false alarm. In `/api/status` under `sensors.as3935`: `last`
-    (seconds ago, distance, energy — `null` when there has been none in 24 h),
-    `strikes_24h` counted in whole hours, `reject` (`nf`/`wdth`/`srej` and the
-    disturbers per minute driving them) and `tune` (`cap` and the measured
-    LCO). Distance goes out as one number the way the part reports it: `0` is
-    closer than the 5 km the scale starts at, `null` is past the 40 km it ends
-    at. It has a card on the web page; not on the panel or in the history yet,
-    and none of it is a setting yet.
+  - **AS3935** (lightning) — **removed**: out of the build and moved to
+    `archive/lightning/`, which says what bringing it back would take. GPIO0,
+    its IRQ line, is free.
 - **mmWave radar (HLK-LD2450)** — **removed**: unplugged, out of the build and
   moved to `archive/radar/`, which says what bringing it back would take. The
   PIR below owns its GPIO11 and the station's presence state.

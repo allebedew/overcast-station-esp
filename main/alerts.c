@@ -147,7 +147,6 @@ static bool tmp117_alive(void)   { tmp117_data_t d;   return sensors_tmp117_get(
 static bool scd40_alive(void)    { scd40_data_t d;    return sensors_scd40_get(&d); }
 static bool bmp581_alive(void)   { bmp581_data_t d;   return sensors_bmp581_get(&d); }
 static bool veml7700_alive(void) { veml7700_data_t d; return sensors_veml7700_get(&d); }
-static bool as3935_alive(void)   { as3935_data_t d;   return sensors_as3935_get(&d); }
 
 static const struct {
     const char *name;
@@ -155,7 +154,6 @@ static const struct {
 } DEVICES[] = {
     { "TMP117", tmp117_alive },     { "SCD40", scd40_alive },
     { "BMP581", bmp581_alive },     { "VEML7700", veml7700_alive },
-    { "AS3935", as3935_alive },
 };
 #define DEVICE_COUNT (sizeof(DEVICES) / sizeof(DEVICES[0]))
 
