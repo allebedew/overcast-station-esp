@@ -12,7 +12,7 @@ typedef struct {
     float temp_c;
 } tmp117_data_t;
 
-/* Probes the four addresses, verifies the device ID and starts continuous
+/* Probes the address, verifies the device ID and starts continuous
  * conversion. Safe to call again after a failure. */
 esp_err_t tmp117_start(void);
 

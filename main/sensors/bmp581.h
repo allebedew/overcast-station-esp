@@ -13,7 +13,7 @@ typedef struct {
     float temp_c;
 } bmp581_data_t;
 
-/* Probes both addresses, checks the chip ID, resets and starts normal mode
+/* Probes the address, checks the chip ID, resets and starts normal mode
  * with the pressure IIR filter on. Safe to call again after a failure. */
 esp_err_t bmp581_start(void);
 

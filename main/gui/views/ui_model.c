@@ -6,6 +6,7 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "pir.h"
+#include "sensors.h"
 #include "settings.h"
 #include "sun.h"
 #include "timesync.h"
@@ -60,6 +61,13 @@ void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
     refresh_alerts(out);
 
     out->pir_raw = pir_raw();
+
+    ina260_data_t batt;
+    out->batt_ok = sensors_ina260_get(&batt);
+    if (out->batt_ok) {
+        out->batt_v = batt.voltage_v;
+        out->batt_a = batt.current_ma / 1000.0f;
+    }
 
     weather_location_t loc;
     if (weather_store_get(loc_sel, &loc)) {

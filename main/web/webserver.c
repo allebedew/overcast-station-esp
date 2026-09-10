@@ -271,6 +271,9 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     veml7700_data_t veml = { .gain = "" };
     bool veml_ok = sensors_veml7700_get(&veml);
 
+    ina260_data_t ina = {0};
+    bool ina_ok = sensors_ina260_get(&ina);
+
     weather_api_data_t weather;
     bool weather_ok = weather_api_get(&weather);
 
@@ -418,6 +421,8 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         "\"veml7700\":{\"ok\":%s,"
         "\"lux\":%.1f,\"white_ratio\":%.2f,"
         "\"gain\":\"%s\",\"it\":%u},"
+        "\"ina260\":{\"ok\":%s,\"voltage\":%.3f,\"current\":%.2f,"
+        "\"power\":%.0f},"
         "\"pir\":{\"raw\":%s,\"presence\":%s}},"
         "\"weather\":{\"loc\":%s,\"current\":%s},"
         "\"system\":{"
@@ -442,6 +447,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         veml_ok ? "true" : "false",
         veml.lux, veml.white_ratio,
         veml.gain, veml.it_ms,
+        ina_ok ? "true" : "false", ina.voltage_v, ina.current_ma, ina.power_mw,
         pir_raw() ? "true" : "false", pir_present() ? "true" : "false",
         wx_loc, wx_cur,
         run.uptime_s,

@@ -24,11 +24,14 @@
 
 /* Each sensor is read at the rate it produces new results. The VEML7700 gates
  * itself on the integration time below this cap; the SCD40's 5 s cycle is fixed
- * in the part, and 1 Hz is how its phase is found again after a restart. */
+ * in the part, and 1 Hz is how its phase is found again after a restart. The
+ * INA260 is polled ahead of its ~93 ms result, so its ready flag catches every
+ * one within a tick and none is overwritten unread. */
 #define SCD40_PERIOD_MS    1000
 #define TMP117_PERIOD_MS   250
 #define BMP581_PERIOD_MS   250
 #define VEML7700_PERIOD_MS 130
+#define INA260_PERIOD_MS   80
 
 /* The SCD40 needs ambient pressure it cannot measure itself, so the BMP581's
  * reading is forwarded; the fallback is the ISA pressure at the configured site
@@ -47,6 +50,7 @@ typedef union {
     tmp117_data_t tmp117;
     bmp581_data_t bmp581;
     veml7700_data_t veml7700;
+    ina260_data_t ina260;
 } sensor_reading_t;
 
 typedef struct {
@@ -77,6 +81,7 @@ static esp_err_t scd40_read_any(sensor_reading_t *r) { return scd40_read(&r->scd
 static esp_err_t tmp117_read_any(sensor_reading_t *r) { return tmp117_read(&r->tmp117); }
 static esp_err_t bmp581_read_any(sensor_reading_t *r) { return bmp581_read(&r->bmp581); }
 static esp_err_t veml7700_read_any(sensor_reading_t *r) { return veml7700_read(&r->veml7700); }
+static esp_err_t ina260_read_any(sensor_reading_t *r) { return ina260_read(&r->ina260); }
 
 static void scd40_started(void);
 static void bmp581_published(const sensor_reading_t *r);
@@ -84,7 +89,10 @@ static void bmp581_published(const sensor_reading_t *r);
 /* Written by the poll task, read by httpd, the display, the LED and alerts. */
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 
-enum { SENSOR_SCD40, SENSOR_TMP117, SENSOR_BMP581, SENSOR_VEML7700, SENSOR_COUNT };
+enum {
+    SENSOR_SCD40, SENSOR_TMP117, SENSOR_BMP581, SENSOR_VEML7700, SENSOR_INA260,
+    SENSOR_COUNT
+};
 
 static sensor_t s_sensors[SENSOR_COUNT] = {
     [SENSOR_SCD40] = { .name = "SCD40", .period_ms = SCD40_PERIOD_MS,
@@ -97,6 +105,8 @@ static sensor_t s_sensors[SENSOR_COUNT] = {
                         .on_reading = bmp581_published },
     [SENSOR_VEML7700] = { .name = "VEML7700", .period_ms = VEML7700_PERIOD_MS,
                           .start = veml7700_start, .read = veml7700_read_any },
+    [SENSOR_INA260] = { .name = "INA260", .period_ms = INA260_PERIOD_MS,
+                        .start = ina260_start, .read = ina260_read_any },
 };
 
 static bool sensor_get(sensor_t *s, sensor_reading_t *out)
@@ -304,6 +314,16 @@ bool sensors_veml7700_get(veml7700_data_t *out)
     bool valid = sensor_get(&s_sensors[SENSOR_VEML7700], &r);
     if (valid) {
         *out = r.veml7700;
+    }
+    return valid;
+}
+
+bool sensors_ina260_get(ina260_data_t *out)
+{
+    sensor_reading_t r;
+    bool valid = sensor_get(&s_sensors[SENSOR_INA260], &r);
+    if (valid) {
+        *out = r.ina260;
     }
     return valid;
 }

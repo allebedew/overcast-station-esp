@@ -38,13 +38,12 @@ void i2c_bus_unlock(void)
 static const char *known_device(uint8_t addr)
 {
     switch (addr) {
-    case 0x62:       return " (SCD40)";
-    case 0x10:       return " (VEML7700)";
-    case 0x46: case 0x47:
-                     return " (BMP581)";
-    case 0x48: case 0x49: case 0x4A: case 0x4B:
-                     return " (TMP117)";
-    default:         return "";
+    case 0x10: return " (VEML7700)";
+    case 0x40: return " (INA260)";
+    case 0x47: return " (BMP581)";
+    case 0x48: return " (TMP117)";
+    case 0x62: return " (SCD40)";
+    default:   return "";
     }
 }
 

@@ -28,7 +28,7 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             "sensors/i2c_bus.c"
                             "sensors/i2c_dev.c" "sensors/scd40.c"
                             "sensors/tmp117.c" "sensors/bmp581.c"
-                            "sensors/veml7700.c"
+                            "sensors/veml7700.c" "sensors/ina260.c"
                        INCLUDE_DIRS "." "sensors" "gui" "gui/gfx" "gui/views"
                                     "web"
                        PRIV_REQUIRES u8g2

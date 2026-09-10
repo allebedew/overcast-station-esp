@@ -864,6 +864,7 @@ static void sun_bar(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
 #define ZOO_W        17            /* widest glyph, what has to clear the edge */
 #define ZOO_GLYPHS   99            /* the unbroken run from 0x20; there are holes past it */
 #define ZOO_CAT      0x28          /* U+1F408 in the font's own run, the one that opens the show */
+#define ZOO_ON       0             /* off for now: it walks over the battery line */
 
 static void zoo(gfx_canvas_t *c, uint32_t anim_ms, uint32_t seed)
 {
@@ -1116,6 +1117,18 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
                  gfx_shift(c), s->set.auto_bright ? "A " : "- ", s->bright_now,
                  m->pir_raw ? 'P' : '-');
 
+    // The battery on the line above: 3x5im is 5 rows, one of gap.
+    gfx_text_style_t batt = UI_TINY_R;
+    batt.level = GFX_DIM;
+    const int batt_base = GFX_H - 1 - GFX_SHIFT_MAX - 6;
+    if (m->batt_ok) {
+        gfx_textf(c, UI_RX, batt_base, &batt, "%.3fV %.3fA", m->batt_v, m->batt_a);
+    } else {
+        gfx_text(c, UI_RX, batt_base, &batt, "-.---V -.---A");
+    }
+
     // Last, so the animal walks over the debug line rather than under it.
-    zoo(c, m->anim_ms, m->boot_seed);
+    if (ZOO_ON) {
+        zoo(c, m->anim_ms, m->boot_seed);
+    }
 }

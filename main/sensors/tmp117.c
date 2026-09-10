@@ -5,11 +5,7 @@
 
 #include "i2c_dev.h"
 
-#define ARRAY_SIZE(a) ((int)(sizeof(a) / sizeof((a)[0])))
-
-/* ADD0 selects the address: GND / V+ / SDA / SCL. Breakouts differ, so all
- * four are probed. None collides with the other devices on this bus. */
-static const uint8_t TMP117_ADDRS[] = { 0x48, 0x49, 0x4A, 0x4B };
+#define TMP117_ADDR 0x48 /* ADD0 to GND; 0x49-0x4B with it on V+ / SDA / SCL */
 
 #define TMP117_REG_TEMP      0x00
 #define TMP117_REG_CONFIG    0x01
@@ -72,59 +68,51 @@ static void log_offset(void)
 
 esp_err_t tmp117_start(void)
 {
-    esp_err_t last = ESP_ERR_NOT_FOUND;
-
     s_step = "probe";
-
-    for (int i = 0; i < ARRAY_SIZE(TMP117_ADDRS); i++) {
-        uint8_t addr = TMP117_ADDRS[i];
-        if (!i2c_dev_present(addr)) {
-            continue;
-        }
-        esp_err_t err = i2c_dev_attach(&s_dev, addr);
+    if (!i2c_dev_present(TMP117_ADDR)) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (!s_dev) {
+        s_step = "attach";
+        esp_err_t err = i2c_dev_attach(&s_dev, TMP117_ADDR);
         if (err != ESP_OK) {
-            s_step = "attach";
-            ESP_LOGW(TAG, "0x%02X: setup failed at step \"%s\": %s", addr,
+            ESP_LOGW(TAG, "0x%02X: setup failed at step \"%s\": %s", TMP117_ADDR,
                      s_step, esp_err_to_name(err));
             return err;
         }
-
-        s_step = "device_id";
-        uint16_t id;
-        err = i2c_dev_read_u16be(s_dev, TMP117_REG_DEVICE_ID, &id);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "0x%02X ACKed the probe but the id read failed: %s",
-                     addr, esp_err_to_name(err));
-            last = err;
-            continue;
-        }
-        if ((id & TMP117_ID_MASK) != TMP117_ID) {
-            ESP_LOGW(TAG, "0x%02X answers with id 0x%04X, not a TMP117", addr, id);
-            s_step = "id_mismatch";
-            last = ESP_ERR_NOT_SUPPORTED;
-            continue;
-        }
-
-        s_step = "config";
-        err = i2c_dev_write_u16be(s_dev, TMP117_REG_CONFIG, TMP117_CONFIG_RESET);
-        if (err == ESP_OK) {
-            esp_rom_delay_us(TMP117_RESET_US);
-            err = i2c_dev_write_u16be(s_dev, TMP117_REG_CONFIG, TMP117_CONFIG);
-        }
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "0x%02X: setup failed at step \"%s\": %s", addr,
-                     s_step, esp_err_to_name(err));
-            last = err;
-            continue;
-        }
-
-        s_step = "";
-        ESP_LOGI(TAG, "TMP117 at 0x%02X, id 0x%03X rev %u", addr,
-                 id & TMP117_ID_MASK, id >> 12);
-        log_offset();
-        return ESP_OK;
     }
-    return last;
+
+    s_step = "device_id";
+    uint16_t id;
+    esp_err_t err = i2c_dev_read_u16be(s_dev, TMP117_REG_DEVICE_ID, &id);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "0x%02X ACKed the probe but the id read failed: %s",
+                 TMP117_ADDR, esp_err_to_name(err));
+        return err;
+    }
+    if ((id & TMP117_ID_MASK) != TMP117_ID) {
+        ESP_LOGW(TAG, "0x%02X answers with id 0x%04X, not a TMP117", TMP117_ADDR, id);
+        s_step = "id_mismatch";
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    s_step = "config";
+    err = i2c_dev_write_u16be(s_dev, TMP117_REG_CONFIG, TMP117_CONFIG_RESET);
+    if (err == ESP_OK) {
+        esp_rom_delay_us(TMP117_RESET_US);
+        err = i2c_dev_write_u16be(s_dev, TMP117_REG_CONFIG, TMP117_CONFIG);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "0x%02X: setup failed at step \"%s\": %s", TMP117_ADDR,
+                 s_step, esp_err_to_name(err));
+        return err;
+    }
+
+    s_step = "";
+    ESP_LOGI(TAG, "TMP117 at 0x%02X, id 0x%03X rev %u", TMP117_ADDR,
+             id & TMP117_ID_MASK, id >> 12);
+    log_offset();
+    return ESP_OK;
 }
 
 esp_err_t tmp117_read(tmp117_data_t *out)

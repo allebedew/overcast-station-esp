@@ -554,6 +554,10 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data, bool fetching,
     }
 
     m.now       = 1754200000;   // 2025-08-03 07:06 UTC
+
+    m.batt_ok = true;
+    m.batt_v  = 3.912f;
+    m.batt_a  = -0.045f;
     m.utc_off_s = 3 * 3600;
 
     m.climate = (climate_t){

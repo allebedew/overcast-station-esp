@@ -5,10 +5,7 @@
 
 #include "i2c_dev.h"
 
-#define ARRAY_SIZE(a) ((int)(sizeof(a) / sizeof((a)[0])))
-
-/* SDO picks the address; breakouts usually tie it high (0x47). */
-static const uint8_t BMP581_ADDRS[] = { 0x47, 0x46 };
+#define BMP581_ADDR 0x47 /* SDO high; 0x46 with it low */
 
 #define BMP581_REG_CHIP_ID    0x01
 #define BMP581_REG_REV_ID     0x02
@@ -174,58 +171,50 @@ static esp_err_t configure(void)
 
 esp_err_t bmp581_start(void)
 {
-    esp_err_t last = ESP_ERR_NOT_FOUND;
-
     s_step = "probe";
-
-    for (int i = 0; i < ARRAY_SIZE(BMP581_ADDRS); i++) {
-        uint8_t addr = BMP581_ADDRS[i];
-        if (!i2c_dev_present(addr)) {
-            continue;
-        }
-        esp_err_t err = i2c_dev_attach(&s_dev, addr);
+    if (!i2c_dev_present(BMP581_ADDR)) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (!s_dev) {
+        s_step = "attach";
+        esp_err_t err = i2c_dev_attach(&s_dev, BMP581_ADDR);
         if (err != ESP_OK) {
-            s_step = "attach";
-            ESP_LOGW(TAG, "0x%02X: setup failed at step \"%s\": %s", addr,
+            ESP_LOGW(TAG, "0x%02X: setup failed at step \"%s\": %s", BMP581_ADDR,
                      s_step, esp_err_to_name(err));
             return err;
         }
-
-        s_step = "chip_id";
-        uint8_t id;
-        err = i2c_dev_read(s_dev, BMP581_REG_CHIP_ID, &id, 1);
-        if (err != ESP_OK) {
-            /* ACKed the probe but will not talk: a foreign device, or a bus
-             * that cannot be driven properly (levels, pull-ups) */
-            ESP_LOGW(TAG, "0x%02X ACKed the probe but the chip-id read failed: %s",
-                     addr, esp_err_to_name(err));
-            last = err;
-            continue;
-        }
-        if (id != BMP581_CHIP_ID_581 && id != BMP581_CHIP_ID_580) {
-            ESP_LOGW(TAG, "0x%02X answers with chip id 0x%02X, not a BMP581/580",
-                     addr, id);
-            s_step = "id_mismatch";
-            last = ESP_ERR_NOT_SUPPORTED;
-            continue;
-        }
-
-        err = configure();
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "0x%02X: setup failed at step \"%s\": %s", addr,
-                     s_step, esp_err_to_name(err));
-            last = err;
-            continue;
-        }
-
-        uint8_t rev = 0;
-        i2c_dev_read(s_dev, BMP581_REG_REV_ID, &rev, 1);
-        s_step = "";
-        ESP_LOGI(TAG, "%s at 0x%02X, rev 0x%02X",
-                 id == BMP581_CHIP_ID_581 ? "BMP581" : "BMP580", addr, rev);
-        return ESP_OK;
     }
-    return last;
+
+    s_step = "chip_id";
+    uint8_t id;
+    esp_err_t err = i2c_dev_read(s_dev, BMP581_REG_CHIP_ID, &id, 1);
+    if (err != ESP_OK) {
+        /* ACKed the probe but will not talk: a foreign device, or a bus
+         * that cannot be driven properly (levels, pull-ups) */
+        ESP_LOGW(TAG, "0x%02X ACKed the probe but the chip-id read failed: %s",
+                 BMP581_ADDR, esp_err_to_name(err));
+        return err;
+    }
+    if (id != BMP581_CHIP_ID_581 && id != BMP581_CHIP_ID_580) {
+        ESP_LOGW(TAG, "0x%02X answers with chip id 0x%02X, not a BMP581/580",
+                 BMP581_ADDR, id);
+        s_step = "id_mismatch";
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    err = configure();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "0x%02X: setup failed at step \"%s\": %s", BMP581_ADDR,
+                 s_step, esp_err_to_name(err));
+        return err;
+    }
+
+    uint8_t rev = 0;
+    i2c_dev_read(s_dev, BMP581_REG_REV_ID, &rev, 1);
+    s_step = "";
+    ESP_LOGI(TAG, "%s at 0x%02X, rev 0x%02X",
+             id == BMP581_CHIP_ID_581 ? "BMP581" : "BMP580", BMP581_ADDR, rev);
+    return ESP_OK;
 }
 
 esp_err_t bmp581_read(bmp581_data_t *out)

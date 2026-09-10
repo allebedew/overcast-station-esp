@@ -85,6 +85,11 @@ typedef struct {
      * switched by, which carries pir.c's hold on top. */
     bool pir_raw;
 
+    /* The INA260 in the battery lead, for the debug strip; + is charge. */
+    bool  batt_ok;
+    float batt_v;
+    float batt_a;
+
     /* Monotonic since boot, for whatever moves on its own. Kept in the model so
      * a frame animates off one stamp rather than each widget reading a clock. */
     uint32_t anim_ms;
