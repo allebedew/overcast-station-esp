@@ -1070,10 +1070,9 @@
                 </div>
                 <div class="hdr-ctl">
                     <div class="seg" id="rangeSeg">
-                        <button data-r="1m" data-i18n="p1m">1м</button>
-                        <button data-r="5m" data-i18n="p5m">5м</button>
+                        <button data-r="live" data-i18n="pLive">5м</button>
                         <button data-r="1h" data-i18n="p1h">1ч</button>
-                        <button data-r="1d" data-i18n="p1d">24ч</button>
+                        <button data-r="24h" data-i18n="p24h">24ч</button>
                     </div>
                     <div class="seg lang" id="langSeg">
                         <button data-l="ru">RU</button>
@@ -1469,10 +1468,9 @@
                     appName: "Метеостанция",
                     online: "Онлайн",
                     noLink: "Нет связи",
-                    p1m: "1м",
-                    p5m: "5м",
+                    pLive: "5м",
                     p1h: "1ч",
-                    p1d: "24ч",
+                    p24h: "24ч",
                     temperature: "Температура",
                     humidity: "Влажность",
                     min: "мин",
@@ -1704,10 +1702,9 @@
                     appName: "Weather Station",
                     online: "Online",
                     noLink: "No link",
-                    p1m: "1m",
-                    p5m: "5m",
+                    pLive: "5m",
                     p1h: "1h",
-                    p1d: "24h",
+                    p24h: "24h",
                     temperature: "Temperature",
                     humidity: "Humidity",
                     min: "min",
@@ -2567,17 +2564,16 @@
 
             /* ---------- charts (canvas, no libraries) ---------- */
             /* The window is the station's, not the page's: `chart_range` names
-             * the same four the knob cycles, and the panel plots 60 columns of
-             * each, so the two show the same stretch of time. Each is the tail
-             * of one of three server-side rings (/api/history?p=): 5m = 1 s
-             * samples, 1h = 5 s points, 1d = 1 min points. 1m and 5m share a
-             * ring, so switching between them costs no request. */
-            let range = null; /* '1m' | '5m' | '1h' | '1d'; null until the first status */
+             * the same three the knob cycles. Each is the tail of one of three
+             * server-side rings (/api/history?p=): 5m = 1 s samples, 1h = 5 s
+             * points, 1d = 1 min points. 1h and 24h cover the same stretch as
+             * the panel; live is the whole 5 min ring here, its newest minute
+             * there. */
+            let range = null; /* 'live' | '1h' | '24h'; null until the first status */
             const RANGES = {
-                "1m": { tier: "5m", len: 60 },
-                "5m": { tier: "5m", len: 300 },
+                live: { tier: "5m", len: 300 },
                 "1h": { tier: "1h", len: 720 },
-                "1d": { tier: "1d", len: 1440 },
+                "24h": { tier: "1d", len: 1440 },
             };
             const TIERS = {
                 "5m": { refresh: 2 },
@@ -2710,7 +2706,7 @@
                     fmt: (v) => v.toFixed(3),
                     /* The tendency comes from the device, not from the chart
                      * window: three hours by definition, so it must not follow
-                     * the 5 m / 1 h / 1 d segment. The arrow repeats with the
+                     * the live / 1 h / 24 h segment. The arrow repeats with the
                      * grade — one head slow, three rapid. */
                     badge: (cl, s) => trendBadge(s.zambretti),
                     /* the forecast wording, and on the right edge the pressure
@@ -2901,7 +2897,7 @@
             function fmtTipTime(ts) {
                 const d = new Date(ts * 1000);
                 const opts = { hour: "2-digit", minute: "2-digit" };
-                if (range !== "1d") opts.second = "2-digit";
+                if (range !== "24h") opts.second = "2-digit";
                 let s = d.toLocaleTimeString(locale(), opts);
                 if (d.toDateString() !== new Date().toDateString()) {
                     s =

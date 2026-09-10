@@ -413,7 +413,7 @@ static void scene_chart(gfx_canvas_t *c)
             }
         }
         gfx_text(c, 1, ui_row(&cur, &lbl), &lbl, NAME[k]);
-        chart_draw(c, &cur, v, CHART_SERIES_MAX, HISTORY_Q_TEMP, CHART_RANGE_1M, false);
+        chart_draw(c, &cur, v, CHART_SERIES_MAX, HISTORY_Q_TEMP, CHART_RANGE_LIVE, false);
     }
 }
 
@@ -436,7 +436,7 @@ static void scene_chart_rh(gfx_canvas_t *c)
     ui_cursor_t            cur = { 1 };
 
     gfx_text(c, 1, ui_row(&cur, &lbl), &lbl, "RH 1m");
-    chart_draw(c, &cur, RH, 60, HISTORY_Q_RH, CHART_RANGE_1M, false);
+    chart_draw(c, &cur, RH, 60, HISTORY_Q_RH, CHART_RANGE_LIVE, false);
 }
 
 static void selftest(void)
@@ -545,7 +545,7 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data, bool fetching,
     // is drawn from what it has picked.
     ui_state_t st = { .set = { .bright = 0, .on = true,
                                .chart_q = HISTORY_Q_TEMP,
-                               .chart_range = CHART_RANGE_1M },
+                               .chart_range = CHART_RANGE_LIVE },
                       .focus = UI_FOCUS_CHART_Q };
 
     if (!have_data) {

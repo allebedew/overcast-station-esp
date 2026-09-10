@@ -60,7 +60,7 @@ static const entry_t s_tab[SETTING_COUNT] = {
           .labels = CHART_Q_NAMES }, NVS_TYPE_U8 },
     [SETTING_CHART_RANGE] = {
         { .key = "chart_range", .api = "chart_range", .name = "Chart range",
-          .def = CHART_RANGE_1M, .min = 0, .max = CHART_RANGE_COUNT - 1,
+          .def = CHART_RANGE_LIVE, .min = 0, .max = CHART_RANGE_COUNT - 1,
           .labels = CHART_RANGE_LABELS }, NVS_TYPE_U8 },
 };
 

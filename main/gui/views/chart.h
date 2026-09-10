@@ -11,23 +11,22 @@ typedef struct ui_cursor ui_cursor_t;
  * the badge under the plot says are one row of a table rather than three
  * constants: they only ever make sense together. */
 typedef enum {
-    CHART_RANGE_1M,
-    CHART_RANGE_5M,
+    CHART_RANGE_LIVE,
     CHART_RANGE_1H,
-    CHART_RANGE_1D,
+    CHART_RANGE_24H,
     CHART_RANGE_COUNT,
 } chart_range_t;
 
 typedef struct {
     history_tier_t tier;
     uint8_t        stride;
+    const char    *badge;
 } chart_range_def_t;
 
 extern const chart_range_def_t CHART_RANGES[CHART_RANGE_COUNT];
 
-/* The chart selection's vocabulary, indexed by its enum: what the badge under
- * the plot says, and the words the HTTP API carries chart_range and
- * chart_quantity as. The quantity names are the keys /api/history gives the
+/* The chart selection's vocabulary, indexed by its enum: the words the HTTP API
+ * carries chart_range and chart_quantity as. The quantity names are the keys /api/history gives the
  * same series -- one word per quantity across the whole API. Here rather than
  * in history.c because the simulator draws the chart without the rings. */
 extern const char *const CHART_RANGE_LABELS[CHART_RANGE_COUNT];

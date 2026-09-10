@@ -9,14 +9,13 @@
 /* Every window is 60 columns wide, one per plotted pixel, so the stride is the
  * tier's slot count over 60 -- not a free choice. */
 const chart_range_def_t CHART_RANGES[CHART_RANGE_COUNT] = {
-    [CHART_RANGE_1M] = { HISTORY_5M,  1 },
-    [CHART_RANGE_5M] = { HISTORY_5M,  5 },
-    [CHART_RANGE_1H] = { HISTORY_1H, 12 },
-    [CHART_RANGE_1D] = { HISTORY_1D, 24 },
+    [CHART_RANGE_LIVE] = { HISTORY_5M,  1, "1m"  },   /* the newest minute of the ring */
+    [CHART_RANGE_1H]   = { HISTORY_1H, 12, "1h"  },
+    [CHART_RANGE_24H]  = { HISTORY_1D, 24, "24h" },
 };
 
 const char *const CHART_RANGE_LABELS[CHART_RANGE_COUNT] = {
-    "1m", "5m", "1h", "1d",
+    "live", "1h", "24h",
 };
 
 const char *const CHART_Q_NAMES[HISTORY_Q_COUNT] = {
@@ -232,7 +231,7 @@ void chart_draw(gfx_canvas_t *c, ui_cursor_t *cur, const float *v, int n,
     }
 
     gfx_text_bg(c, UI_RX/2, baseline, &UI_TINY_C, range_hl ? GFX_HL : GFX_NONE,
-                CHART_RANGE_LABELS[range]);
+                CHART_RANGES[range].badge);
 
     if (isfinite(hi)) {
         chart_label(b, sizeof(b), q, hi, true);
