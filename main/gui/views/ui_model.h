@@ -89,6 +89,9 @@ typedef struct {
     /* For the debug strip. */
     battery_t batt;
 
+    bool debug; /* the debug strip and the battery lines over it */
+    bool zoo;
+
     /* Monotonic since boot, for whatever moves on its own. Kept in the model so
      * a frame animates off one stamp rather than each widget reading a clock. */
     uint32_t anim_ms;

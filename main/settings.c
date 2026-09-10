@@ -62,6 +62,12 @@ static const entry_t s_tab[SETTING_COUNT] = {
         { .key = "chart_range", .api = "chart_range", .name = "Chart range",
           .def = CHART_RANGE_LIVE, .min = 0, .max = CHART_RANGE_COUNT - 1,
           .labels = CHART_RANGE_LABELS }, NVS_TYPE_U8 },
+    [SETTING_DISPLAY_DEBUG] = {
+        { .key = "disp_debug", .api = "display_debug", .name = "Display debug lines",
+          .def = 1, .min = 0, .max = 1, .as_bool = true }, NVS_TYPE_U8 },
+    [SETTING_DISPLAY_ZOO] = {
+        { .key = "disp_zoo", .api = "display_zoo", .name = "Display zoo",
+          .def = 0, .min = 0, .max = 1, .as_bool = true }, NVS_TYPE_U8 },
 };
 
 /* Where a changed value has to land besides NVS — see settings_on_change(). */

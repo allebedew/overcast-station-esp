@@ -389,7 +389,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
 
     /* From the same table the POST handler reads, so the two can never differ
      * on which settings exist. */
-    char settings_json[256];
+    char settings_json[384];
     jbuf_t s;
     jbuf_init(&s, settings_json, sizeof(settings_json));
     jbuf_printf(&s, "{");

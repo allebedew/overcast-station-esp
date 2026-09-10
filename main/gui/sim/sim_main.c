@@ -540,6 +540,7 @@ static void screen_now_scene(gfx_canvas_t *c, bool have_data, bool fetching,
     m.out_fetching = fetching;
     m.anim_ms      = anim_ms;
     m.boot_seed    = (uint32_t)rand();   // stands in for esp_random() on the panel
+    m.debug        = true;
 
     // The knob's own state, which on the panel ui_state_init() sets: the chart
     // is drawn from what it has picked.

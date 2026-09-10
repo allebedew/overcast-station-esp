@@ -43,10 +43,11 @@ debug strip.
   client; a search hit fills the name and coordinate fields, which can also be
   filled by hand, so the name is the user's own; chips are dragged to reorder,
   with a mouse — HTML5 drag and drop does not fire on a touch screen); battery
-  (every `battery` field; a button opens a mAh field that sets the count through
-  `/api/battery/reset`), system, settings and Wi-Fi cards behind the header gear. Settings:
+  (every `battery` field under an icon filled to the count, coloured by mode —
+  and on discharge by the count's level, amber < 30 %, red < 15 %; a pencil
+  button in its header opens a mAh field that sets the count through `/api/battery/reset`), system, settings and Wi-Fi cards behind the header gear. Settings:
   LED brightness, buzzer volume, display on, its auto-brightness and its
-  brightness, site altitude, wind units, SCD40 FRC, history reset. Every setting
+  brightness, debug lines, zoo, site altitude, wind units, SCD40 FRC, history reset. Every setting
   follows the device on each poll except while the control has the focus, so
   what the knob changes shows up here without overwriting a moving hand.
   Every reading is a fixed slot generated from the tables at the top of the
@@ -237,6 +238,9 @@ debug strip.
   **Brightness** is the master current (`0xC7`), 16 steps; it is one of the
   knob's fields, kept in `settings/disp_bright` (default 12) and shown as 0–15
   in the bottom-right corner, prefixed by `A ` in auto mode and `- ` in manual.
+  That corner is the debug strip; it and the two battery lines above it are
+  hidden by `settings/disp_debug` (default on), except the strip while the knob
+  is on brightness.
   **Auto** (`settings/disp_auto`, default on, the knob's step past level 15)
   drives the level off the VEML7700 instead: full at 200 lx and up, by decade
   below that, the dimmest step at 1 lx and under. It follows the reading on the
@@ -260,8 +264,10 @@ debug strip.
   lights a panel that was switched off. The only moving parts
   are the signal bar sweeping while the link is being made, three dots with one
   lit walking the same way in place of the reading's age while a fetch runs, the
-  sun bar's centre reading swapping every 5 s, and the Zambretti wording
-  scrolling back and forth when it is wider than the row left it. The
+  sun bar's centre reading swapping every 5 s, the Zambretti wording
+  scrolling back and forth when it is wider than the row left it, and the zoo
+  (`settings/disp_zoo`, default off) — an animal walking the bottom edge, over
+  the debug lines if they are on. The
   knob drives its chart — **turning back** walks the four fields (weather
   location, which quantity, which window, brightness) and an empty focus that
   picks nothing and carries no plate, **turning forward**
@@ -543,7 +549,7 @@ card belongs in that device's module, not in the caller — dew point in
 | Endpoint | Method | Description |
 |---|---|---|
 | `/` | GET | embedded single-page UI (gzipped) |
-| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap` / `wg` (`configured`, `up`, `ip`, `endpoint`), `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`; and `pir` — `raw`, the bare line, and `presence`, the held flag), `battery` (`ok`, `state` `charging`/`discharging`/`full`/`idle`/`unknown`, `voltage` V, `current` mA (+ = charge), `power` mW, `pct_v` — `null` without the INA260 — and `mah`, `pct`, the count, always a number; `eta_s`, seconds to full on charge or to empty on discharge, else `null`), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `phase` `day`/`golden`/`civil`/`nautical`/`astro`/`night`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system` (uptime, build, heap, NVS, plus `panel` — `on_s` / `dose_s`, the OLED's lit and brightness-weighted seconds), `settings` (generated from the settings table: `led_brightness`, `buzzer_volume`, `display_on`, `display_brightness`, `display_auto_brightness`, `altitude`) |
+| `/api/status` | GET | full status JSON in objects, nothing at the top level: `sta` / `ap` / `wg` (`configured`, `up`, `ip`, `endpoint`), `climate` (`temp`, `rh`, `co2`, `press`, `press_msl`, `lux` — a number or `null` with no sensor behind it), `sensors` (one object per device with its own `ok`, including what it derives — SCD40 `dew`, VEML7700 `white_ratio`; and `pir` — `raw`, the bare line, and `presence`, the held flag), `battery` (`ok`, `state` `charging`/`discharging`/`full`/`idle`/`unknown`, `voltage` V, `current` mA (+ = charge), `power` mW, `pct_v` — `null` without the INA260 — and `mah`, `pct`, the count, always a number; `eta_s`, seconds to full on charge or to empty on discharge, else `null`), `zambretti` (`trend` −3…+3, `delta_3h`, `code` 0…25 for A…Z; `null` until three hours of pressure are recorded), `sun` (`state` `rises`/`polar_day`/`polar_night`, `rise` / `set` as unix UTC or `null`, `day_len`, `up`, `elev`, `phase` `day`/`golden`/`civil`/`nautical`/`astro`/`night`, `next_in` / `next_is_rise` — seconds to the next crossing, counted on the device so a wrong browser clock cannot skew it; `null` without a clock or an active location), `weather` (two independently nullable halves: `loc` — `name`, `active`, `lat`, `lon`, `utc_offset` — known as soon as a location is saved, and `current`, the fetched reading with its `age`), `system` (uptime, build, heap, NVS, plus `panel` — `on_s` / `dose_s`, the OLED's lit and brightness-weighted seconds), `settings` (generated from the settings table: every key `/api/settings` takes) |
 | `/api/history` | GET | `?p=5m\|1h\|1d` (default `1d`); `{period, co2, temp, rh, press, lux, motion, presence}`, each series gated on its own quantity so `null` is a gap in that series alone. `press` comes out reduced to sea level; `motion` is the share of the slot the PIR line spent high, 0…100, and `presence` the held occupancy flag as 0/1 |
 | `/api/history/reset` | POST | wipe all tiers, RAM rings and flash snapshots |
 | `/api/scan` | GET | Wi-Fi scan, `[{ssid, bssid, ch, rssi, auth}]`, one entry per BSSID |
@@ -552,7 +558,7 @@ card belongs in that device's module, not in the caller — dew point in
 | `/api/locations/move` | POST | reorder locations; `{"from", "to"}` |
 | `/api/locations/active` | PUT | switch location; `{"index"}` (triggers an immediate refetch) |
 | `/api/connect` | POST | leave AP mode / restart the STA connection cycle |
-| `/api/settings` | POST | any subset of the keys `/api/status` reports under `settings`, driven by the same table: `led_brightness` 1–255, `buzzer_volume` 1–50, `display_on` bool, `display_brightness` 0–15, `display_auto_brightness` bool, `altitude` −500…9000, `wind_unit` `kmh`/`ms`/`mph`/`kn`, `chart_quantity` `temp`/`press`/`rh`/`co2`/`lux`, `chart_range` `live`/`1h`/`24h`. Out of range is clamped; an unknown key, a wrong type or an unknown word is a 400 naming it |
+| `/api/settings` | POST | any subset of the keys `/api/status` reports under `settings`, driven by the same table: `led_brightness` 1–255, `buzzer_volume` 1–50, `display_on` bool, `display_brightness` 0–15, `display_auto_brightness` bool, `display_debug` bool, `display_zoo` bool, `altitude` −500…9000, `wind_unit` `kmh`/`ms`/`mph`/`kn`, `chart_quantity` `temp`/`press`/`rh`/`co2`/`lux`, `chart_range` `live`/`1h`/`24h`. Out of range is clamped; an unknown key, a wrong type or an unknown word is a 400 naming it |
 | `/api/scd40/calibrate` | POST | forced recalibration; `{"ppm": 400–2000}`, returns the applied correction |
 | `/api/battery/reset` | POST | sets the battery count: empty body → 2000 mAh, `{"mah": 0–2000}` → that |
 | `/api/ota` | POST | firmware update; raw binary body, `X-OTA-Key` header; reboots on success |

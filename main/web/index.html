@@ -418,7 +418,8 @@
             /* Which series the station's own panel is plotting -- one card at
                a time, moved from here or from the knob. Sits at the right edge
                of the header, past the trend or the badge. */
-            .on-panel {
+            .on-panel,
+            .hdr-btn {
                 flex: none;
                 display: flex;
                 margin-left: 6px;
@@ -429,9 +430,14 @@
                 color: var(--text-faint);
                 cursor: pointer;
             }
-            .on-panel:hover {
+            .on-panel:hover,
+            .hdr-btn:hover {
                 color: var(--text-dim);
                 border-color: var(--text-faint);
+            }
+            .hdr-btn.active {
+                color: var(--accent);
+                border-color: var(--accent);
             }
             .on-panel.active {
                 background: var(--accent);
@@ -620,6 +626,154 @@
             }
             body:not(.show-panels) .grid-bottom {
                 display: none;
+            }
+
+            /* --- Battery card --- */
+            /* --bat is the mode's colour: the badge, the fill, the headline */
+            .bat {
+                --bat: var(--text-faint);
+            }
+            .bat.charging {
+                --bat: var(--co2);
+            }
+            .bat.discharging {
+                --bat: var(--accent);
+            }
+            .bat.discharging.warn {
+                --bat: var(--co2-warn);
+            }
+            .bat.discharging.bad {
+                --bat: var(--co2-bad);
+            }
+            .bat.full {
+                --bat: var(--presence);
+            }
+            .bat.idle {
+                --bat: var(--text-dim);
+            }
+            .bat .badge {
+                color: var(--bat);
+                background: color-mix(in srgb, var(--bat) 14%, transparent);
+            }
+            .bat-top {
+                display: flex;
+                align-items: center;
+                gap: 14px;
+            }
+            .bat-icon {
+                width: 120px;
+                height: 50px;
+                flex: none;
+            }
+            .bat-shell {
+                fill: none;
+                stroke: #3a4557;
+                stroke-width: 2;
+            }
+            .bat-nub {
+                fill: #3a4557;
+            }
+            .bat-fill {
+                fill: var(--bat);
+                opacity: 0.9;
+            }
+            #batHatch rect {
+                fill: var(--border);
+            }
+            .bat-hatch,
+            .bat-bolt {
+                display: none;
+            }
+            .bat.unknown .bat-hatch {
+                display: inline;
+                fill: url(#batHatch);
+            }
+            .bat.unknown .bat-fill {
+                opacity: 0.35;
+            }
+            .bat.charging .bat-bolt {
+                display: inline;
+                fill: var(--bg);
+                stroke: var(--bat);
+                stroke-width: 1.5;
+                stroke-linejoin: round;
+            }
+            .bat.charging .bat-fill {
+                animation: bat-pulse 1.6s ease-in-out infinite;
+            }
+            @keyframes bat-pulse {
+                50% {
+                    opacity: 0.45;
+                }
+            }
+            .bat-pct {
+                font-size: 34px;
+                font-weight: 700;
+                letter-spacing: -0.02em;
+                line-height: 1.05;
+                font-variant-numeric: tabular-nums;
+                color: var(--bat);
+            }
+            .bat-pct .unit {
+                font-size: 15px;
+                font-weight: 500;
+                color: var(--text-dim);
+                margin-left: 3px;
+            }
+            .bat-sub {
+                font-size: 11.5px;
+                color: var(--text-faint);
+                margin-top: 2px;
+            }
+            .bat-sub b,
+            .bat-foot b {
+                font-weight: 600;
+                font-variant-numeric: tabular-nums;
+            }
+            .bat-sub b {
+                color: var(--text-dim);
+            }
+            .bat-foot b {
+                color: var(--text);
+            }
+            .bat-tiles {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 6px;
+                margin-top: 12px;
+            }
+            .bat-tiles > div {
+                background: var(--panel-2);
+                border-radius: 8px;
+                padding: 6px 8px;
+                display: flex;
+                flex-direction: column;
+                min-width: 0;
+            }
+            .bat-tiles > div > span {
+                font-size: 11px;
+                color: var(--text-faint);
+            }
+            .bat-tiles b {
+                font-size: 15px;
+                font-weight: 600;
+                color: var(--text);
+                font-variant-numeric: tabular-nums;
+                white-space: nowrap;
+            }
+            .bat-tiles i {
+                font-style: normal;
+                font-size: 11px;
+                font-weight: 500;
+                color: var(--text-faint);
+            }
+            .bat-foot {
+                display: flex;
+                justify-content: space-between;
+                gap: 8px;
+                margin-top: 10px;
+                font-size: 12px;
+                color: var(--text-faint);
             }
 
             /* --- Key/value table --- */
@@ -1137,53 +1291,94 @@
             <div class="grid-bottom">
                 <div class="stack">
                     <!-- BATTERY -->
-                    <div class="card">
+                    <div class="card bat unknown" id="batCard">
                         <h2>
                             <span class="sens-dot off" id="batDot"></span>
                             <span data-i18n="battery">Батарея</span>
+                            <span class="badge" id="batBadge" data-i18n="bat_unknown"></span>
+                            <button class="hdr-btn" id="batResetBtn" data-i18n-title="batReset">
+                                <!-- pencil (Feather Icons, MIT) -->
+                                <svg
+                                    width="13"
+                                    height="13"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    aria-hidden="true"
+                                >
+                                    <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                                </svg>
+                            </button>
                         </h2>
-                        <table class="kv">
-                            <tbody id="batRows">
-                                <tr>
-                                    <td data-i18n="loading">Загрузка…</td>
-                                    <td></td>
-                                </tr>
-                            </tbody>
-                        </table>
+                        <div class="bat-top">
+                            <!-- the fill spans x 4..108; its width is set per poll -->
+                            <svg class="bat-icon" viewBox="0 0 120 50" aria-hidden="true">
+                                <pattern
+                                    id="batHatch"
+                                    width="6"
+                                    height="6"
+                                    patternUnits="userSpaceOnUse"
+                                    patternTransform="rotate(45)"
+                                >
+                                    <rect width="2" height="6" />
+                                </pattern>
+                                <rect class="bat-shell" x="1" y="1" width="112" height="48" rx="7" />
+                                <rect class="bat-nub" x="114" y="16" width="5" height="18" rx="2" />
+                                <rect class="bat-hatch" x="4" y="4" width="104" height="42" rx="4" />
+                                <rect class="bat-fill" id="batFill" x="4" y="4" width="0" height="42" rx="4" />
+                                <path class="bat-bolt" d="M59.3 12.5 L50 26.6 H56.2 L53.1 37.5 L64 21.9 H57.8 Z" />
+                            </svg>
+                            <div>
+                                <div class="bat-pct">
+                                    <span id="batPct">--</span><span class="unit">%</span>
+                                </div>
+                                <div class="bat-sub">
+                                    <span data-i18n="batByVoltage">По напряжению</span>
+                                    <b id="batPctV">--</b>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bat-tiles">
+                            <div>
+                                <span data-i18n="batVoltage">Напряжение</span>
+                                <b><span id="batV">--</span> <i data-i18n="uV">В</i></b>
+                            </div>
+                            <div>
+                                <span data-i18n="batCurrent">Ток</span>
+                                <b><span id="batI">--</span> <i data-i18n="uA">А</i></b>
+                            </div>
+                            <div>
+                                <span data-i18n="batPower">Мощность</span>
+                                <b><span id="batW">--</span> <i data-i18n="uW">Вт</i></b>
+                            </div>
+                        </div>
+                        <div class="bat-foot">
+                            <span><span id="batEtaK"></span> <b id="batEta">--</b></span>
+                            <span
+                                ><span data-i18n="batCount">Счётчик</span>
+                                <b id="batMah">--</b> <span data-i18n="uMah">мА·ч</span></span
+                            >
+                        </div>
                         <!-- the value is picked first, so the reset is two
                              deliberate clicks without a confirm() -->
-                        <div class="set-row">
-                            <button
-                                class="btn block"
-                                id="batResetBtn"
-                                data-i18n="batReset"
-                            >
-                                Задать заряд…
+                        <div class="frc-row" id="batResetRow" hidden>
+                            <input
+                                id="batMahIn"
+                                type="number"
+                                value="2000"
+                                min="0"
+                                max="2000"
+                                step="1"
+                            />
+                            <button class="btn primary" id="batSetBtn" data-i18n="batSet">
+                                Сбросить
                             </button>
-                            <div class="frc-row" id="batResetRow" hidden>
-                                <input
-                                    id="batMah"
-                                    type="number"
-                                    value="2000"
-                                    min="0"
-                                    max="2000"
-                                    step="1"
-                                />
-                                <button
-                                    class="btn primary"
-                                    id="batSetBtn"
-                                    data-i18n="batSet"
-                                >
-                                    Сбросить
-                                </button>
-                                <button
-                                    class="btn"
-                                    id="batCancelBtn"
-                                    data-i18n="cancel"
-                                >
-                                    Отмена
-                                </button>
-                            </div>
+                            <button class="btn" id="batCancelBtn" data-i18n="cancel">
+                                Отмена
+                            </button>
                         </div>
                     </div>
 
@@ -1252,6 +1447,22 @@
                             <span class="name" data-i18n="displayAutoBrightness"
                                 >Авто-яркость дисплея</span
                             ><input type="checkbox" id="dispAutoBri" />
+                        </div>
+                    </div>
+
+                    <div class="set-row">
+                        <div class="head">
+                            <span class="name" data-i18n="displayDebug"
+                                >Отладочные строки</span
+                            ><input type="checkbox" id="dispDebug" />
+                        </div>
+                    </div>
+
+                    <div class="set-row">
+                        <div class="head">
+                            <span class="name" data-i18n="displayZoo"
+                                >Зоопарк</span
+                            ><input type="checkbox" id="dispZoo" />
                         </div>
                     </div>
 
@@ -1588,6 +1799,8 @@
                     displayOn: "Дисплей включён",
                     displayBrightness: "Яркость дисплея",
                     displayAutoBrightness: "Авто-яркость дисплея",
+                    displayDebug: "Отладочные строки",
+                    displayZoo: "Зоопарк",
                     settingSaved: "Настройка сохранена",
                     sensWhiteRatio: "white/lux",
                     sensGain: "усиление",
@@ -1769,8 +1982,8 @@
                     batVoltage: "Напряжение",
                     batCurrent: "Ток",
                     batPower: "Мощность",
-                    batCount: "Заряд (счётчик)",
-                    batByVoltage: "Заряд по напряжению",
+                    batCount: "Счётчик",
+                    batByVoltage: "По напряжению",
                     batToFull: "До полной",
                     batToEmpty: "До разряда",
                     batEta: "Осталось",
@@ -1845,6 +2058,8 @@
                     displayOn: "Display on",
                     displayBrightness: "Display brightness",
                     displayAutoBrightness: "Display auto brightness",
+                    displayDebug: "Debug lines",
+                    displayZoo: "Zoo",
                     settingSaved: "Setting saved",
                     sensWhiteRatio: "white/lux",
                     sensGain: "gain",
@@ -2032,8 +2247,8 @@
                     batVoltage: "Voltage",
                     batCurrent: "Current",
                     batPower: "Power",
-                    batCount: "Charge (count)",
-                    batByVoltage: "Charge by voltage",
+                    batCount: "Count",
+                    batByVoltage: "By voltage",
                     batToFull: "To full",
                     batToEmpty: "To empty",
                     batEta: "Time left",
@@ -2647,6 +2862,8 @@
                 syncSetting("dispBriRange", st.display_brightness, "dispBriVal");
                 syncSetting("dispOn", st.display_on);
                 syncSetting("dispAutoBri", st.display_auto_brightness);
+                syncSetting("dispDebug", st.display_debug);
+                syncSetting("dispZoo", st.display_zoo);
                 syncSetting("altInput", st.altitude);
                 syncSetting("windUnitSel", st.wind_unit);
                 adopt("chart_range", st.chart_range, setRange);
@@ -2656,29 +2873,36 @@
             /* BATTERY_CAPACITY_MAH; /api/battery/reset refuses anything above */
             const BAT_CAPACITY_MAH = 2000;
 
+            /* Every level on the card is the count's; the voltage estimate is
+               only shown. */
+            const BAT_WARN_PCT = 30;
+            const BAT_BAD_PCT = 15;
+            const BAT_FILL_W = 104; /* the fill's span inside the shell, SVG units */
+
             function renderBattery(b) {
+                const state = b.state || "unknown";
+                const pct = typeof b.pct === "number" ? b.pct : null;
+                const level =
+                    pct === null ? "" : pct < BAT_BAD_PCT ? " bad" : pct < BAT_WARN_PCT ? " warn" : "";
+                $("batCard").className = `card bat ${state}${level}`;
                 setDot("batDot", !!b.ok);
-                const eta =
-                    b.state === "charging"
-                        ? "batToFull"
-                        : b.state === "discharging"
-                          ? "batToEmpty"
-                          : "batEta";
-                $("batRows").innerHTML = kvRows([
-                    [t("state"), t("bat_" + (b.state || "unknown"))],
-                    [t("batVoltage"), num(b.voltage, (v) => `${v.toFixed(3)} ${t("uV")}`)],
-                    [
-                        t("batCurrent"),
-                        num(b.current, (v) => `${v > 0 ? "+" : ""}${(v / 1000).toFixed(3)} ${t("uA")}`),
-                    ],
-                    [t("batPower"), num(b.power, (v) => `${(v / 1000).toFixed(3)} ${t("uW")}`)],
-                    [
-                        t("batCount"),
-                        `${num(b.mah, (v) => v.toFixed(3))} ${t("uMah")} · ${num(b.pct, (v) => v.toFixed(2))} %`,
-                    ],
-                    [t("batByVoltage"), num(b.pct_v, (v) => v + " %")],
-                    [t(eta), num(b.eta_s, fmtSpan)],
-                ]);
+                $("batBadge").textContent = t("bat_" + state);
+
+                /* the count runs past both ends; the shell does not */
+                const fill = Math.min(100, Math.max(0, pct ?? 0));
+                $("batFill").setAttribute("width", ((BAT_FILL_W * fill) / 100).toFixed(1));
+                $("batPct").textContent = num(pct, (v) => v.toFixed(2));
+                $("batPctV").textContent = num(b.pct_v, (v) => v + " %");
+
+                $("batV").textContent = num(b.voltage, (v) => v.toFixed(3));
+                $("batI").textContent = num(b.current, (v) => `${v > 0 ? "+" : ""}${(v / 1000).toFixed(3)}`);
+                $("batW").textContent = num(b.power, (v) => (v / 1000).toFixed(3));
+
+                $("batEtaK").textContent = t(
+                    state === "charging" ? "batToFull" : state === "discharging" ? "batToEmpty" : "batEta",
+                );
+                $("batEta").textContent = num(b.eta_s, fmtSpan);
+                $("batMah").textContent = num(b.mah, (v) => v.toFixed(3));
             }
 
             /* One setting into its control: a checkbox takes `checked`,
@@ -4000,6 +4224,8 @@
                 "display_auto_brightness",
                 "settingSaved",
             );
+            wireCheckbox("dispDebug", "display_debug", "settingSaved");
+            wireCheckbox("dispZoo", "display_zoo", "settingSaved");
 
             $("windUnitSel").addEventListener("change", (e) =>
                 saveSetting("wind_unit", e.target.value, "settingSaved"),
@@ -4064,14 +4290,16 @@
             });
 
             function batResetOpen(open) {
-                $("batResetBtn").hidden = open;
+                $("batResetBtn").classList.toggle("active", open);
                 $("batResetRow").hidden = !open;
-                if (open) $("batMah").focus();
+                if (open) $("batMahIn").focus();
             }
-            $("batResetBtn").addEventListener("click", () => batResetOpen(true));
+            $("batResetBtn").addEventListener("click", () =>
+                batResetOpen($("batResetRow").hidden),
+            );
             $("batCancelBtn").addEventListener("click", () => batResetOpen(false));
             $("batSetBtn").addEventListener("click", async () => {
-                const mah = +$("batMah").value;
+                const mah = +$("batMahIn").value;
                 if (!(mah >= 0 && mah <= BAT_CAPACITY_MAH)) {
                     toast(t("batMahRange").replace("{max}", BAT_CAPACITY_MAH));
                     return;

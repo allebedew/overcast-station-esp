@@ -63,6 +63,9 @@ void ui_model_refresh(ui_model_t *out, history_quantity_t chart_q,
 
     battery_get(&out->batt);
 
+    out->debug = settings_get(SETTING_DISPLAY_DEBUG) != 0;
+    out->zoo   = settings_get(SETTING_DISPLAY_ZOO) != 0;
+
     weather_location_t loc;
     if (weather_store_get(loc_sel, &loc)) {
         snprintf(out->loc, sizeof(out->loc), "%s", loc.name);

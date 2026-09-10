@@ -20,6 +20,8 @@ typedef enum {
     SETTING_WIND_UNIT,
     SETTING_CHART_Q,
     SETTING_CHART_RANGE,
+    SETTING_DISPLAY_DEBUG,
+    SETTING_DISPLAY_ZOO,
     SETTING_COUNT,
 } setting_id_t;
 

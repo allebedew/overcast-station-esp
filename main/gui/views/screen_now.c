@@ -183,7 +183,7 @@ static int scroll_off(uint32_t anim_ms, int over)
 /* Battery: a dim shell filled to `pct` at full brightness. Same anchor as
  * bars(), so the two line up on one row. */
 #define BATT_W 7
-#define BATT_H 5
+#define BATT_H 3
 
 static void battery(gfx_canvas_t *c, int right, int baseline, int pct)
 {
@@ -196,7 +196,7 @@ static void battery(gfx_canvas_t *c, int right, int baseline, int pct)
 
     // The charge is the outline itself lit over the first `fill` columns; the
     // inside stays empty, so at this size the level reads off the length of a
-    // wall rather than an area three pixels tall. Rounding down keeps the nub --
+    // wall rather than an area one pixel tall. Rounding down keeps the nub --
     // the last column -- for a true 100%, and any charge at all is worth one.
     int fill = pct == 100 ? BATT_W : pct * BATT_W / 100;
     if (fill == 0 && pct > 0) {
@@ -857,7 +857,6 @@ static void sun_bar(gfx_canvas_t *c, ui_cursor_t *cur, const ui_model_t *m)
 #define ZOO_W        17            /* widest glyph, what has to clear the edge */
 #define ZOO_GLYPHS   99            /* the unbroken run from 0x20; there are holes past it */
 #define ZOO_CAT      0x28          /* U+1F408 in the font's own run, the one that opens the show */
-#define ZOO_ON       0             /* off for now: it walks over the battery line */
 
 static void zoo(gfx_canvas_t *c, uint32_t anim_ms, uint32_t seed)
 {
@@ -886,6 +885,29 @@ static void zoo(gfx_canvas_t *c, uint32_t anim_ms, uint32_t seed)
     // above the edge, so at shift 0 it stands GFX_SHIFT_MAX rows off the bottom.
     // The glyphs face left, so the rightward leg is the one that gets flipped.
     gfx_glyph_m(c, x, GFX_H - 2 - GFX_SHIFT_MAX, &st, cp, !(leg & 1));
+}
+
+/* The battery on the two lines above the debug strip: 3x5im is 5 rows, one of
+ * gap. The upper one is the count, the mode letter and the voltage-only estimate. */
+static void batt_lines(gfx_canvas_t *c, const battery_t *b)
+{
+    static const char BATT_MODE[] = {
+        [BATTERY_UNKNOWN] = '-',     [BATTERY_DISCHARGING] = 'D',
+        [BATTERY_CHARGING] = 'C',    [BATTERY_FULL] = 'F',
+        [BATTERY_IDLE] = 'I',
+    };
+    gfx_text_style_t batt = UI_TINY_R;
+    batt.level = GFX_DIM;
+    const int batt_base = GFX_H - 1 - GFX_SHIFT_MAX - 6;
+    if (b->ok) {
+        gfx_textf(c, UI_RX, batt_base, &batt, "%.3fV %.3fA",
+                  b->voltage_v, b->current_ma / 1000.0f);
+        gfx_textf(c, UI_RX, batt_base - 6, &batt, "%dmAh %c %d%%",
+                  (int)b->mah, BATT_MODE[b->state], b->pct_v);
+    } else {
+        gfx_text(c, UI_RX, batt_base, &batt, "-.---V -.---A");
+        gfx_textf(c, UI_RX, batt_base - 6, &batt, "%dmAh - --%%", (int)b->mah);
+    }
 }
 
 // Built up element by element: what is drawn here reads the model, the blocks
@@ -927,8 +949,9 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
         gfx_text(c, x + hw + cw, baseline, &UI_TEXT, mm);
     }
     // Placed against the bars; the wider AP badge is drawn after it and wins
-    // any column they share.
-    battery(c, UI_RX - WG_W - SIG_W - 3, baseline,
+    // any column they share. One row up off the bars' anchor: a 3 px battery on
+    // the baseline sits too low next to them.
+    battery(c, UI_RX - WG_W - SIG_W - 3, baseline - 1,
             m->batt.ok ? (int)(m->batt.pct + 0.5f) : 0);
     if (m->ap) {
         ap_badge(c, UI_RX - WG_W, baseline);
@@ -1106,35 +1129,21 @@ void screen_now(gfx_canvas_t *c, const ui_model_t *m, const ui_state_t *s)
     dbg.level = bright_focus ? GFX_FULL : GFX_DIM;
 
     // The mode marks the brightness, which is the level the panel is actually
-    // driven at whichever mode picked it.
-    gfx_textf_bg(c, UI_RX, GFX_H - 1 - GFX_SHIFT_MAX, &dbg,
-                 bright_focus ? GFX_HL : GFX_OFF, "+%d %s%u %c",
-                 gfx_shift(c), s->set.auto_bright ? "A " : "- ", s->bright_now,
-                 m->pir_raw ? 'P' : '-');
-
-    // The battery on the two lines above: 3x5im is 5 rows, one of gap. The upper
-    // one is the count, the mode letter and the voltage-only estimate.
-    static const char BATT_MODE[] = {
-        [BATTERY_UNKNOWN] = '-',     [BATTERY_DISCHARGING] = 'D',
-        [BATTERY_CHARGING] = 'C',    [BATTERY_FULL] = 'F',
-        [BATTERY_IDLE] = 'I',
-    };
-    const battery_t *b = &m->batt;
-    gfx_text_style_t batt = UI_TINY_R;
-    batt.level = GFX_DIM;
-    const int batt_base = GFX_H - 1 - GFX_SHIFT_MAX - 6;
-    if (b->ok) {
-        gfx_textf(c, UI_RX, batt_base, &batt, "%.3fV %.3fA",
-                  b->voltage_v, b->current_ma / 1000.0f);
-        gfx_textf(c, UI_RX, batt_base - 6, &batt, "%dmAh %c %d%%",
-                  (int)b->mah, BATT_MODE[b->state], b->pct_v);
-    } else {
-        gfx_text(c, UI_RX, batt_base, &batt, "-.---V -.---A");
-        gfx_textf(c, UI_RX, batt_base - 6, &batt, "%dmAh - --%%", (int)b->mah);
+    // driven at whichever mode picked it. Shown with the debug lines off too
+    // while the knob is on it, or the brightness would be turned blind.
+    if (m->debug || bright_focus) {
+        gfx_textf_bg(c, UI_RX, GFX_H - 1 - GFX_SHIFT_MAX, &dbg,
+                     bright_focus ? GFX_HL : GFX_OFF, "+%d %s%u %c",
+                     gfx_shift(c), s->set.auto_bright ? "A " : "- ",
+                     s->bright_now, m->pir_raw ? 'P' : '-');
     }
 
-    // Last, so the animal walks over the debug line rather than under it.
-    if (ZOO_ON) {
+    if (m->debug) {
+        batt_lines(c, &m->batt);
+    }
+
+    // Last, so the animal walks over the debug lines rather than under them.
+    if (m->zoo) {
         zoo(c, m->anim_ms, m->boot_seed);
     }
 }
