@@ -433,8 +433,9 @@ debug strip.
   one line at boot with the reset reason, and arrival/departure from the PIR's
   held presence flag, reported with how long the previous state lasted. The
   hold that decides when the room is empty is the sensor's own (`HOLD_MS`), so
-  the edges are taken as they come; an arrival is announced only after an hour
-  of absence, since a trip to the kitchen is not news. Boot is never an
+  the edges are taken as they come; both are announced only across an hour of
+  absence — the departure once the hour is up, the arrival at its end — so a
+  trip to the kitchen is silent and the two always pair up. Boot is never an
   arrival, and the first departure is dropped if nothing has moved since boot. Token and chat id are
   compile-time constants in `telegram.c`; left empty, the module disables
   itself. The gust message quotes both the reading and the threshold in the

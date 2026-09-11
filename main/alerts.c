@@ -74,10 +74,10 @@ static const struct {
 #define RAIN_ON_PCT  70
 #define RAIN_OFF_PCT 50
 
-/* An arrival is worth a message only after a real absence — stepping out to the
- * kitchen and back is not news. Departures are announced whatever their run,
- * since the interesting part is that the room emptied. */
-#define ARRIVE_NOTIFY_MIN_ABSENCE_MS (60 * 60 * 1000)
+/* Arrival and departure are news only across a real absence — a trip to the
+ * kitchen is neither. The departure waits it out, so the two always pair up;
+ * its message text says "an hour ago". */
+#define PRESENCE_NOTIFY_MIN_ABSENCE_MS (60 * 60 * 1000)
 
 /* ------------------------------------------------------------------------ */
 
@@ -282,8 +282,9 @@ static void format_span(char *buf, size_t n, int64_t ms)
  * The flag starts out set, so boot is never an arrival. */
 static void check_presence(void)
 {
-    static bool armed, occupied;
+    static bool armed, occupied, leave_pending;
     static int64_t since_ms; /* start of the current state */
+    static int64_t stay_ms;  /* the presence a pending departure ended */
 
     bool present = pir_present();
     int64_t now = now_ms();
@@ -293,19 +294,29 @@ static void check_presence(void)
         since_ms = now;
         return;
     }
+
+    char span[24];
+    /* Ahead of the edge check, so a return on the very tick the hour runs out
+     * still reports the departure before the arrival. */
+    if (leave_pending && now - since_ms >= PRESENCE_NOTIFY_MIN_ABSENCE_MS) {
+        leave_pending = false;
+        format_span(span, sizeof(span), stay_ms);
+        telegram_notify("🚪 Ушёл час назад, был здесь %s", span);
+    }
     if (present == occupied) {
         return;
     }
 
-    char span[24];
-    format_span(span, sizeof(span), now - since_ms);
     if (occupied) {
         /* Nothing moved since boot: the presence was only assumed. */
-        if (pir_moved()) {
-            telegram_notify("🚪 Ушёл, был здесь %s", span);
+        leave_pending = pir_moved();
+        stay_ms = now - since_ms;
+    } else {
+        leave_pending = false;
+        if (now - since_ms >= PRESENCE_NOTIFY_MIN_ABSENCE_MS) {
+            format_span(span, sizeof(span), now - since_ms);
+            telegram_notify("👋 Пришёл, никого не было %s", span);
         }
-    } else if (now - since_ms >= ARRIVE_NOTIFY_MIN_ABSENCE_MS) {
-        telegram_notify("👋 Пришёл, никого не было %s", span);
     }
 
     occupied = present;
