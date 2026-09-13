@@ -169,6 +169,11 @@ esp_err_t scd40_start(void)
     return ESP_OK;
 }
 
+esp_err_t scd40_stop(void)
+{
+    return cmd(SCD40_CMD_STOP);
+}
+
 /* Magnus-Tetens, WMO coefficients. RH is clamped off zero: logf(0) is -inf. */
 static float dew_point_c(float t_c, float rh_pct)
 {

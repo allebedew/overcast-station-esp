@@ -11,6 +11,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "pir.h"
+#include "power_save.h"
 #include "sensors.h"
 #include "settings.h"
 #include "telegram.h"
@@ -144,7 +145,10 @@ static void notify(alert_q_t q, int z, int prev, double v)
 /* Sensors are watched through their own getters, which already answer false
  * while a device is absent or failing -- no new state in sensors.c. */
 static bool tmp117_alive(void)   { tmp117_data_t d;   return sensors_tmp117_get(&d); }
-static bool scd40_alive(void)    { scd40_data_t d;    return sensors_scd40_get(&d); }
+/* Power save stops the SCD40 by hand; that is not a loss worth reporting, and
+ * the silence would otherwise queue a warning for whenever Wi-Fi returns. */
+static bool scd40_alive(void)    { scd40_data_t d;
+                                   return power_save_on() || sensors_scd40_get(&d); }
 static bool bmp581_alive(void)   { bmp581_data_t d;   return sensors_bmp581_get(&d); }
 static bool veml7700_alive(void) { veml7700_data_t d; return sensors_veml7700_get(&d); }
 

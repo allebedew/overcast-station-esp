@@ -35,8 +35,8 @@
 #define MAUS_PER_MAH 3.6e9 /* mA·µs */
 #define FULL_MAUS    ((int64_t)(BATTERY_CAPACITY_MAH * MAUS_PER_MAH))
 
-/* What a power cut may lose; on a 1 A charge that is a write every 3 min. */
-#define SAVE_STEP_MAUS ((int64_t)(50 * MAUS_PER_MAH))
+/* What a power cut may lose; on a 1 A charge that is a write every 72 s. */
+#define SAVE_STEP_MAUS ((int64_t)(20 * MAUS_PER_MAH))
 
 /* The time left runs at the count's own rate: sampled every second over the last
  * 30 s, restarted on a mode change, a gap or a hand-set count, and trusted once
@@ -238,6 +238,16 @@ void battery_get(battery_t *out)
     }
     /* Linear: optimistic through the CV taper. */
     out->eta_s = left_maus > 0 ? (int)(left_maus / rate_ma / 1e6) : 0;
+}
+
+void battery_save(void)
+{
+    taskENTER_CRITICAL(&s_lock);
+    bool moved = s_charge_maus != s_saved_maus;
+    taskEXIT_CRITICAL(&s_lock);
+    if (moved) {
+        save();
+    }
 }
 
 void battery_set_mah(float mah)

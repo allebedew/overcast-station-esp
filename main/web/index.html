@@ -1517,6 +1517,25 @@
 
                     <div class="set-row">
                         <div class="head">
+                            <span class="name" data-i18n="txPower"
+                                >Мощность передатчика Wi-Fi</span
+                            >
+                        </div>
+                        <div class="frc-row">
+                            <select id="txPowerSel">
+                                <option value="20dBm">20 dBm</option>
+                                <option value="18dBm">18 dBm</option>
+                                <option value="16dBm">16 dBm</option>
+                                <option value="15dBm">15 dBm</option>
+                                <option value="14dBm">14 dBm</option>
+                                <option value="13dBm">13 dBm</option>
+                                <option value="11dBm">11 dBm</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="set-row">
+                        <div class="head">
                             <span class="name" data-i18n="frcTitle"
                                 >Калибровка CO₂ (FRC)</span
                             ><span class="val">ppm</span>
@@ -1698,9 +1717,10 @@
      POST /api/connect          - restart the STA connection cycle
      POST /api/settings         - any subset of the keys /api/status reports
                                   under "settings"; an unknown key or a wrong
-                                  type is a 400. wind_unit, chart_quantity and
-                                  chart_range are carried as words, and the
-                                  error lists the ones a key accepts
+                                  type is a 400. wind_unit, chart_quantity,
+                                  chart_range and wifi_tx_power are carried as
+                                  words, and the error lists the ones a key
+                                  accepts
      POST /api/scd40/calibrate  - {ppm}
 
    Every reading on the page is a fixed slot: the markup for a card, a tile
@@ -1793,6 +1813,7 @@
                     sensLux: "Освещённость",
                     altitude: "Высота над уровнем моря",
                     windUnit: "Единицы скорости ветра",
+                    txPower: "Мощность передатчика Wi-Fi",
                     onPanel: "Показывать на дисплее станции",
                     altSaved: "Высота сохранена",
                     buzzerVolume: "Громкость зуммера",
@@ -2052,6 +2073,7 @@
                     sensLux: "Illuminance",
                     altitude: "Altitude above sea level",
                     windUnit: "Wind speed units",
+                    txPower: "Wi-Fi TX power",
                     onPanel: "Plot this on the station's display",
                     altSaved: "Altitude saved",
                     buzzerVolume: "Buzzer volume",
@@ -2866,6 +2888,7 @@
                 syncSetting("dispZoo", st.display_zoo);
                 syncSetting("altInput", st.altitude);
                 syncSetting("windUnitSel", st.wind_unit);
+                syncSetting("txPowerSel", st.wifi_tx_power);
                 adopt("chart_range", st.chart_range, setRange);
                 adopt("chart_quantity", st.chart_quantity, setQuantity);
             }
@@ -4229,6 +4252,10 @@
 
             $("windUnitSel").addEventListener("change", (e) =>
                 saveSetting("wind_unit", e.target.value, "settingSaved"),
+            );
+
+            $("txPowerSel").addEventListener("change", (e) =>
+                saveSetting("wifi_tx_power", e.target.value, "settingSaved"),
             );
 
             /* Site altitude: the one input to the sea-level reduction. Saved on

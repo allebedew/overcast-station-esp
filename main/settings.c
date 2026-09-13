@@ -9,6 +9,7 @@
 #include "gfx_target.h"
 #include "history.h"
 #include "weather_api.h"
+#include "wifi.h"
 
 #define NVS_NAMESPACE "settings"
 
@@ -68,6 +69,12 @@ static const entry_t s_tab[SETTING_COUNT] = {
     [SETTING_DISPLAY_ZOO] = {
         { .key = "disp_zoo", .api = "display_zoo", .name = "Display zoo",
           .def = 0, .min = 0, .max = 1, .as_bool = true }, NVS_TYPE_U8 },
+    /* The default is the radio's own ceiling, so an untouched station transmits
+     * exactly as it did before the setting existed. */
+    [SETTING_WIFI_TX_POWER] = {
+        { .key = "wifi_tx", .api = "wifi_tx_power", .name = "Wi-Fi TX power",
+          .def = WIFI_TX_20DBM, .min = 0, .max = WIFI_TX_POWER_COUNT - 1,
+          .labels = WIFI_TX_POWER_NAMES }, NVS_TYPE_U8 },
 };
 
 /* Where a changed value has to land besides NVS — see settings_on_change(). */

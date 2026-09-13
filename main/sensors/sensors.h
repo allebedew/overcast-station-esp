@@ -27,6 +27,10 @@ bool sensors_bmp581_get(bmp581_data_t *out);
 bool sensors_veml7700_get(veml7700_data_t *out);
 bool sensors_ina260_get(ina260_data_t *out);
 
+/* Takes the SCD40 out of the poll and out of periodic measurement, or puts it
+ * back: power_save.c's one sensor. An absent one stays absent either way. */
+void sensors_scd40_enable(bool on);
+
 /* Forced recalibration of the SCD40, after it has measured ≥3 min in that
  * environment. Blocks the whole I2C bus for ~1 s; on success stores the applied
  * offset in *correction_ppm. ESP_ERR_INVALID_STATE if the sensor is offline. */

@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "iot_button.h"
 #include "button_gpio.h"
+#include "power_save.h"
 #include "wifi.h"
 
 #define BUTTON_GPIO 9 /* BOOT button */
@@ -14,6 +15,10 @@ static const char *TAG = "button";
  * point, and the short click lost its job with the character display. */
 static void on_button_long_press(void *arg, void *usr_data)
 {
+    /* The AP cannot come up on a stopped radio, so asking for it leaves power
+     * save. */
+    power_save_set(false);
+
     wifi_info_t info;
     wifi_get_info(&info);
     ESP_LOGI(TAG, "BOOT button long press: AP %s",

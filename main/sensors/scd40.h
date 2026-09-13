@@ -28,6 +28,10 @@ void scd40_init(void);
  * other error abandons the sequence, which restarts from the beginning. */
 esp_err_t scd40_start(void);
 
+/* Leaves periodic measurement, so the part stops drawing its 205 mA pulse every
+ * 5 s. scd40_start() brings it back; it stops the part itself anyway. */
+esp_err_t scd40_stop(void);
+
 /* Latest measurement, if one is due. A result appears every 5 s at a phase not
  * known until one is caught, so ESP_ERR_NOT_FINISHED comes back both while
  * hunting and, without touching the bus, in the quiet window after a read. */

@@ -41,4 +41,9 @@ void battery_get(battery_t *out);
 /* Sets the count, the manual reset, and saves it. */
 void battery_set_mah(float mah);
 
+/* Writes the count to NVS if it has moved since the last write. For whoever is
+ * about to do something that may not come back through the shutdown handler —
+ * an OTA, say. */
+void battery_save(void);
+
 const char *battery_state_str(battery_state_t s);

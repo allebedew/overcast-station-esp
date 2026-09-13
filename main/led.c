@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "led_strip.h"
+#include "power_save.h"
 #include "settings.h"
 #include "wifi.h"
 #include "sensors.h"
@@ -105,6 +106,8 @@ static void show_co2(int tick, bool activity)
 
 /*
  * Display priority (highest first):
+ *   0. Power save on        -> dark: the radio and the SCD40 are off by hand,
+ *                              and both would otherwise be reported as faults
  *   1. OTA in progress      -> purple blinking
  *   2. Error present        -> red, blink count = error code
  *   3. Wi-Fi AP mode        -> blue, pulses off = number of AP clients
@@ -126,7 +129,9 @@ static void led_task(void *arg)
         uint8_t b = s_brightness;
         int code;
 
-        if (ota_is_active()) {
+        if (power_save_on()) {
+            set_color(0, 0, 0);
+        } else if (ota_is_active()) {
             set_color(blink_on ? b : 0, 0, blink_on ? b : 0); /* purple blink */
         } else if ((code = error_code()) != 0) {
             set_color(in_pulse(tick, code) ? b : 0, 0, 0); /* red coded blink */

@@ -22,6 +22,7 @@ typedef enum {
     SETTING_CHART_RANGE,
     SETTING_DISPLAY_DEBUG,
     SETTING_DISPLAY_ZOO,
+    SETTING_WIFI_TX_POWER,
     SETTING_COUNT,
 } setting_id_t;
 

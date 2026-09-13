@@ -9,6 +9,7 @@
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
+#include "settings.h"
 #include "wifi_store.h"
 
 #define WIFI_RETRIES_PER_NETWORK 5
@@ -20,8 +21,46 @@
 
 static const char *TAG = "wifi";
 
+const char *const WIFI_TX_POWER_NAMES[WIFI_TX_POWER_COUNT] = {
+    [WIFI_TX_20DBM] = "20dBm", [WIFI_TX_18DBM] = "18dBm",
+    [WIFI_TX_16DBM] = "16dBm", [WIFI_TX_15DBM] = "15dBm",
+    [WIFI_TX_14DBM] = "14dBm", [WIFI_TX_13DBM] = "13dBm",
+    [WIFI_TX_11DBM] = "11dBm",
+};
+
+/* The API's own unit is a quarter of a dBm, and only these values are steps of
+ * its mapping table. */
+static const int8_t TX_QUARTER_DBM[WIFI_TX_POWER_COUNT] = {
+    [WIFI_TX_20DBM] = 80, [WIFI_TX_18DBM] = 72, [WIFI_TX_16DBM] = 66,
+    [WIFI_TX_15DBM] = 60, [WIFI_TX_14DBM] = 56, [WIFI_TX_13DBM] = 52,
+    [WIFI_TX_11DBM] = 44,
+};
+
+/* The settings hook. Not RAM alone, unlike the rest of them, but the driver
+ * call is thread-safe and there is no task of ours that owns the radio. */
+static void apply_tx_power(int32_t idx)
+{
+    if (idx < 0 || idx >= WIFI_TX_POWER_COUNT) {
+        return;
+    }
+    esp_err_t err = esp_wifi_set_max_tx_power(TX_QUARTER_DBM[idx]);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "TX power %s", WIFI_TX_POWER_NAMES[idx]);
+    } else {
+        ESP_LOGW(TAG, "TX power not set: %s", esp_err_to_name(err));
+    }
+}
+
+/* After every esp_wifi_start(): the driver refuses the call before one, and the
+ * stop/start pair power save throws drops the setting. */
+static void apply_saved_tx_power(void)
+{
+    apply_tx_power(settings_get(SETTING_WIFI_TX_POWER));
+}
+
 static volatile wifi_sta_state_t s_sta_state = WIFI_STA_IDLE;
 static volatile bool s_ap_active;
+static bool s_radio_off; /* power save stopped the driver */
 static int s_attempt;
 static char s_current_ssid[33];
 static esp_timer_handle_t s_retry_timer;
@@ -248,6 +287,39 @@ void wifi_reconnect(void)
     start_sta();
 }
 
+void wifi_radio_enable(bool on)
+{
+    if (on != s_radio_off) {
+        return;
+    }
+    if (!on) {
+        /* Set before the stop: that raises STA_DISCONNECTED, and the handler
+         * must not schedule a retry onto a radio that is going away. */
+        s_radio_off = true;
+        esp_timer_stop(s_retry_timer);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_stop());
+        s_sta_state = WIFI_STA_IDLE;
+        s_ap_active = false;
+        ESP_LOGI(TAG, "Radio off");
+        return;
+    }
+
+    /* The tail of wifi_connect(): configure, then start, and STA_START drives
+     * the first attempt. */
+    s_radio_off = false;
+    if (wifi_store_count() == 0) {
+        start_ap();
+    } else {
+        s_attempt = 0;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
+        apply_current_network();
+        s_sta_state = WIFI_STA_CONNECTING;
+    }
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_start());
+    apply_saved_tx_power();
+    ESP_LOGI(TAG, "Radio on (%s)", s_ap_active ? WIFI_AP_SSID : s_current_ssid);
+}
+
 static void retry_timer_cb(void *arg)
 {
     apply_current_network();
@@ -278,9 +350,9 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         wifi_event_sta_disconnected_t *event = event_data;
         ESP_LOGW(TAG, "Disconnected from \"%s\", reason %d (%s)",
                  s_current_ssid, event->reason, disconnect_reason_str(event->reason));
-        if (s_ap_active) {
-            /* No reconnect while the AP is up, but the link is gone: the state
-             * has to stop claiming otherwise. */
+        if (s_ap_active || s_radio_off) {
+            /* No reconnect while the AP is up or the radio is stopped, but the
+             * link is gone: the state has to stop claiming otherwise. */
             s_sta_state = WIFI_STA_IDLE;
             return;
         }
@@ -340,10 +412,13 @@ esp_err_t wifi_connect(void)
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
                                                         &event_handler, NULL, NULL));
 
+    settings_on_change(SETTING_WIFI_TX_POWER, apply_tx_power);
+
     if (wifi_store_count() == 0) {
         ESP_LOGW(TAG, "No saved networks, starting AP for provisioning");
         start_ap();
         ESP_ERROR_CHECK(esp_wifi_start());
+        apply_saved_tx_power();
         return ESP_OK;
     }
 
@@ -352,6 +427,7 @@ esp_err_t wifi_connect(void)
 
     s_sta_state = WIFI_STA_CONNECTING;
     ESP_ERROR_CHECK(esp_wifi_start());
+    apply_saved_tx_power();
 
     ESP_LOGI(TAG, "Connecting to \"%s\"...", s_current_ssid);
     return ESP_OK;

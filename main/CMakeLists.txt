@@ -5,7 +5,7 @@ idf_component_register(SRCS "main.c" "wifi.c" "wifi_store.c" "button.c"
                             "history.c"
                             "zambretti.c" "sun.c"
                             "storage.c" "weather_api.c" "weather_store.c"
-                            "led.c" "buzzer.c" "pir.c" "wg.c"
+                            "led.c" "buzzer.c" "pir.c" "wg.c" "power_save.c"
                             # everything for the graphical SSD1322 panel: the
                             # drawing framework (canvas, text over u8g2 fonts,
                             # the fonts gui/tools/extract_fonts.py sliced out)

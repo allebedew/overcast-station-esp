@@ -14,6 +14,26 @@ typedef enum {
     WIFI_STA_CONNECTED,     /* associated, IP obtained */
 } wifi_sta_state_t;
 
+/* Maximum transmit power, in the steps esp_wifi_set_max_tx_power() actually
+ * has — it rounds anything between them down. What lowering it buys is a
+ * smaller current peak on transmit, which is what a tired cell browns out on;
+ * below 11 dBm the retransmits cost more bursts than the smaller peak saves.
+ * Stored as an index in NVS, so the order is a persisted contract: append
+ * only. */
+typedef enum {
+    WIFI_TX_20DBM,
+    WIFI_TX_18DBM,
+    WIFI_TX_16DBM,
+    WIFI_TX_15DBM,
+    WIFI_TX_14DBM,
+    WIFI_TX_13DBM,
+    WIFI_TX_11DBM,
+    WIFI_TX_POWER_COUNT,
+} wifi_tx_power_t;
+
+/* Indexed by the enum: the vocabulary wifi_tx_power is spelled in on the API. */
+extern const char *const WIFI_TX_POWER_NAMES[WIFI_TX_POWER_COUNT];
+
 typedef struct {
     char ssid[33];
     uint8_t bssid[6];
@@ -44,6 +64,11 @@ void wifi_ap_enable(bool on);
 
 /* Re-reads the saved networks, restarts the round-robin and drops the AP. */
 void wifi_reconnect(void);
+
+/* Stops the radio outright, or brings it back and restarts the round-robin.
+ * For power_save.c; everything that talks over the link already gates on
+ * wifi_is_connected(), which stays false while it is off. */
+void wifi_radio_enable(bool on);
 
 /* Fills out with a consistent snapshot of both interfaces. */
 void wifi_get_info(wifi_info_t *out);

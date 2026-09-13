@@ -10,7 +10,12 @@ debug strip.
 - **Wi-Fi (STA)** — up to 5 networks in NVS, tried in order, 5 attempts each
   5 s apart. Every attempt scans all channels and joins the strongest BSSID for
   the SSID unless the network is pinned to one. All failing (or an empty store)
-  falls back to AP mode.
+  falls back to AP mode. Transmit power is a setting (`wifi_tx_power`,
+  20 / 18 / 16 / 15 / 14 / 13 / 11 dBm — the steps
+  `esp_wifi_set_max_tx_power()` has, default the radio's own 20 dBm ceiling),
+  applied after every radio start; lowering it shrinks the current peak on
+  transmit, which is what the cell sags on, and below 11 dBm the retransmits
+  would cost more bursts than the peak saves.
 - **AP mode** — `WeatherStation` / `weather123`. Runs as APSTA on the STA
   channel, so an existing router association survives and the forecast and
   Telegram keep using it while the AP is up. `sta` and `ap` are
@@ -47,7 +52,8 @@ debug strip.
   and on discharge by the count's level, amber < 30 %, red < 15 %; a pencil
   button in its header opens a mAh field that sets the count through `/api/battery/reset`), system, settings and Wi-Fi cards behind the header gear. Settings:
   LED brightness, buzzer volume, display on, its auto-brightness and its
-  brightness, debug lines, zoo, site altitude, wind units, SCD40 FRC, history reset. Every setting
+  brightness, debug lines, zoo, site altitude, wind units, Wi-Fi TX power,
+  SCD40 FRC, history reset. Every setting
   follows the device on each poll except while the control has the focus, so
   what the knob changes shows up here without overwriting a moving hand.
   Every reading is a fixed slot generated from the tables at the top of the
@@ -165,8 +171,9 @@ debug strip.
   - **Count** — mAh integrated over every result, free to go negative; held at
     2000 while two or more `full` results run in a row (so days on USB do not
     integrate the offset), or set by hand through `/api/battery/reset`. Kept in
-    NVS (`battery/charge`, i64 mA·µs) every 50 mAh of change, on reaching full,
-    on a reset and at a clean restart; 0 if never saved.
+    NVS (`battery/charge`, i64 mA·µs) every 20 mAh of change, on reaching full,
+    on a reset, when an OTA upload starts and at a clean restart; 0 if never
+    saved.
   - **Time left** — to full on charge, to empty on discharge, linear at the
     count's own rate over the last 30 s (sampled every second, restarted on a
     mode change, a gap or a reset, `null` until it spans 10 s): optimistic
@@ -176,6 +183,16 @@ debug strip.
   - Shown in `/api/status` `battery`, on the web page's battery card and on
     the two lines above the panel's debug strip (`-1234mAh D 65%`, then volts
     and amps).
+- **Power save** (`power_save.c`) — **experimental**, a hand-thrown mode that
+  stops the Wi-Fi radio and the SCD40 and leaves the panel running; the knob's
+  long press toggles it, and it is always off after a restart. The station
+  browns out into a reboot loop near 3.55 V on the cell, and what it is aimed at
+  is the current peaks on a cell whose internal resistance has risen — Wi-Fi TX
+  and the SCD40's 205 mA measurement pulse every 5 s — as much as the ~30 mA of
+  average draw the two are worth. While it is on the Wi-Fi bars read as no link,
+  the status LED is dark (the radio and the sensor are off on purpose, and both
+  would otherwise be reported as faults) and the SCD40 counts as alive for the
+  alerts. A BOOT hold asks for the AP and so leaves the mode first.
 - **mmWave radar (HLK-LD2450)** — **removed**: unplugged, out of the build and
   moved to `archive/radar/`, which says what bringing it back would take. The
   PIR below owns its GPIO11 and the station's presence state.
@@ -208,7 +225,9 @@ debug strip.
   since the last call and clears it — `cw`/`ccw`, `cw_held`/`ccw_held`, click,
   double-click and long-press counts, plus the live held state. No interaction
   scheme is implied: mapping turns to selection, editing or a menu belongs to
-  the screens. Drained by the GUI's render task, one `encoder_take()` per frame.
+  the screens, and the long press is the one gesture spent outside them — it
+  toggles *Power save* above. Drained by the GUI's render task, one
+  `encoder_take()` per frame.
 - **256x64 OLED** (Newhaven NHD-5.5-25664UCG3, SSD1322) — 4-wire SPI on SPI2 at
   8 MHz, mounted rotated so everything above the transport works in portrait
   64x256. A render task at **10 frames/s** refreshes the model, folds in the
@@ -507,7 +526,8 @@ card belongs in that device's module, not in the caller — dew point in
 | `ota.c` | `POST /api/ota` + rollback confirmation; publishes `ota_is_active()` and the byte counts `ota_get_progress()` |
 | `led.c` | LED task: polls wifi/sensors/ota each tick, picks the pattern; persisted brightness |
 | `buzzer.c` | passive piezo on one LEDC channel: the tune table and a task that plays it, waiting out each note on its request queue so a new tune preempts mid-note |
-| `button.c` | BOOT button: click → next page, 1.5 s hold → AP toggle |
+| `button.c` | BOOT button: click → next page, 1.5 s hold → AP toggle (leaving power save first) |
+| `power_save.c` | experimental power-save mode: one flag, and the two switches it throws — the Wi-Fi radio and the SCD40. Not persisted |
 | `encoder.c` | EC11 knob: PCNT quadrature behind a 10 ms poll, the button on `iot_button`; publishes raw detents and press events through `encoder_take()`, no interaction scheme of its own. Its header is esp-free so the GUI simulator can drive screens with it |
 | `sensors/sensors.c` | one task polling every sensor at its own period through a shared hot-plug state machine; owns the snapshots and the cross-sensor wiring (BMP581 pressure → SCD40 compensation, INA260 → battery gauge) |
 | `sensors/i2c_bus.c` | the I2C master bus and the recursive lock arbitrating it |

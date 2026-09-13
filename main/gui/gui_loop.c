@@ -17,6 +17,7 @@
 #include "ota.h"
 #include "panel_hours.h"
 #include "pir.h"
+#include "power_save.h"
 #include "screen_ota.h"
 #include "settings.h"
 #include "ssd1322.h"
@@ -288,6 +289,13 @@ static void gui_task(void *arg)
 
             encoder_input_t in;
             encoder_take(&in);
+
+            /* The one job the long press has. iot_button raises no click after
+             * it, so the panel does not also toggle. */
+            if (in.long_press & 1) {
+                power_save_toggle();
+                buzzer_play(power_save_on() ? BUZZER_CLICK_LO : BUZZER_CLICK_HI);
+            }
 
             ui_event_t ev = ui_state_input(&s_state, &in);
             if (ev != UI_EV_NONE) {

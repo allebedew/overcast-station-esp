@@ -8,6 +8,8 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 
+#include "battery.h"
+
 /* Shared secret for network flashing, same value as in flash-ota.sh. Guards
  * against a stray upload from the LAN or from AP mode. */
 #define OTA_KEY "weather-ota"
@@ -68,6 +70,11 @@ esp_err_t ota_post_handler(httpd_req_t *req)
 
     ESP_LOGI(TAG, "OTA start: %u bytes -> %s",
              (unsigned)req->content_len, target->label);
+
+    /* Ahead of the write rather than on the way out: the shutdown handler
+     * covers the reboot at the end, nothing covers an upload that hangs or
+     * takes the watchdog with it. */
+    battery_save();
 
     /* The LED and screen tasks poll this. Progress is set first, so a task
      * that sees the flag never reads the previous attempt's counters. */

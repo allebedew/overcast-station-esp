@@ -264,13 +264,44 @@ static bool sensor_step(sensor_t *s)
     return false;
 }
 
+/* Thrown from another task, acted on here: every transfer on the bus belongs to
+ * the poll task. */
+static volatile bool s_scd40_off;
+static bool          s_scd40_stopped; /* poll-task private: the stop has gone out */
+
+void sensors_scd40_enable(bool on)
+{
+    s_scd40_off = !on;
+}
+
+static void apply_scd40_switch(void)
+{
+    if (s_scd40_off == s_scd40_stopped) {
+        return;
+    }
+    s_scd40_stopped = s_scd40_off;
+    if (!s_scd40_stopped) {
+        return; /* the probe path below brings it back on its own */
+    }
+
+    sensor_t *s = &s_sensors[SENSOR_SCD40];
+    if (s->running) {
+        i2c_bus_lock();
+        scd40_stop();
+        i2c_bus_unlock();
+    }
+    set_offline(s, esp_timer_get_time());
+    ESP_LOGI(TAG, "SCD40 stopped to save power");
+}
+
 static void sensors_task(void *arg)
 {
     for (;;) {
+        apply_scd40_switch();
         int64_t now = esp_timer_get_time();
         for (int i = 0; i < SENSOR_COUNT; i++) {
             sensor_t *s = &s_sensors[i];
-            if (now < s->next_us) {
+            if (now < s->next_us || (i == SENSOR_SCD40 && s_scd40_off)) {
                 continue;
             }
             /* measured from now, so a poll held up by the bus lock shifts the
