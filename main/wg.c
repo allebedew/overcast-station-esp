@@ -3,8 +3,12 @@
 #include <stdio.h>
 #include <string.h>
 
-#if __has_include("wg_secrets.h")
-#include "wg_secrets.h"
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+
+/* The WireGuard block in secrets.h is optional; its private key is the switch. */
+#ifdef WG_PRIVATE_KEY
 #define WG_ENABLED 1
 #endif
 
@@ -118,7 +122,7 @@ void wg_get_info(wg_info_t *out)
              WG_ENDPOINT_PORT);
 }
 
-#else /* no wg_secrets.h */
+#else /* no WireGuard block in secrets.h */
 
 void wg_init(void) {}
 

@@ -16,7 +16,7 @@ debug strip.
   applied after every radio start; lowering it shrinks the current peak on
   transmit, which is what the cell sags on, and below 11 dBm the retransmits
   would cost more bursts than the peak saves.
-- **AP mode** — `WeatherStation` / `weather123`. Runs as APSTA on the STA
+- **AP mode** — `WeatherStation`, password from `secrets.h`. Runs as APSTA on the STA
   channel, so an existing router association survives and the forecast and
   Telegram keep using it while the AP is up. `sta` and `ap` are
   independent objects in `/api/status`. BOOT (GPIO9): 1.5 s hold toggles
@@ -28,8 +28,8 @@ debug strip.
   and rebuilt after 3 min without one, which re-resolves the endpoint. Only the
   tunnel subnet is routed into it, so the forecast, Telegram and SNTP keep
   using Wi-Fi directly; the web UI and OTA answer over both. Keys and endpoint
-  are `main/wg_secrets.h`, copied from `wg_secrets.h.example` and never in git
-  — without that file the tunnel is simply absent from the build.
+  are the WireGuard block of `main/secrets.h` (see **Secrets**) — without it the
+  tunnel is simply absent from the build.
 - **Web UI** — single page embedded in the firmware (gzipped at build time),
   `http://weather.local` (mDNS), polled every 1 s, bilingual RU/EN from an
   in-page dictionary. The header switches the window every chart is drawn over
@@ -67,7 +67,7 @@ debug strip.
   written back from the device only once per page load, so the poll cannot
   overwrite typing.
 - **OTA** — push model: `./flash-ota.sh [host]` builds and uploads to
-  `POST /api/ota` (`X-OTA-Key` header, key in `ota.c`). Two 4 MB app partitions
+  `POST /api/ota` (`X-OTA-Key` header, key in `secrets.h`). Two 4 MB app partitions
   + otadata; rollback enabled — a new image confirms itself at the end of
   `app_main` or the bootloader reverts.
 - **Status LED** (WS2812 on GPIO8, 100 ms tick), by priority: purple blinking —
@@ -456,7 +456,7 @@ debug strip.
   absence — the departure once the hour is up, the arrival at its end — so a
   trip to the kitchen is silent and the two always pair up. Boot is never an
   arrival, and the first departure is dropped if nothing has moved since boot. Token and chat id are
-  compile-time constants in `telegram.c`; left empty, the module disables
+  compile-time constants in `secrets.h`; left empty, the module disables
   itself. The gust message quotes both the reading and the threshold in the
   configured wind unit (tenths for m/s and knots), the rest in the unit the
   band is set in.
@@ -521,7 +521,7 @@ card belongs in that device's module, not in the caller — dew point in
 |---|---|
 | `wifi.c` | connection state machine; one snapshot from `wifi_get_info()` with separate STA and AP fields, plus the radio-free `wifi_sta_state()` the display polls |
 | `wifi_store.c` | saved credentials in NVS (`wifi_creds`), mutex-protected |
-| `wg.c` | the WireGuard tunnel over `trombik/esp_wireguard`: config from `wg_secrets.h`, a supervisor task that waits for Wi-Fi and SNTP, watches the handshake and rebuilds the interface when it stops coming |
+| `wg.c` | the WireGuard tunnel over `trombik/esp_wireguard`: config from `secrets.h`, a supervisor task that waits for Wi-Fi and SNTP, watches the handshake and rebuilds the interface when it stops coming |
 | `web/webserver.c` | esp_http_server + mDNS; routes in one table, handlers through a wrapper that logs and blinks the LED; replies via a bounded appender that truncates rather than overrunning |
 | `ota.c` | `POST /api/ota` + rollback confirmation; publishes `ota_is_active()` and the byte counts `ota_get_progress()` |
 | `led.c` | LED task: polls wifi/sensors/ota each tick, picks the pattern; persisted brightness |
@@ -583,6 +583,15 @@ card belongs in that device's module, not in the caller — dew point in
 | `/api/scd40/calibrate` | POST | forced recalibration; `{"ppm": 400–2000}`, returns the applied correction |
 | `/api/battery/reset` | POST | sets the battery count: empty body → 2000 mAh, `{"mah": 0–2000}` → that |
 | `/api/ota` | POST | firmware update; raw binary body, `X-OTA-Key` header; reboots on success |
+
+## Secrets
+
+`main/secrets.h`, copied from `secrets.h.example` and never in git: Telegram
+token and chat id, the OTA key, the AP password, and the optional WireGuard
+block (its private key is what compiles the tunnel in). The file as a whole is
+optional — each consumer falls back to a default, an empty Telegram token
+disables the notifier, and `flash-ota.sh` reads the OTA key straight out of
+whichever file defines it.
 
 ## Build & flash
 

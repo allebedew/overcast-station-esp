@@ -13,10 +13,17 @@
 #include "cJSON.h"
 #include "wifi.h"
 
-/* Bot credentials are baked into the firmware, same approach as OTA_KEY.
- * Get the token from @BotFather, the chat id from @userinfobot. */
-#define TELEGRAM_TOKEN   "8789784700:AAEXInU2cZnTdKwlax0hp1JPQvfRDqEqzG4"
-#define TELEGRAM_CHAT_ID "51137287"
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+
+/* Baked into the firmware; empty credentials disable the module. */
+#ifndef TELEGRAM_TOKEN
+#define TELEGRAM_TOKEN ""
+#endif
+#ifndef TELEGRAM_CHAT_ID
+#define TELEGRAM_CHAT_ID ""
+#endif
 
 #define MAX_TEXT       200
 #define QUEUE_LEN      8

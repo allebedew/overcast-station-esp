@@ -12,11 +12,17 @@
 #include "settings.h"
 #include "wifi_store.h"
 
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+
 #define WIFI_RETRIES_PER_NETWORK 5
 #define WIFI_RETRY_DELAY_MS      5000
 
 #define WIFI_AP_SSID     "WeatherStation"
+#ifndef WIFI_AP_PASSWORD
 #define WIFI_AP_PASSWORD "weather123"
+#endif
 #define WIFI_AP_MAX_CONN 4
 
 static const char *TAG = "wifi";

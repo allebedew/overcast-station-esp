@@ -10,9 +10,15 @@
 
 #include "battery.h"
 
-/* Shared secret for network flashing, same value as in flash-ota.sh. Guards
- * against a stray upload from the LAN or from AP mode. */
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+
+/* Shared secret for network flashing; flash-ota.sh reads whichever of the two
+ * files defines it. Guards against a stray upload from the LAN or from AP mode. */
+#ifndef OTA_KEY
 #define OTA_KEY "weather-ota"
+#endif
 
 #define OTA_REBOOT_DELAY_MS 1000
 

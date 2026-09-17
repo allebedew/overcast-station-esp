@@ -5,7 +5,14 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 HOST="${1:-weather.local}"
-OTA_KEY="weather-ota" # same key as in main/ota.c
+
+# Same key the firmware compiled in: secrets.h if it defines one, else the
+# fallback in ota.c. Keeps the constant in a single place.
+read_ota_key() {
+  sed -n 's/^#define OTA_KEY[[:space:]]*"\(.*\)".*/\1/p' "$1" 2>/dev/null | head -1
+}
+OTA_KEY="$(read_ota_key main/secrets.h)"
+[ -n "$OTA_KEY" ] || OTA_KEY="$(read_ota_key main/ota.c)"
 
 # build.sh sources the ESP-IDF environment itself and fails if it is missing,
 # so no exported shell is needed here.
